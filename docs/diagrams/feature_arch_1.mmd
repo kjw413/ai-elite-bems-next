@@ -1,0 +1,23 @@
+flowchart LR
+    subgraph S["데이터 소스"]
+        direction TB
+        E["energy_daily DB<br/>전력·연료·용수·냉동전력·생산량"]
+        W["기상청 ASOS<br/>기온·습도"]
+        H["공휴일 캘린더"]
+        P["재공품 WIP<br/>품목별 처리량"]
+    end
+    FE["피처 엔지니어링<br/>make_features<br/>로그변환·지연·이동평균·도일"]
+    R["피처 라우팅<br/>M1~M4 부분집합"]
+    M["분위수 앙상블<br/>공장·대상별 36모델"]
+    C["CQR 밴드 보정<br/>P05 ≤ P50 ≤ P95"]
+    I["추론<br/>재귀 lag · 사후보정"]
+    O(["P50 예측 + 정상범주 밴드<br/>이상감지"])
+
+    S --> FE --> R --> M --> C --> I --> O
+
+    classDef src fill:#eef2ff,stroke:#6366f1,color:#1e1b4b;
+    classDef core fill:#ecfeff,stroke:#06b6d4,color:#083344;
+    classDef out fill:#f0fdf4,stroke:#22c55e,color:#14532d;
+    class E,W,H,P src;
+    class FE,R,M,C,I core;
+    class O out;

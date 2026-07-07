@@ -1,4 +1,0 @@
-[2026-06-17 13:59:52] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
-[2026-06-17 13:59:56] [INFO   ] [automation.mail] 메일 발송 성공: '[생산기술팀] 일일 에너지 원단위 alert 2026-06-15 (월)'
-[2026-06-17 14:23:08] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
-[2026-06-17 14:23:12] [INFO   ] [automation.mail] 메일 발송 성공: '[생산기술팀] 일일 에너지 원단위 alert 2026-06-15 (월)'

@@ -1,49 +1,59 @@
-# Local environment
-.env
-.env.*
-!.env.template
-
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
 .ruff_cache/
-.mypy_cache/
-.coverage
-htmlcov/
 
-# Virtual environments
-.venv/
+# Editor / atomic-write 잔재
+*.tmp.*
+*.tmp
+_cleanup_trash/
+
+# Virtual environment
 venv/
-env/
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Data (user-specific) — 실데이터는 저장소에 커밋 금지
+data/
+docs/references/
+
+# Logs
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Streamlit
 .streamlit/secrets.toml
 
-# Logs and runtime output
-logs/
-output/
-outputs/
-*.log
+# ML artifacts (generated locally; do not commit)
+catboost_info/
+app/predictive model/**/*.pkl*
+app/predictive model/**/weather_cache.json
 
-# OS and editor files
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
+# 런타임 상태/캐시 (학습 상태·동기화 상태·날씨 캐시·락)
+app/predictive model/DB_weather.xlsx
+app/predictive model/energy usage/v5_training_status.json
+app/predictive model/energy usage/_*.json
+app/predictive model/**/*.lock
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
 
-# Large data/model artifacts
-*.pkl
-*.pickle
-*.joblib
-*.model
-*.h5
-*.pt
-*.pth
-*.onnx
-*.bin
-*.parquet
-*.csv
-*.xlsx
-*.xls
+# 학습 로그 + 임시 분석 파일
+app/predictive model/**/_logs/
+app/predictive model/**/*.log
+app/predictive model/_train_log_*.txt
+app/predictive model/_tmp_*.py
+
+# Excel 임시/충돌 파일 (~$ prefix)
+**/~$*.xlsx
+**/~$*.xls

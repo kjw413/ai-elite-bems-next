@@ -1,0 +1,20 @@
+repos:
+  - repo: local
+    hooks:
+      - id: block-large-binaries
+        name: block large binary files over 1MB
+        entry: python tools/git_hooks/block_large_binaries.py
+        language: system
+        types: [file]
+
+      - id: scan-secrets
+        name: scan staged files for secrets
+        entry: python tools/git_hooks/scan_secrets.py
+        language: system
+        types: [file]
+
+      - id: ruff-unused
+        name: ruff unused imports and variables
+        entry: python tools/git_hooks/run_ruff_unused.py
+        language: system
+        types: [python]

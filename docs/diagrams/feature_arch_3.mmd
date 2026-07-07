@@ -1,0 +1,24 @@
+flowchart TD
+    PT["(공장 × 대상)<br/>예: 남양주2 · 전력"]
+    PT --> M1 & M3 & M4
+
+    subgraph ALG["각 모델 = 3 알고리즘"]
+        direction LR
+        L["LightGBM"]
+        X["XGBoost"]
+        CB["CatBoost"]
+    end
+    M1 & M3 & M4 --> ALG
+
+    ALG --> Q["분위수당 9모델<br/>× {P05, P50, P95}<br/>= 27모델"]
+    Q --> WGT["Pinball-loss 가중<br/>최적화 (SLSQP)"]
+    WGT --> MONO["단조성 강제<br/>P05 ≤ P50 ≤ P95"]
+    MONO --> CQR["CQR q̂ 보정<br/>검증셋 잔차 → 90% 커버리지"]
+    CQR --> BAND(["P50 + [P05, P95] 밴드"])
+
+    classDef mdl fill:#eef2ff,stroke:#6366f1,color:#1e1b4b;
+    classDef proc fill:#ecfeff,stroke:#06b6d4,color:#083344;
+    classDef out fill:#f0fdf4,stroke:#22c55e,color:#14532d;
+    class M1,M3,M4 mdl;
+    class Q,WGT,MONO,CQR proc;
+    class BAND out;

@@ -1,0 +1,54 @@
+# 이 파일은 재공품 피처 우선순위 목록을 정의합니다.
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class WipPrioritySpec:
+    priority: int
+    plant: str
+    target: str
+    item_codes: tuple[str, ...]
+    note: str
+
+
+# 1차 실험용 수동 확정 재공품 피처 셋
+# - 우선순위 1, 2는 기존 추천 품목을 유지
+# - 우선순위 3(김해-연료)는 260015, 219097만 사용
+PRIORITY_WIP_SHORTLIST: tuple[WipPrioritySpec, ...] = (
+    WipPrioritySpec(
+        priority=1,
+        plant="광주",
+        target="연료",
+        item_codes=("260014", "260042", "260016"),
+        note="Keep the top-priority shortlist as-is for the first experiment.",
+    ),
+    WipPrioritySpec(
+        priority=2,
+        plant="광주",
+        target="용수",
+        item_codes=("260014", "260042", "260016"),
+        note="Keep the second-priority shortlist as-is for the first experiment.",
+    ),
+    WipPrioritySpec(
+        priority=3,
+        plant="김해",
+        target="연료",
+        item_codes=("260015", "219097"),
+        note="Use only 260015 and 219097 for the first-pass 김해 fuel experiment.",
+    ),
+)
+
+
+# 우선순위 specs을 차례로 반환합니다.
+def iter_priority_specs() -> tuple[WipPrioritySpec, ...]:
+    return PRIORITY_WIP_SHORTLIST
+
+
+# 우선 목록 품목 코드 값을 가져옵니다.
+def get_shortlist_item_codes(plant: str, target: str) -> tuple[str, ...]:
+    for spec in PRIORITY_WIP_SHORTLIST:
+        if spec.plant == plant and spec.target == target:
+            return spec.item_codes
+    return ()

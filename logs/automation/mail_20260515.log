@@ -1,8 +1,0 @@
-[2026-05-15 14:48:11] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@naver.com'], Cc: []
-[2026-05-15 14:48:16] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-14 (목)'
-[2026-05-15 16:29:22] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@naver.com'], Cc: []
-[2026-05-15 16:29:26] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-14 (목)'
-[2026-05-15 16:54:33] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@naver.com'], Cc: []
-[2026-05-15 16:54:37] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-14 (목)'
-[2026-05-15 16:57:51] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@naver.com'], Cc: []
-[2026-05-15 16:57:54] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-14 (목)'

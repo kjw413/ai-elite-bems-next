@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('app/pages/dashboard_main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK: syntax'\\)\")"
-    ]
-  }
-}
