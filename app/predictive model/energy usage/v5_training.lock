@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "state": "running",
+  "trigger_pid": 18080,
+  "worker_pid": 20680,
+  "run_id": "6b218f07000d4ad3aa87651334b5d3c2",
+  "trigger_mode": "manual",
+  "created_at": "2026-06-25T11:13:53.092935",
+  "heartbeat_at": "2026-06-25T11:13:53.164955"
+}

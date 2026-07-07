@@ -1,0 +1,89 @@
+2026-07-03 16:24:56,976 [INFO] daily_prediction: ============================================================
+2026-07-03 16:24:56,976 [INFO] daily_prediction: 일일 자동 배치 예측 시작
+2026-07-03 16:24:58,533 [INFO] app.services.weather_sync_service: [weather_sync] 서울: 누락 수집 (2026-07-02 ~ 2026-07-02)
+2026-07-03 16:25:00,675 [INFO] app.services.weather_sync_service: [weather_sync] 서울: 1일 추가 완료 (last=2026-07-02)
+2026-07-03 16:25:00,873 [INFO] app.services.weather_sync_service: [weather_sync] 김해: 누락 수집 (2026-07-02 ~ 2026-07-02)
+2026-07-03 16:25:05,667 [INFO] app.services.weather_sync_service: [weather_sync] 김해: 1일 추가 완료 (last=2026-07-02)
+2026-07-03 16:25:05,802 [INFO] app.services.weather_sync_service: [weather_sync] 이천: 누락 수집 (2026-07-02 ~ 2026-07-02)
+2026-07-03 16:25:09,512 [INFO] app.services.weather_sync_service: [weather_sync] 이천: 1일 추가 완료 (last=2026-07-02)
+2026-07-03 16:25:09,629 [INFO] app.services.weather_sync_service: [weather_sync] 부여: 누락 수집 (2026-07-02 ~ 2026-07-02)
+2026-07-03 16:25:12,610 [INFO] app.services.weather_sync_service: [weather_sync] 부여: 1일 추가 완료 (last=2026-07-02)
+2026-07-03 16:26:06,789 [INFO] app.services.auto_prediction_service: [auto_prediction] 완료: 역채움 15행, 신규 예측 45행 (2026-06-26~2026-07-02)
+2026-07-03 16:26:06,790 [INFO] daily_prediction: 완료: 실측 역채움 15행 / 신규 예측 45행 (2026-06-26 ~ 2026-07-02)
+2026-07-03 16:26:06,791 [INFO] daily_prediction: 공장별 신규 예측: 남양주1 9행, 남양주2 9행, 김해 9행, 광주 9행, 논산 9행
+2026-07-03 16:26:42,870 [INFO] daily_prediction: ============================================================
+2026-07-03 16:26:42,871 [INFO] daily_prediction: 일일 자동 배치 예측 시작
+2026-07-03 16:26:44,569 [INFO] app.services.auto_prediction_service: [auto_prediction] skip (already_ran_today)
+2026-07-03 16:26:44,570 [INFO] daily_prediction: 실행 생략: already_ran_today
+2026-07-06 14:56:03,602 [INFO] daily_prediction: ============================================================
+2026-07-06 14:56:03,602 [INFO] daily_prediction: 일일 자동 배치 예측 시작
+2026-07-06 14:56:05,710 [INFO] app.services.weather_sync_service: [weather_sync] 서울: 누락 수집 (2026-07-03 ~ 2026-07-05)
+2026-07-06 14:56:11,017 [INFO] app.services.weather_sync_service: [weather_sync] 서울: 3일 추가 완료 (last=2026-07-05)
+2026-07-06 14:56:11,444 [INFO] app.services.weather_sync_service: [weather_sync] 김해: 누락 수집 (2026-07-03 ~ 2026-07-05)
+2026-07-06 14:56:17,844 [INFO] app.services.weather_sync_service: [weather_sync] 김해: 3일 추가 완료 (last=2026-07-05)
+2026-07-06 14:56:18,073 [INFO] app.services.weather_sync_service: [weather_sync] 이천: 누락 수집 (2026-07-03 ~ 2026-07-05)
+2026-07-06 14:56:25,663 [INFO] app.services.weather_sync_service: [weather_sync] 이천: 3일 추가 완료 (last=2026-07-05)
+2026-07-06 14:56:26,037 [INFO] app.services.weather_sync_service: [weather_sync] 부여: 누락 수집 (2026-07-03 ~ 2026-07-05)
+2026-07-06 14:56:33,539 [INFO] app.services.weather_sync_service: [weather_sync] 부여: 3일 추가 완료 (last=2026-07-05)
+2026-07-06 14:56:33.721 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-07-06 14:56:33.755 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-07-06 14:56:33.756 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+2026-07-06 14:56:34.160 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-07-06 14:56:34.160 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-07-06 14:56:34.217 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-07-06 14:56:34.218 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-07-06 14:56:34.690 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:690: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  df = pd.read_sql_query(
+2026-07-06 14:57:52.447 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-07-06 14:57:52.453 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:690: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  df = pd.read_sql_query(
+2026-07-06 14:57:56.020 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+2026-07-06 14:57:58.839 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:690: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  df = pd.read_sql_query(
+2026-07-06 14:57:59.330 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+2026-07-06 14:58:01.938 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:690: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  df = pd.read_sql_query(
+2026-07-06 14:58:02.228 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:1358: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  return pd.read_sql_query(query, conn, params=params or None)
+2026-07-06 14:58:04.093 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+E:\AI-Elite_Energy-Dashboard-Web\app\services\usage_prediction_v5_service.py:690: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  df = pd.read_sql_query(
+2026-07-06 14:58:04.541 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-07-06 14:58:06,704 [INFO] app.services.auto_prediction_service: [auto_prediction] 완료: 역채움 0행, 신규 예측 15행 (2026-06-29~2026-07-05)
+2026-07-06 14:58:06,705 [INFO] daily_prediction: 완료: 실측 역채움 0행 / 신규 예측 15행 (2026-06-29 ~ 2026-07-05)
+2026-07-06 14:58:06,706 [INFO] daily_prediction: 공장별 신규 예측: 남양주1 3행, 남양주2 3행, 김해 3행, 광주 3행, 논산 3행
+-07-05)
+2026-07-06 14:58:06,706 [INFO] daily_prediction: 공장별 신규 예측: 남양주1 3행, 남양주2 3행, 김해 3행, 광주 3행, 논산 3행
+2026-07-06 15:52:13,989 [INFO] daily_prediction: ============================================================
+2026-07-06 15:52:13,990 [INFO] daily_prediction: 일일 자동 배치 예측 시작
+2026-07-06 15:52:15,777 [INFO] app.services.weather_sync_service: [weather_sync] 서울: 이미 최신 상태 (last=2026-07-05)
+2026-07-06 15:52:15,861 [INFO] app.services.weather_sync_service: [weather_sync] 김해: 이미 최신 상태 (last=2026-07-05)
+2026-07-06 15:52:15,907 [INFO] app.services.weather_sync_service: [weather_sync] 이천: 이미 최신 상태 (last=2026-07-05)
+2026-07-06 15:52:16,025 [INFO] app.services.weather_sync_service: [weather_sync] 부여: 이미 최신 상태 (last=2026-07-05)
+2026-07-06 15:52:16,140 [INFO] app.services.v5_band_calibration: [band_calibration] v1 payload 감지 — rolling 은 항등에서 시작
+2026-07-06 15:52:16,146 [INFO] app.services.v5_band_calibration: [band_calibration] rolling refresh: 15 cells from 915 rows (window=90d, saturated=2)
+2026-07-06 15:52:16,395 [INFO] app.services.auto_prediction_service: [auto_prediction] 완료: 역채움 0행, 신규 예측 0행 (2026-06-29~2026-07-05)
+2026-07-06 15:52:16,396 [INFO] daily_prediction: 완료: 실측 역채움 0행 / rolling 재보정 15셀 / 신규 예측 0행 (2026-06-29 ~ 2026-07-05)

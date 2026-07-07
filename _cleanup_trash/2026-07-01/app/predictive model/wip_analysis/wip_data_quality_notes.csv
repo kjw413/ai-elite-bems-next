@@ -1,0 +1,8 @@
+﻿topic,value,note
+남양주1_남양주2_WIP_identical,True,제공된 재공품 데이터에서 남양주1/남양주2 원본/정리본 시트가 완전히 동일합니다.
+남양주1_analysis_period,2023-01-02 ~ 2026-04-21,남양주1 분석 행수 822건
+남양주2_analysis_period,2023-01-02 ~ 2026-04-21,남양주2 분석 행수 822건
+김해_analysis_period,2023-01-02 ~ 2026-04-21,김해 분석 행수 822건
+광주_analysis_period,2023-01-02 ~ 2026-04-21,광주 분석 행수 822건
+논산_analysis_period,2023-01-02 ~ 2026-04-21,논산 분석 행수 822건
+selection_rule,"nonzero_days>=40, coverage>=5%, top<=5","추천 후보는 mix-adjusted correlation 기준으로 정렬 후, 상호 상관 0.85 이상이면 중복으로 제외했습니다."

@@ -1,0 +1,225 @@
+[2026-05-13 13:52:51] [INFO   ] [automation.daily_report] 리포트 빌더 시작 - 기준일: 2026-05-11 (전일: 2026-05-10, 전년동일: 2025-05-11)
+[2026-05-13 13:52:52] [WARNING] [automation.daily_report] 기준일(2026-05-11) 데이터가 없습니다.
+[2026-05-13 13:52:52] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 13:52:52] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 13:52:52] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 13:52:52] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 13:52:52] [INFO   ] [automation.daily_report] 리포트 생성 완료 - 공장 0개, 차트 0개
+[2026-05-13 13:54:29] [INFO   ] [automation.daily_report] 리포트 빌더 시작 - 기준일: 2026-05-09 (전일: 2026-05-08, 전년동일: 2025-05-09)
+[2026-05-13 13:54:30] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 13:54:30] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 13:54:30] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 13:54:30] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 13:54:30] [INFO   ] [automation.daily_report] 리포트 생성 완료 - 공장 5개, 차트 0개
+[2026-05-13 16:17:38] [INFO   ] [automation.daily_report] 리포트 빌더 시작 - 기준일: 2026-05-11 (전일: 2026-05-10, 전년동일: 2025-05-11)
+[2026-05-13 16:17:38] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:17:38] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:17:39] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:17:39] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:17:39] [INFO   ] [automation.daily_report] 리포트 생성 완료 - 공장 1개, 차트 0개
+[2026-05-13 16:21:34] [INFO   ] [automation.daily_report] 리포트 빌더 시작 - 기준일: 2026-05-11 (전일: 2026-05-10, 전년동일: 2025-05-11)
+[2026-05-13 16:21:34] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:21:34] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:21:34] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:21:34] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:21:34] [INFO   ] [automation.daily_report] 리포트 생성 완료 - 공장 1개, 차트 0개
+[2026-05-13 16:25:24] [INFO   ] [automation.daily_report] 리포트 빌더 시작 - 기준일: 2026-05-11 (전일: 2026-05-10, 전년동일: 2025-05-11)
+[2026-05-13 16:25:24] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:25:24] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:25:24] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:25:24] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:25:24] [INFO   ] [automation.daily_report] 리포트 생성 완료 - 공장 1개, 차트 0개
+[2026-05-13 16:26:06] [INFO   ] [automation.daily_report] 리포트 빌더 시작 - 기준일: 2026-05-11 (전일: 2026-05-10, 전년동일: 2025-05-11)
+[2026-05-13 16:26:06] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:26:06] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:26:06] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:26:06] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:26:06] [INFO   ] [automation.daily_report] 리포트 생성 완료 - 공장 1개, 차트 0개
+[2026-05-13 16:33:32] [INFO   ] [automation.daily_report] 리포트 빌더 시작 - 기준일: 2026-05-11 (전일: 2026-05-10, 전년동일: 2025-05-11)
+[2026-05-13 16:33:33] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:33:33] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:33:33] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:33:33] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:33:33] [INFO   ] [automation.daily_report] 리포트 생성 완료 - 공장 1개, 차트 0개
+[2026-05-13 16:44:01] [INFO   ] [automation.daily_report] 리포트 빌더 v2 시작 - 기준일: 2026-05-11 (주간: 2026-05-05~2026-05-11, MTD: 2026-05-01~2026-05-11)
+[2026-05-13 16:44:02] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 16:44:02] [INFO   ] [automation.daily_report] 리포트 v2 생성 완료 - verdict=critical, KPI 4장, 이상 3건, 목표 4건, 차트=X
+[2026-05-13 16:44:26] [INFO   ] [automation.daily_report] 리포트 빌더 v2 시작 - 기준일: 2026-05-11 (주간: 2026-05-05~2026-05-11, MTD: 2026-05-01~2026-05-11)
+[2026-05-13 16:44:30] [INFO   ] [automation.daily_report] 리포트 v2 생성 완료 - verdict=critical, KPI 4장, 이상 3건, 목표 4건, 차트=O
+[2026-05-13 17:13:52] [INFO   ] [automation.daily_report] 리포트 빌더 v3 시작 - 기준일: 2026-05-11 (주간: 2026-05-05~2026-05-11, MTD: 2026-05-01~2026-05-11)
+[2026-05-13 17:13:56] [INFO   ] [automation.daily_report] 리포트 v3 생성 완료 - 표 5행, 이상 3건, 목표 4건, 차트=O
+[2026-05-13 17:14:11] [INFO   ] [automation.daily_report] 리포트 빌더 v3 시작 - 기준일: 2026-05-11 (주간: 2026-05-05~2026-05-11, MTD: 2026-05-01~2026-05-11)
+[2026-05-13 17:14:14] [INFO   ] [automation.daily_report] 리포트 v3 생성 완료 - 표 5행, 이상 3건, 목표 4건, 차트=O
+[2026-05-13 17:21:45] [INFO   ] [automation.daily_report] 리포트 빌더 시작 - 기준일: 2026-05-11 (전일: 2026-05-10, 전년동일: 2025-05-11)
+[2026-05-13 17:21:45] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 17:21:45] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 17:21:45] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 17:21:45] [WARNING] [automation.daily_report] 차트 PNG 변환 실패(kaleido 미설치 가능): 
+Image export using the "kaleido" engine requires the Kaleido package,
+which can be installed using pip:
+
+    $ pip install --upgrade kaleido
+
+[2026-05-13 17:21:45] [INFO   ] [automation.daily_report] 리포트 생성 완료 - 공장 1개, 차트 0개
+[2026-05-13 17:26:49] [INFO   ] [automation.daily_report] 리포트 빌더 v3 시작 - 기준일: 2026-05-11 (주간: 2026-05-05~2026-05-11, MTD: 2026-05-01~2026-05-11)
+[2026-05-13 17:26:53] [INFO   ] [automation.daily_report] 리포트 v3 생성 완료 - 표 5행, 이상 3건, 목표 4건, 차트=O

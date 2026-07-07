@@ -1,0 +1,206 @@
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 7개
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F10   남양주공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장', 'F50   경산공장']
+[2026-05-11 17:22:24] [ERROR  ] [automation.dw_sampling] MIS 앱 연결 실패: pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] ------------------------------------------------------------
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] 기준년월: 2026-04
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] 성공 공장(0): []
+[2026-05-11 17:22:24] [INFO   ] [automation.dw_sampling] 전체 적재: INSERT 0 / UPDATE 0 / 행 0
+[2026-05-11 17:22:24] [ERROR  ] [automation.dw_sampling] pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 7개
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F10   남양주공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장', 'F50   경산공장']
+[2026-05-11 17:22:43] [ERROR  ] [automation.dw_sampling] MIS 앱 연결 실패: pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] ------------------------------------------------------------
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] 기준년월: 2026-04
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] 성공 공장(0): []
+[2026-05-11 17:22:43] [INFO   ] [automation.dw_sampling] 전체 적재: INSERT 0 / UPDATE 0 / 행 0
+[2026-05-11 17:22:43] [ERROR  ] [automation.dw_sampling] pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 7개
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F10   남양주공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장', 'F50   경산공장']
+[2026-05-11 17:22:48] [ERROR  ] [automation.dw_sampling] MIS 앱 연결 실패: pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] ------------------------------------------------------------
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] 기준년월: 2026-04
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] 성공 공장(0): []
+[2026-05-11 17:22:48] [INFO   ] [automation.dw_sampling] 전체 적재: INSERT 0 / UPDATE 0 / 행 0
+[2026-05-11 17:22:48] [ERROR  ] [automation.dw_sampling] pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 7개
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F10   남양주공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장', 'F50   경산공장']
+[2026-05-11 17:22:52] [ERROR  ] [automation.dw_sampling] MIS 앱 연결 실패: pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] ------------------------------------------------------------
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] 기준년월: 2026-04
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] 성공 공장(0): []
+[2026-05-11 17:22:52] [INFO   ] [automation.dw_sampling] 전체 적재: INSERT 0 / UPDATE 0 / 행 0
+[2026-05-11 17:22:52] [ERROR  ] [automation.dw_sampling] pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 7개
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F10   남양주공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장', 'F50   경산공장']
+[2026-05-11 17:26:12] [ERROR  ] [automation.dw_sampling] MIS 앱 연결 실패: pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] ------------------------------------------------------------
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] 기준년월: 2026-04
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] 성공 공장(0): []
+[2026-05-11 17:26:12] [INFO   ] [automation.dw_sampling] 전체 적재: INSERT 0 / UPDATE 0 / 행 0
+[2026-05-11 17:26:12] [ERROR  ] [automation.dw_sampling] pywinauto 미설치 또는 비-Windows 환경입니다. Windows에서 `pip install pywinauto` 후 .bat을 실행하세요.
+[2026-05-11 17:27:21] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:27:21] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-11 17:27:21] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:27:21] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 7개
+[2026-05-11 17:27:21] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-11 17:27:21] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F10   남양주공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장', 'F50   경산공장']
+[2026-05-11 17:27:24] [INFO   ] [automation.dw_sampling] 기존 인스턴스에 연결: '유틸리티 일자별 사용량 추이'
+[2026-05-11 17:27:39] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1A   남양주 1공장 → DB 코드 F1A
+[2026-05-11 17:27:39] [INFO   ] [automation.dw_sampling]   [UI] 메인 창(MA04080) 포커스
+[2026-05-11 17:27:41] [INFO   ] [automation.dw_sampling]   [UI] 좌측 트리(myTreeView)에서 'MA04080' 노드 더블클릭
+[2026-05-11 17:27:59] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-11 17:28:22] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-11 17:28:33] [INFO   ] [automation.dw_sampling]   [UI] 항목: '전력량' 라디오 선택
+[2026-05-11 17:28:45] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-11 17:29:12] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-11 17:29:33] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-11 17:29:37] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 전체 선택 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-11 17:29:52] [ERROR  ] [automation.dw_sampling] 공장 'F1A   남양주 1공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFFB59F4C0
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 921, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 848, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 490, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFFB59F4C0
+[2026-05-11 17:29:52] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1B   남양주 2공장 → DB 코드 F1B
+[2026-05-11 17:29:52] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-11 17:30:16] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-11 17:33:17] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:33:17] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-11 17:33:17] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:33:17] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 7개
+[2026-05-11 17:33:17] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-11 17:33:17] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F10   남양주공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장', 'F50   경산공장']
+[2026-05-11 17:33:19] [INFO   ] [automation.dw_sampling] 기존 인스턴스에 연결: '유틸리티 일자별 사용량 추이'
+[2026-05-11 17:33:28] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1A   남양주 1공장 → DB 코드 F1A
+[2026-05-11 17:33:28] [INFO   ] [automation.dw_sampling]   [UI] 메인 창(MA04080) 포커스
+[2026-05-11 17:33:30] [INFO   ] [automation.dw_sampling]   [UI] 좌측 트리(myTreeView)에서 'MA04080' 노드 더블클릭
+[2026-05-11 17:33:47] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-11 17:34:12] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-11 17:34:23] [INFO   ] [automation.dw_sampling]   [UI] 항목: '전력량' 라디오 선택
+[2026-05-11 17:46:15] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:46:15] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-11 17:46:15] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:46:15] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 7개
+[2026-05-11 17:46:15] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-11 17:46:15] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F10   남양주공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장', 'F50   경산공장']
+[2026-05-11 17:46:22] [INFO   ] [automation.dw_sampling] 기존 인스턴스에 연결: '유틸리티 일자별 사용량 추이'
+[2026-05-11 17:46:31] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1A   남양주 1공장 → DB 코드 F1A
+[2026-05-11 17:46:31] [INFO   ] [automation.dw_sampling]   [UI] 메인 창(MA04080) 포커스
+[2026-05-11 17:46:33] [INFO   ] [automation.dw_sampling]   [UI] 좌측 트리(myTreeView)에서 'MA04080' 노드 더블클릭
+[2026-05-11 17:46:50] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-11 17:47:13] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-11 17:47:25] [INFO   ] [automation.dw_sampling]   [UI] 항목: '전력량' 라디오 선택
+[2026-05-11 17:47:36] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-11 17:48:03] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-11 17:52:47] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:52:47] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-11 17:52:47] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-11 17:52:47] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 7개
+[2026-05-11 17:52:47] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-11 17:52:47] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F10   남양주공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장', 'F50   경산공장']
+[2026-05-11 17:52:47] [INFO   ] [automation.dw_sampling] Timings.fast() 적용 완료 (pywinauto 내부 딜레이 최소화)
+[2026-05-11 17:52:49] [INFO   ] [automation.dw_sampling] 기존 인스턴스에 연결: '유틸리티 일자별 사용량 추이'
+[2026-05-11 17:52:59] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1A   남양주 1공장 → DB 코드 F1A
+[2026-05-11 17:52:59] [INFO   ] [automation.dw_sampling]   [UI] 메인 창(MA04080) 포커스
+[2026-05-11 17:53:00] [INFO   ] [automation.dw_sampling]   [UI] 좌측 트리(myTreeView)에서 'MA04080' 노드 더블클릭
+[2026-05-11 17:53:16] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-11 17:53:28] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-11 17:53:39] [INFO   ] [automation.dw_sampling]   [UI] 항목: '전력량' 라디오 선택
+[2026-05-11 17:53:51] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-11 17:54:02] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-11 17:54:15] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-11 17:54:17] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 전체 선택 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-11 17:54:32] [ERROR  ] [automation.dw_sampling] 공장 'F1A   남양주 1공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0x000000005F06CF10
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 970, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 897, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 511, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0x000000005F06CF10
+[2026-05-11 17:54:32] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1B   남양주 2공장 → DB 코드 F1B
+[2026-05-11 17:54:32] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-11 17:54:33] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-11 17:54:33] [INFO   ] [automation.dw_sampling]   [UI] 항목: '전력량' 라디오 선택
+[2026-05-11 17:54:34] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-11 17:54:34] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-11 17:54:38] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-11 17:54:39] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 전체 선택 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-11 17:54:54] [ERROR  ] [automation.dw_sampling] 공장 'F1B   남양주 2공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0x000000005ED2D0E0
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 970, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 897, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 511, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0x000000005ED2D0E0
+[2026-05-11 17:54:54] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F10   남양주공장 → DB 코드 F10
+[2026-05-11 17:54:54] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-11 17:54:55] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-11 17:54:55] [INFO   ] [automation.dw_sampling]   [UI] 항목: '전력량' 라디오 선택
+[2026-05-11 17:54:56] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-11 17:54:57] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-11 17:55:00] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-11 17:55:01] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 전체 선택 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-11 17:55:16] [ERROR  ] [automation.dw_sampling] 공장 'F10   남양주공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0x000000005F5A7B10
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 970, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 897, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 511, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0x000000005F5A7B10
+[2026-05-11 17:55:16] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F20   김해공장 → DB 코드 F20
+[2026-05-11 17:55:16] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-11 17:55:17] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-11 17:55:17] [INFO   ] [automation.dw_sampling]   [UI] 항목: '전력량' 라디오 선택
+[2026-05-11 17:55:18] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-11 17:55:19] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-11 17:55:22] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-11 17:55:23] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 전체 선택 후 클립보드로 복사 (탭 구분 텍스트)

@@ -1,0 +1,12 @@
+[2026-05-27 15:30:17] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@naver.com'], Cc: []
+[2026-05-27 15:30:20] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-25 (월)'
+[2026-05-27 15:41:16] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@naver.com'], Cc: []
+[2026-05-27 15:41:19] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-25 (월)'
+[2026-05-27 15:45:28] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
+[2026-05-27 15:45:32] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-25 (월)'
+[2026-05-27 15:51:21] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
+[2026-05-27 15:51:24] [INFO   ] [automation.mail] 메일 발송 성공: '[생산기술팀]일일 에너지 원단위 alert 2026-05-25 (월)'
+[2026-05-27 16:08:57] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
+[2026-05-27 16:09:01] [INFO   ] [automation.mail] 메일 발송 성공: '[생산기술팀]일일 에너지 원단위 alert 2026-05-25 (월)'
+[2026-05-27 16:23:29] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
+[2026-05-27 16:23:33] [INFO   ] [automation.mail] 메일 발송 성공: '[생산기술팀]일일 에너지 원단위 alert 2026-05-25 (월)'

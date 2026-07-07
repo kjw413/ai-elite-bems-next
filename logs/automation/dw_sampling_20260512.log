@@ -1,0 +1,350 @@
+[2026-05-12 13:20:21] [INFO   ] [automation.dw_sampling] RawDB 백업 생성: C:\tmp\RawDB_에너지_test.bak.20260512_132020.xlsx
+[2026-05-12 13:20:23] [INFO   ] [automation.dw_sampling] 일부 공장만 샘플링되어 RawDB '전사' 시트 자동 재계산은 건너뜁니다.
+[2026-05-12 13:26:26] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 13:26:26] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-12 13:26:26] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 13:26:26] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 5개
+[2026-05-12 13:26:26] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-12 13:26:26] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장']
+[2026-05-12 13:26:30] [INFO   ] [automation.dw_sampling] Timings.fast() 적용 완료 (pywinauto 내부 딜레이 최소화)
+[2026-05-12 13:26:33] [INFO   ] [automation.dw_sampling] 기존 인스턴스에 연결: '유틸리티 일자별 사용량 추이'
+[2026-05-12 13:26:42] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1A   남양주 1공장 → DB 코드 남양주1
+[2026-05-12 13:26:42] [INFO   ] [automation.dw_sampling]   [UI] 메인 창(MA04080) 포커스
+[2026-05-12 13:26:44] [INFO   ] [automation.dw_sampling]   [UI] 좌측 트리(myTreeView)에서 'MA04080' 노드 더블클릭
+[2026-05-12 13:27:01] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:27:12] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-12 13:27:24] [INFO   ] [automation.dw_sampling]   [UI] 항목: '전력량' 라디오 선택
+[2026-05-12 13:27:35] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:27:47] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:28:00] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 11 (rows/tables)
+[2026-05-12 13:28:01] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 전체 선택 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:28:16] [ERROR  ] [automation.dw_sampling] 공장 'F1A   남양주 1공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=None
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1137, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1060, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 516, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=None
+[2026-05-12 13:28:16] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1B   남양주 2공장 → DB 코드 남양주2
+[2026-05-12 13:28:16] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:28:17] [INFO   ] [automation.dw_sampling]   [UI] 구분: '일' 라디오 선택
+[2026-05-12 13:28:17] [INFO   ] [automation.dw_sampling]   [UI] 항목: '전력량' 라디오 선택
+[2026-05-12 13:28:18] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:28:18] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:28:22] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:28:23] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 전체 선택 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:34:14] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 13:34:14] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-12 13:34:14] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 13:34:14] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 5개
+[2026-05-12 13:34:14] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-12 13:34:14] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장']
+[2026-05-12 13:34:14] [INFO   ] [automation.dw_sampling] Timings.fast() 적용 완료 (pywinauto 내부 딜레이 최소화)
+[2026-05-12 13:34:18] [ERROR  ] [automation.dw_sampling] MIS 앱 연결 실패: 사내 프로그램이 실행 중이 아니고 DW_APP_PATH도 유효하지 않습니다: 
+→ MIS 프로그램을 먼저 로그인까지 띄워 둔 상태에서 .bat 을 실행해 주세요.
+[2026-05-12 13:34:18] [INFO   ] [automation.dw_sampling] ------------------------------------------------------------
+[2026-05-12 13:34:18] [INFO   ] [automation.dw_sampling] 기준년월: 2026-04
+[2026-05-12 13:34:18] [INFO   ] [automation.dw_sampling] 성공 공장(0): []
+[2026-05-12 13:34:18] [INFO   ] [automation.dw_sampling] 전체 적재: INSERT 0 / UPDATE 0 / 행 0
+[2026-05-12 13:34:18] [ERROR  ] [automation.dw_sampling] 사내 프로그램이 실행 중이 아니고 DW_APP_PATH도 유효하지 않습니다: 
+→ MIS 프로그램을 먼저 로그인까지 띄워 둔 상태에서 .bat 을 실행해 주세요.
+[2026-05-12 13:34:28] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 13:34:28] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-12 13:34:28] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 13:34:28] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 5개
+[2026-05-12 13:34:28] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-12 13:34:28] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장']
+[2026-05-12 13:34:28] [INFO   ] [automation.dw_sampling] Timings.fast() 적용 완료 (pywinauto 내부 딜레이 최소화)
+[2026-05-12 13:34:30] [INFO   ] [automation.dw_sampling] 기존 인스턴스에 연결: '유틸리티 일자별 사용량 추이'
+[2026-05-12 13:34:39] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1A   남양주 1공장 → DB 코드 남양주1
+[2026-05-12 13:34:39] [INFO   ] [automation.dw_sampling]   [UI] 메인 창(MA04080) 포커스
+[2026-05-12 13:34:41] [INFO   ] [automation.dw_sampling]   [UI] 좌측 트리(myTreeView)에서 'MA04080' 노드 더블클릭
+[2026-05-12 13:34:58] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:35:09] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:35:21] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:35:35] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:35:36] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:35:47] [INFO   ] [automation.dw_sampling]   → 그리드 좌상단 selector 클릭: abs=(2227, 1201), rel=(8, 535)
+[2026-05-12 13:35:53] [ERROR  ] [automation.dw_sampling] 공장 'F1A   남양주 1공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFE1793200
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1148, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1071, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 527, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFE1793200
+[2026-05-12 13:35:53] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1B   남양주 2공장 → DB 코드 남양주2
+[2026-05-12 13:35:53] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:35:54] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:35:54] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:35:58] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:35:59] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:36:10] [INFO   ] [automation.dw_sampling]   → 그리드 좌상단 selector 클릭: abs=(2227, 1201), rel=(8, 535)
+[2026-05-12 13:36:16] [ERROR  ] [automation.dw_sampling] 공장 'F1B   남양주 2공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFE1792C00
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1148, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1071, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 527, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFE1792C00
+[2026-05-12 13:36:16] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F20   김해공장 → DB 코드 김해
+[2026-05-12 13:36:16] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:36:16] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:36:17] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:36:20] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:36:22] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:36:32] [INFO   ] [automation.dw_sampling]   → 그리드 좌상단 selector 클릭: abs=(2227, 1201), rel=(8, 535)
+[2026-05-12 13:36:38] [ERROR  ] [automation.dw_sampling] 공장 'F20   김해공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFE13D0740
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1148, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1071, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 527, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFE13D0740
+[2026-05-12 13:36:38] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F30   광주공장 → DB 코드 광주
+[2026-05-12 13:36:38] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:36:39] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:36:39] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:36:43] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:36:44] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:36:55] [INFO   ] [automation.dw_sampling]   → 그리드 좌상단 selector 클릭: abs=(2227, 1201), rel=(8, 535)
+[2026-05-12 13:37:01] [ERROR  ] [automation.dw_sampling] 공장 'F30   광주공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=None
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1148, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1071, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 527, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=None
+[2026-05-12 13:37:01] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F40   논산공장 → DB 코드 논산
+[2026-05-12 13:37:01] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:37:02] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:37:02] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:37:05] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 1 (rows/tables)
+[2026-05-12 13:37:06] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:54:49] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 13:54:49] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-12 13:54:49] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 13:54:49] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 5개
+[2026-05-12 13:54:49] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-12 13:54:49] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장']
+[2026-05-12 13:54:49] [INFO   ] [automation.dw_sampling] Timings.fast() 적용 완료 (pywinauto 내부 딜레이 최소화)
+[2026-05-12 13:54:51] [INFO   ] [automation.dw_sampling] 기존 인스턴스에 연결: '유틸리티 일자별 사용량 추이'
+[2026-05-12 13:55:00] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1A   남양주 1공장 → DB 코드 남양주1
+[2026-05-12 13:55:00] [INFO   ] [automation.dw_sampling]   [UI] 메인 창(MA04080) 포커스
+[2026-05-12 13:55:02] [INFO   ] [automation.dw_sampling]   [UI] 좌측 트리(myTreeView)에서 'MA04080' 노드 더블클릭
+[2026-05-12 13:55:19] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:55:30] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:55:42] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:55:56] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:55:57] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:56:11] [INFO   ] [automation.dw_sampling]   → 그리드 Header 좌표 클릭: abs=(307, 1238), rel=(8, 535)
+[2026-05-12 13:56:12] [INFO   ] [automation.dw_sampling]   → Header 클릭 복사 확인 지연: Ctrl+C 폴백 전송
+[2026-05-12 13:56:16] [ERROR  ] [automation.dw_sampling] 공장 'F1A   남양주 1공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=None
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1197, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1120, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 576, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=None
+[2026-05-12 13:56:16] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1B   남양주 2공장 → DB 코드 남양주2
+[2026-05-12 13:56:16] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:56:17] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:56:17] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:56:21] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:56:22] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:56:36] [INFO   ] [automation.dw_sampling]   → 그리드 Header 좌표 클릭: abs=(307, 1238), rel=(8, 535)
+[2026-05-12 13:56:37] [INFO   ] [automation.dw_sampling]   → Header 클릭 복사 확인 지연: Ctrl+C 폴백 전송
+[2026-05-12 13:56:41] [ERROR  ] [automation.dw_sampling] 공장 'F1B   남양주 2공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=None
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1197, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1120, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 576, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=None
+[2026-05-12 13:56:41] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F20   김해공장 → DB 코드 김해
+[2026-05-12 13:56:41] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:56:42] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:56:42] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:56:46] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:56:47] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:56:56] [INFO   ] [automation.dw_sampling]   → 그리드 Header 클릭: abs=(308, 716), header_rect=(300,704,1910,728)
+[2026-05-12 13:56:58] [INFO   ] [automation.dw_sampling]   → Header 클릭 복사 확인 지연: Ctrl+C 폴백 전송
+[2026-05-12 13:57:02] [ERROR  ] [automation.dw_sampling] 공장 'F20   김해공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFB9E0CF30
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1197, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1120, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 576, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFB9E0CF30
+[2026-05-12 13:57:02] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F30   광주공장 → DB 코드 광주
+[2026-05-12 13:57:02] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:57:02] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:57:03] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:57:07] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:57:08] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:57:17] [INFO   ] [automation.dw_sampling]   → 그리드 Header 클릭: abs=(308, 716), header_rect=(300,704,1910,728)
+[2026-05-12 13:57:19] [INFO   ] [automation.dw_sampling]   → Header 클릭 복사 확인 지연: Ctrl+C 폴백 전송
+[2026-05-12 13:57:23] [ERROR  ] [automation.dw_sampling] 공장 'F30   광주공장' 실패: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFB9E0D500
+Traceback (most recent call last):
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1197, in run_sampling
+    df_fac = _run_one_factory(
+        main, factory_option=opt, target_ym=target_ym,
+        mapping=mapping, cfg=cfg, first_cycle=(idx == 0),
+    )
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 1120, in _run_one_factory
+    captured_raw = _copy_grid_to_clipboard(main, loc, cfg, options)
+  File "E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_sampling_service.py", line 576, in _copy_grid_to_clipboard
+    raise RuntimeError(
+        f"클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err={last_err}"
+    )
+RuntimeError: 클립보드에서 그리드 텍스트를 읽지 못했습니다. last_err=exception: access violation reading 0xFFFFFFFFB9E0D500
+[2026-05-12 13:57:23] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F40   논산공장 → DB 코드 논산
+[2026-05-12 13:57:23] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 13:57:23] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 13:57:24] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 13:57:27] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 13:57:28] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 13:57:37] [INFO   ] [automation.dw_sampling]   → 그리드 Header 클릭: abs=(308, 716), header_rect=(300,704,1910,728)
+[2026-05-12 14:33:16] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 14:33:16] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-12 14:33:16] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 14:33:16] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 5개
+[2026-05-12 14:33:16] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-12 14:33:16] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장']
+[2026-05-12 14:33:16] [INFO   ] [automation.dw_sampling] Timings.fast() 적용 완료 (pywinauto 내부 딜레이 최소화)
+[2026-05-12 14:33:18] [INFO   ] [automation.dw_sampling] 기존 인스턴스에 연결: '유틸리티 일자별 사용량 추이'
+[2026-05-12 14:33:27] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1A   남양주 1공장 → DB 코드 남양주1
+[2026-05-12 14:33:27] [INFO   ] [automation.dw_sampling]   [UI] 메인 창(MA04080) 포커스
+[2026-05-12 14:33:29] [INFO   ] [automation.dw_sampling]   [UI] 좌측 트리(myTreeView)에서 'MA04080' 노드 더블클릭
+[2026-05-12 14:33:46] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 14:33:58] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 14:34:09] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 14:34:23] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 14:34:25] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 14:34:37] [INFO   ] [automation.dw_sampling]   → 그리드 Header 좌표 클릭: abs=(307, 716), rel=(8, 13)
+[2026-05-12 14:34:39] [INFO   ] [automation.dw_sampling]   → Header 클릭 복사 확인 지연: Ctrl+C 폴백 전송
+[2026-05-12 14:34:39] [INFO   ] [automation.dw_sampling]   → 클립보드 파싱 완료: shape=(1, 31)
+[2026-05-12 14:34:40] [INFO   ] [automation.dw_sampling]   → transform 후 0건 (factory=남양주1, YM=2026-04)
+[2026-05-12 14:34:40] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1B   남양주 2공장 → DB 코드 남양주2
+[2026-05-12 14:34:40] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 14:34:41] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 14:34:41] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 14:34:45] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 14:34:46] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 14:34:56] [INFO   ] [automation.dw_sampling]   → 그리드 Header 클릭: abs=(308, 716), header_rect=(300,704,1910,728)
+[2026-05-12 14:34:58] [INFO   ] [automation.dw_sampling]   → Header 클릭 복사 확인 지연: Ctrl+C 폴백 전송
+[2026-05-12 14:34:58] [INFO   ] [automation.dw_sampling]   → 클립보드 파싱 완료: shape=(1, 31)
+[2026-05-12 14:34:59] [INFO   ] [automation.dw_sampling]   → transform 후 0건 (factory=남양주2, YM=2026-04)
+[2026-05-12 14:34:59] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F20   김해공장 → DB 코드 김해
+[2026-05-12 14:34:59] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 14:34:59] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 14:35:00] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 14:35:03] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 14:35:05] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 14:35:16] [INFO   ] [automation.dw_sampling]   → 그리드 Header 클릭: abs=(308, 716), header_rect=(300,704,1910,728)
+[2026-05-12 14:35:17] [INFO   ] [automation.dw_sampling]   → Header 클릭 복사 확인 지연: Ctrl+C 폴백 전송
+[2026-05-12 14:35:17] [INFO   ] [automation.dw_sampling]   → 클립보드 파싱 완료: shape=(1, 31)
+[2026-05-12 14:35:18] [INFO   ] [automation.dw_sampling]   → transform 후 0건 (factory=김해, YM=2026-04)
+[2026-05-12 14:35:18] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F30   광주공장 → DB 코드 광주
+[2026-05-12 14:35:18] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 14:35:19] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 14:35:19] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 14:35:23] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 14:35:24] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 14:35:35] [INFO   ] [automation.dw_sampling]   → 그리드 Header 클릭: abs=(308, 716), header_rect=(300,704,1910,728)
+[2026-05-12 14:35:37] [INFO   ] [automation.dw_sampling]   → Header 클릭 복사 확인 지연: Ctrl+C 폴백 전송
+[2026-05-12 14:35:37] [INFO   ] [automation.dw_sampling]   → 클립보드 파싱 완료: shape=(1, 31)
+[2026-05-12 14:35:37] [INFO   ] [automation.dw_sampling]   → transform 후 0건 (factory=광주, YM=2026-04)
+[2026-05-12 14:35:37] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F40   논산공장 → DB 코드 논산
+[2026-05-12 14:35:37] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 14:35:38] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 14:35:39] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 14:35:42] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 14:35:43] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 14:35:55] [INFO   ] [automation.dw_sampling]   → 그리드 Header 클릭: abs=(308, 716), header_rect=(300,704,1910,728)
+[2026-05-12 14:35:56] [INFO   ] [automation.dw_sampling]   → Header 클릭 복사 확인 지연: Ctrl+C 폴백 전송
+[2026-05-12 14:35:57] [INFO   ] [automation.dw_sampling]   → 클립보드 파싱 완료: shape=(1, 31)
+[2026-05-12 14:35:57] [INFO   ] [automation.dw_sampling]   → transform 후 0건 (factory=논산, YM=2026-04)
+[2026-05-12 14:35:57] [INFO   ] [automation.dw_sampling] ------------------------------------------------------------
+[2026-05-12 14:35:57] [INFO   ] [automation.dw_sampling] 기준년월: 2026-04
+[2026-05-12 14:35:57] [INFO   ] [automation.dw_sampling] 성공 공장(0): []
+[2026-05-12 14:35:57] [WARNING] [automation.dw_sampling] 실패 공장(5):
+[2026-05-12 14:35:57] [WARNING] [automation.dw_sampling]   - F1A   남양주 1공장: 그리드 결과 비어 있음
+[2026-05-12 14:35:57] [WARNING] [automation.dw_sampling]   - F1B   남양주 2공장: 그리드 결과 비어 있음
+[2026-05-12 14:35:57] [WARNING] [automation.dw_sampling]   - F20   김해공장: 그리드 결과 비어 있음
+[2026-05-12 14:35:57] [WARNING] [automation.dw_sampling]   - F30   광주공장: 그리드 결과 비어 있음
+[2026-05-12 14:35:57] [WARNING] [automation.dw_sampling]   - F40   논산공장: 그리드 결과 비어 있음
+[2026-05-12 14:35:57] [INFO   ] [automation.dw_sampling] 전체 적재: INSERT 0 / UPDATE 0 / 행 0
+[2026-05-12 14:35:57] [ERROR  ] [automation.dw_sampling] 모든 공장에서 데이터 추출에 실패했습니다.
+[2026-05-12 14:48:57] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 14:48:57] [INFO   ] [automation.dw_sampling] DW 샘플링 자동화 시작 (MA04080)
+[2026-05-12 14:48:57] [INFO   ] [automation.dw_sampling] ============================================================
+[2026-05-12 14:48:57] [INFO   ] [automation.dw_sampling] DW 샘플링 시작 - 기준년월: 2026-04 / 대상 공장 5개
+[2026-05-12 14:48:57] [INFO   ] [automation.dw_sampling] 매핑: E:\AI-Elite_Energy-Dashboard-Web\app\automation\dw_mappings\default_mapping.yaml
+[2026-05-12 14:48:57] [INFO   ] [automation.dw_sampling] 대상 공장: ['F1A   남양주 1공장', 'F1B   남양주 2공장', 'F20   김해공장', 'F30   광주공장', 'F40   논산공장']
+[2026-05-12 14:48:57] [INFO   ] [automation.dw_sampling] Timings.fast() 적용 완료 (pywinauto 내부 딜레이 최소화)
+[2026-05-12 14:48:59] [INFO   ] [automation.dw_sampling] 기존 인스턴스에 연결: '유틸리티 일자별 사용량 추이'
+[2026-05-12 14:49:07] [INFO   ] [automation.dw_sampling] ── 공장 사이클 시작: F1A   남양주 1공장 → DB 코드 남양주1
+[2026-05-12 14:49:07] [INFO   ] [automation.dw_sampling]   [UI] 메인 창(MA04080) 포커스
+[2026-05-12 14:49:09] [INFO   ] [automation.dw_sampling]   [UI] 좌측 트리(myTreeView)에서 'MA04080' 노드 더블클릭
+[2026-05-12 14:49:26] [INFO   ] [automation.dw_sampling]   [UI] cmbORG 콤보에서 공장 ListItem 선택
+[2026-05-12 14:49:38] [INFO   ] [automation.dw_sampling]   [UI] 기준년월(pubCalendarCombo1) 입력 (YYYY-MM)
+[2026-05-12 14:49:50] [INFO   ] [automation.dw_sampling]   [UI] 툴바: '조회' 버튼 클릭
+[2026-05-12 14:50:05] [INFO   ] [automation.dw_sampling]   → 상태바 매칭: 30 (rows/tables)
+[2026-05-12 14:50:06] [INFO   ] [automation.dw_sampling]   [UI] 결과 그리드 좌측 상단 selector 클릭 후 클립보드로 복사 (탭 구분 텍스트)
+[2026-05-12 14:50:15] [INFO   ] [automation.dw_sampling]   → pyautogui 그리드 복사 좌표 클릭: abs=(307, 716), rel=(8, 13)

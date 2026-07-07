@@ -1,0 +1,12 @@
+[2026-05-13 16:17:39] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
+[2026-05-13 16:17:40] [ERROR  ] [automation.mail] 메일 발송 실패: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Missing Authority Key Identifier (_ssl.c:1032)
+[2026-05-13 16:21:34] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
+[2026-05-13 16:21:35] [ERROR  ] [automation.mail] 메일 발송 실패: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Missing Authority Key Identifier (_ssl.c:1032)
+[2026-05-13 16:25:24] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
+[2026-05-13 16:25:24] [ERROR  ] [automation.mail] 메일 발송 실패: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Missing Authority Key Identifier (_ssl.c:1032)
+[2026-05-13 16:26:06] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
+[2026-05-13 16:26:09] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-11 실적 - 남양주1'
+[2026-05-13 17:21:45] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@bing.co.kr'], Cc: []
+[2026-05-13 17:21:48] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-11 실적 - 남양주1'
+[2026-05-13 17:26:53] [INFO   ] [automation.mail] 메일 발송 시도 → To: ['kjw2110@naver.com'], Cc: []
+[2026-05-13 17:26:56] [INFO   ] [automation.mail] 메일 발송 성공: '[FEMS][일일 에너지 원단위] 2026-05-11 (월)'
