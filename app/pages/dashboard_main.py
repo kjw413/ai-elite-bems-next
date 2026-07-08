@@ -3,7 +3,7 @@ Dashboard Main Page
 ===================
 에너지 대시보드:
   0. AI 예측 기반 이상 알림 배너 (prediction_log 비교)
-  1. 7일간 생산량·원단위 추이 차트 (사업장/원단위 선택)
+  1. 7일간 생산량·사용량 추이 차트 (사업장 선택)
   2. 유틸리티 원단위 현황 (vs 전년 비교)
   3. 생산량 및 사용량 현황 (vs 전년 비교)
 """
@@ -42,7 +42,16 @@ from app.services.anomaly_diagnosis_service import (
     get_cached_diagnosis,
     delete_cached_diagnosis,
 )
+from app.services.anomaly_rules_service import (
+    CONSECUTIVE_RUN_MIN,
+    FREQUENT_COUNT_MIN,
+    SEVERITY_ALERT,
+    SEVERITY_WATCH,
+    detect_drift,
+    evaluate_band_rules,
+)
 from app.utils.page_state import persist
+from app.utils.page_common import section_tone
 
 # ──────────────────────────────────────
 # AI 이상 알림 설정값
@@ -68,9 +77,9 @@ def _theme_colors():
         ACCENT_COLOR   = "#38bdf8",
         GRID_COLOR     = "rgba(120,160,220,0.14)",
         ZERO_COLOR     = "#2a3a58",
-        BG_CARD        = "#101a30",
-        BG_CARD2       = "#16223c",
-        BORDER_COLOR   = "rgba(120,160,220,0.14)",
+        BG_CARD        = "#1a2a52",
+        BG_CARD2       = "#22345f",
+        BORDER_COLOR   = "rgba(122,164,224,0.22)",
     )
 
 _T = _theme_colors()
@@ -121,37 +130,35 @@ def _progress_rate(base_date: date) -> float:
 # 섹션 1: 7일간 추이 차트
 # ──────────────────────────────────────
 
-UNIT_OPTIONS = {
-    "전력 원단위 [kWh/mix-ton]": "power_per_ton",
-    "연료 원단위 [Nm³/mix-ton]": "fuel_per_ton",
-    "용수 원단위 [ton/mix-ton]": "water_per_ton",
-    "폐수/용수": "wastewater_ratio",
+TREND_USAGE_OPTIONS = {
+    "전력 사용량 [kWh]": "total_power_kwh",
+    "연료 사용량 [Nm³]": "fuel_nm3",
+    "용수 사용량 [ton]": "water_ton",
+    "폐수 사용량 [ton]": "wastewater_ton",
 }
 
-UNIT_COLORS = {
-    "power_per_ton":    "#F6C90E",   # 노랑 (yellow) - 전력/번개 심볼
-    "fuel_per_ton":     "#E8450A",   # 주황빨강 (red-orange) - 화염 심볼
-    "water_per_ton":    "#0EA5E9",   # 하늘파랑 (sky-blue) - 물 심볼
-    "wastewater_ratio": "#6B7280",   # 검회색 (dark-gray) - 폐수 심볼
+TREND_USAGE_COLORS = {
+    "total_power_kwh": "#F6C90E",   # 노랑 (yellow) - 전력/번개 심볼
+    "fuel_nm3":        "#E8450A",   # 주황빨강 (red-orange) - 화염 심볼
+    "water_ton":       "#0EA5E9",   # 하늘파랑 (sky-blue) - 물 심볼
+    "wastewater_ton":  "#6B7280",   # 검회색 (dark-gray) - 폐수 심볼
 }
 
 # 7일 추이 차트 4분면 각각의 헤더용 — (아이콘, 전체 제목)
 # 차트 위 좌측에 작은 라벨로 표시되어 어느 지표의 차트인지 즉시 인지 가능.
-UNIT_HEADERS = {
-    "power_per_ton":    ("⚡", "전력 원단위"),
-    "fuel_per_ton":     ("🔥", "연료 원단위"),
-    "water_per_ton":    ("💧", "용수 원단위"),
-    "wastewater_ratio": ("🚿", "폐수/용수"),
+TREND_USAGE_HEADERS = {
+    "total_power_kwh": ("⚡", "전력 사용량"),
+    "fuel_nm3":        ("🔥", "연료 사용량"),
+    "water_ton":       ("💧", "용수 사용량"),
+    "wastewater_ton":  ("🚿", "폐수 사용량"),
 }
 
-# 추이 지표 컬럼 → (사용량 컬럼, 사용량 단위, 지표 단위). 비는 사용량 컬럼 없음.
-UNIT_USAGE_INFO = {
-    "power_per_ton":    ("total_power_kwh", "전력 사용량 (kWh)",  "전력 원단위 (kWh/ton)"),
-    "fuel_per_ton":     ("fuel_nm3",        "연료 사용량 (Nm³)",  "연료 원단위 (Nm³/ton)"),
-    "water_per_ton":    ("water_ton",       "용수 사용량 (ton)",  "용수 원단위 (ton/ton)"),
-    "wastewater_ratio": (None,              None,                "폐수/용수"),
+TREND_USAGE_INFO = {
+    "total_power_kwh": ("전력 사용량 (kWh)", "power"),
+    "fuel_nm3":        ("연료 사용량 (Nm³)", "fuel"),
+    "water_ton":       ("용수 사용량 (ton)", "water"),
+    "wastewater_ton":  ("폐수 사용량 (ton)", "wastewater"),
 }
-
 PROD_COLOR = "#A4D65E"   # 연녹색 — 생산량 상징색 (메일 리포트와 동기)
 
 FACTORY_OPTIONS = list(FACTORY_DISPLAY_ORDER)
@@ -224,6 +231,42 @@ def _fetch_anomaly_data(base_date: date) -> pd.DataFrame:
         return pd.DataFrame()
     finally:
         conn.close()
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _fetch_band_rule_series(base_date: date,
+                            lookback_days: int = SPC_LOOKBACK_DAYS) -> pd.DataFrame:
+    """run rule/CUSUM 판정용 시계열 — 전 실공장×타겟, 실측 있는 행 전체.
+
+    이상 행만 뽑는 _fetch_anomaly_data 와 달리 정상(inside) 행도 포함해야
+    연속/빈발/지속편향 패턴을 판정할 수 있습니다. 조회창은 배너 노출창(7일)보다
+    긴 SPC_LOOKBACK_DAYS(30일) — 창 경계에 걸친 연속 run 과 CUSUM 안정성 확보.
+    """
+    date_from = base_date - timedelta(days=lookback_days - 1)
+    query = """
+        SELECT factory, pred_date, target, pred_value, actual_value,
+               band_status, band_position
+        FROM prediction_log
+        WHERE pred_date BETWEEN %s AND %s
+          AND actual_value IS NOT NULL
+          AND pred_value IS NOT NULL
+        ORDER BY factory, target, pred_date
+    """
+    conn = get_connection()
+    try:
+        df = pd.read_sql_query(
+            query, conn,
+            params=(date_from.strftime("%Y-%m-%d"), base_date.strftime("%Y-%m-%d")),
+        )
+    except Exception as exc:
+        logger.exception("Failed to fetch band rule series for base_date=%s: %s", base_date, exc)
+        return pd.DataFrame()
+    finally:
+        conn.close()
+    if not df.empty:
+        for c in ["pred_value", "actual_value", "band_position"]:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
 
 
 # ──────────────────────────────────────
@@ -368,7 +411,22 @@ def _render_spc_chart(factory: str, target: str, base_date: date) -> bool:
 
     unit = _spc_target_unit(target)
 
+    # 지속편향(CUSUM) 감지 — 단일점 이탈로는 안 잡히는 "매일 조금씩 계속 높은/낮은"
+    # drift 유형(냉방 기저부하 증가 등)을 잔차 누적합으로 포착.
+    drift = detect_drift(df)
+
     fig = go.Figure()
+
+    if drift is not None and df["pred_date"].notna().any():
+        drift_fill = (
+            "rgba(220,38,38,0.07)" if drift["direction"] == "over"
+            else "rgba(245,158,11,0.07)"
+        )
+        fig.add_vrect(
+            x0=pd.Timestamp(drift["start_date"]) - pd.Timedelta(hours=12),
+            x1=df["pred_date"].max() + pd.Timedelta(hours=12),
+            fillcolor=drift_fill, line_width=0, layer="below",
+        )
 
     # 1) 정상범주 음영 (P05 ~ P95)
     has_band = df["pred_p05"].notna().any() and df["pred_p95"].notna().any()
@@ -540,7 +598,6 @@ def _render_spc_chart(factory: str, target: str, base_date: date) -> bool:
         ),
         xaxis_title="",
         yaxis_title=unit,
-        template="plotly_white",
         height=260,
         margin=dict(l=50, r=20, t=40, b=30),
         legend=dict(
@@ -554,87 +611,243 @@ def _render_spc_chart(factory: str, target: str, base_date: date) -> bool:
     fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR, tickformat="%m-%d")
     fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
     st.plotly_chart(fig, use_container_width=True)
+
+    if drift is not None:
+        is_over = drift["direction"] == "over"
+        dir_ko = "높게" if is_over else "낮게"
+        icon = "📈" if is_over else "📉"
+        bias_txt = (
+            f" 평균 {drift['mean_bias_pct']:+.1f}%"
+            if drift.get("mean_bias_pct") is not None else ""
+        )
+        st.caption(
+            f"{icon} 음영 구간: {drift['start_date'].strftime('%m/%d')}부터 "
+            f"{drift['days']}영업일째 실측이 AI 예측(중심선)보다{bias_txt} 계속 {dir_ko} "
+            f"유지되고 있습니다. 하루하루는 정상범위 안이라도 이런 흐름이 이어지면 "
+            f"설비 상태 변화나 기저부하 증감을 점검하세요."
+        )
     return True
 
 
-def _render_spc_section(base_date: date) -> None:
-    """대시보드 홈의 SPC(통계적 공정 관리) 섹션.
+# 상태 그리드 셀 스펙 — 상태색은 항상 아이콘+라벨과 함께 사용 (색상 단독 의존 금지).
+# 심각도 순서: 경보(빨강) > 지속(주황) > 주의(황색) > 정상(초록).
+_GRID_STATES = {
+    "alert":  dict(color="#ef4444", bg="rgba(239,68,68,0.13)",  border="rgba(239,68,68,0.45)"),
+    "drift":  dict(color="#fb923c", bg="rgba(251,146,60,0.11)", border="rgba(251,146,60,0.40)"),
+    "watch":  dict(color="#f59e0b", bg="rgba(245,158,11,0.09)", border="rgba(245,158,11,0.35)"),
+    "normal": dict(color="#10b981", bg="rgba(16,185,129,0.07)", border="rgba(16,185,129,0.30)"),
+    "nodata": dict(color="#647695", bg="transparent",           border="rgba(122,164,224,0.15)"),
+}
 
-    UI:
-      - 공장 선택 selectbox (전체 5개 실공장)
-      - 타겟별(전력/연료/용수) 차트를 세로 3행으로 한 번에 노출
-      - 각 차트는 정상범주 음영 + UCL/LCL 점선 + 중심선 + 실측 마커
+_GRID_TARGET_HEADERS = [("전력", "⚡"), ("연료", "🔥"), ("용수", "💧")]
+
+
+def _grid_cell_html(state: str, label: str, sub: str) -> str:
+    """상태 그리드 셀 1칸 HTML."""
+    spec = _GRID_STATES[state]
+    return (
+        f"<td style='background:{spec['bg']}; border:1px solid {spec['border']}; "
+        f"border-radius:10px; padding:9px 6px; text-align:center; width:28%;'>"
+        f"<div style='font-size:0.85rem; font-weight:700; color:{spec['color']}; line-height:1.3;'>{label}</div>"
+        f"<div style='font-size:0.69rem; color:{_TEXT_MUTED}; margin-top:2px;'>{sub}</div>"
+        f"</td>"
+    )
+
+
+def _render_anomaly_status_grid(base_date: date) -> None:
+    """5개 실공장 × 3개 에너지원 = 15칸 상태 그리드.
+
+    셀 판정 우선순위: 경보(반복 이탈) > 계속 높음/낮음(지속편향) > 주의(단발 이탈) > 정상.
+    통계 용어(CUSUM·잔차 등)는 노출하지 않고 일상어로만 표기.
     """
+    from app.services.v5_common import FACTORY_PHYSICAL_DISPLAY_ORDER
+
+    series_df = _fetch_band_rule_series(base_date)
+    rules = evaluate_band_rules(series_df, base_date, recent_days=ANOMALY_LOOKBACK_DAYS)
+    flags = rules["row_flags"]
+    drifts = {(s["factory"], s["target"]): s for s in rules["drift_signals"]}
+
+    if series_df.empty:
+        st.info(
+            "표시할 판정 데이터가 없습니다. 예측은 매일 자동 실행되므로 "
+            "잠시 후 새로고침하거나 logs/automation/auto_prediction.log 를 확인하세요."
+        )
+        return
+
+    have_data = set(zip(series_df["factory"], series_df["target"]))
+    recent_from = base_date - timedelta(days=ANOMALY_LOOKBACK_DAYS - 1)
+    recent = series_df[pd.to_datetime(series_df["pred_date"]).dt.date >= recent_from]
+
+    head_style = (
+        f"font-size:0.78rem; color:{_TEXT_SECONDARY}; font-weight:600; "
+        f"padding:2px 4px; text-align:center;"
+    )
+    fac_style = (
+        f"font-size:0.84rem; color:{_TEXT_PRIMARY}; font-weight:600; "
+        f"text-align:left; padding:2px 8px 2px 2px; white-space:nowrap; width:12%;"
+    )
+
+    rows_html: list[str] = []
+    header_cells = "".join(
+        f"<th style='{head_style}'>{icon} {t}</th>" for t, icon in _GRID_TARGET_HEADERS
+    )
+    rows_html.append(f"<tr><th></th>{header_cells}</tr>")
+
+    for fac in FACTORY_PHYSICAL_DISPLAY_ORDER:
+        cells: list[str] = []
+        for tgt, _icon in _GRID_TARGET_HEADERS:
+            if (fac, tgt) not in have_data:
+                cells.append(_grid_cell_html("nodata", "—", "예측 없음"))
+                continue
+
+            cell_recent = recent[(recent["factory"] == fac) & (recent["target"] == tgt)]
+            n_out = int(cell_recent["band_status"].isin(["over", "under"]).sum())
+
+            cell_flags = (
+                flags[(flags["factory"] == fac) & (flags["target"] == tgt)]
+                if not flags.empty else flags
+            )
+            n_alert = (
+                int((cell_flags["severity"] == SEVERITY_ALERT).sum())
+                if not cell_flags.empty else 0
+            )
+            drift = drifts.get((fac, tgt))
+
+            if n_alert > 0:
+                cells.append(_grid_cell_html(
+                    "alert", "🚨 경보", f"7일 내 이탈 {n_out}건 반복"
+                ))
+            elif drift is not None:
+                is_over = drift["direction"] == "over"
+                label = "📈 계속 높음" if is_over else "📉 계속 낮음"
+                bias = drift.get("mean_bias_pct")
+                sub = (
+                    f"예측 대비 평균 {bias:+.1f}% · {drift['days']}일째"
+                    if bias is not None else f"{drift['days']}일째 지속"
+                )
+                cells.append(_grid_cell_html("drift", label, sub))
+            elif n_out > 0:
+                cells.append(_grid_cell_html(
+                    "watch", "⚠️ 주의", f"하루 이탈 {n_out}건 (우연 가능)"
+                ))
+            else:
+                cells.append(_grid_cell_html("normal", "✓ 정상", "범위 내"))
+
+        rows_html.append(f"<tr><th style='{fac_style}'>{fac}</th>{''.join(cells)}</tr>")
+
     st.markdown(
-        f"<div style='font-size:0.92rem; font-weight:600; color:{_TEXT_PRIMARY}; margin:8px 0 4px;'>"
-        f"📈 SPC 관리도 — 정상범주 vs 실측 추이"
-        f"</div>",
+        "<table style='width:100%; border-collapse:separate; border-spacing:5px; "
+        "table-layout:fixed; margin:2px 0 4px;'>" + "".join(rows_html) + "</table>",
         unsafe_allow_html=True,
     )
     st.caption(
-        f"통계적 공정 관리(SPC) 방식: 정상범주(P05~P95)를 UCL/LCL로 보고, "
-        f"실측이 통제선 밖이면 ↑(과사용) / ↓(저사용)으로 자동 표시합니다. "
-        f"조회 기간: 최근 {SPC_LOOKBACK_DAYS}일."
+        "🚨 경보 = 같은 방향 이탈 반복(연속 2일 또는 7일 내 3회 이상) · "
+        "📈📉 계속 높음/낮음 = 실측이 AI 예측보다 한쪽으로 계속 치우침 · "
+        "⚠️ 주의 = 하루 단위 이탈(우연 가능) · ✓ 정상 = 정상범위 유지 | 최근 7일 기준"
     )
 
-    # 공장 선택 — 전사(집계) + 실공장 5개.
-    # 집계 공장의 SPC는 _fetch_spc_data 에서 실공장 행을 합산해 동일 스키마로 생성.
-    SPC_FACTORY_OPTIONS = [f for f in FACTORY_OPTIONS if f != "남양주"]
-    sel_col1, sel_col2 = st.columns([0.55, 0.45])
-    with sel_col1:
-        sel_factory = st.selectbox(
-            "공장",
-            options=SPC_FACTORY_OPTIONS,
-            index=0,
-            key="spc_factory_select",
-            label_visibility="collapsed",
-        )
-    with sel_col2:
-        st.markdown(
-            "<div style='font-size:0.75rem; color:#94a3b8; padding-top:6px;'>"
-            "● <span style='color:#10b981;'>정상</span>  "
-            "● <span style='color:#dc2626;'>↑과사용</span>  "
-            "● <span style='color:#f59e0b;'>↓저사용</span>  "
-            "○ <span style='color:#94a3b8;'>v5.1 (밴드없음)</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
 
-    targets = ["전력", "연료", "용수"]
-    any_chart = False
-    for tgt in targets:
-        rendered = _render_spc_chart(sel_factory, tgt, base_date)
-        if rendered:
-            any_chart = True
-        else:
-            st.caption(f"_{sel_factory} · {tgt}: 표시할 예측 이력이 없습니다._")
+def _render_spc_section(base_date: date) -> None:
+    """대시보드 홈의 이상감지 현황 — 15칸 상태 그리드 + 접힌 상세 차트.
 
-    if not any_chart:
-        st.info(
-            "표시할 SPC 데이터가 없습니다. AI 예측 페이지에서 배치 예측을 먼저 실행하면 "
-            "여기에 정상범주와 실측 추이가 시각화됩니다."
-        )
+    홈은 간결하게: 그리드 하나로 전 공장×에너지원 판정을 한눈에 보여주고,
+    정상범주 관리도 차트는 expander 안으로 이동해 필요할 때만 펼쳐 봅니다.
+    """
+    st.markdown(
+        f"<div style='font-size:0.92rem; font-weight:600; color:{_TEXT_PRIMARY}; margin:8px 0 4px;'>"
+        f"📊 공장 × 에너지원 이상감지 현황"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    _render_anomaly_status_grid(base_date)
+
+    # 상세 추이 차트 — 기본 접힘. 그리드에서 이상 칸을 본 뒤 원인 확인용.
+    with st.expander("📈 공장별 상세 추이 차트 (정상범위 vs 실측)", expanded=False):
+        # 공장 선택 — 전사(집계) + 실공장 5개.
+        # 집계 공장의 차트는 _fetch_spc_data 에서 실공장 행을 합산해 동일 스키마로 생성.
+        SPC_FACTORY_OPTIONS = [f for f in FACTORY_OPTIONS if f != "남양주"]
+        sel_col1, sel_col2 = st.columns([0.55, 0.45])
+        with sel_col1:
+            sel_factory = st.selectbox(
+                "공장",
+                options=SPC_FACTORY_OPTIONS,
+                index=0,
+                key="spc_factory_select",
+                label_visibility="collapsed",
+            )
+        with sel_col2:
+            st.markdown(
+                "<div style='font-size:0.75rem; color:#94a3b8; padding-top:6px;'>"
+                "● <span style='color:#10b981;'>정상</span>  "
+                "● <span style='color:#dc2626;'>↑과사용</span>  "
+                "● <span style='color:#f59e0b;'>↓저사용</span>  "
+                "○ <span style='color:#94a3b8;'>v5.1 (밴드없음)</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        targets = ["전력", "연료", "용수"]
+        any_chart = False
+        for tgt in targets:
+            rendered = _render_spc_chart(sel_factory, tgt, base_date)
+            if rendered:
+                any_chart = True
+            else:
+                st.caption(f"_{sel_factory} · {tgt}: 표시할 예측 이력이 없습니다._")
+
+        if not any_chart:
+            st.info(
+                "표시할 차트 데이터가 없습니다. 예측은 매일 자동 실행되므로 "
+                "잠시 후 새로고침해 보세요."
+            )
 
 
 def _render_anomaly_alert(base_date: date):
-    """AI 예측 이상 알림 배너를 대시보드 상단에 렌더링합니다.
+    """AI 예측 이상 알림 배너 — 2단계 판정(경보/주의) + 지속편향(CUSUM).
 
-    v5.2 정성적 이상: 실측이 정상범주(P05~P95) 밖이면 이상으로 분류.
-    'over'(과사용 ↑) / 'under'(저사용 ↓) 를 구분해 노출.
+    P05~P95 는 90% 구간이라 완벽한 모델도 단일일 판정의 ~10%는 밴드를 벗어납니다.
+    그래서 run rule 을 통과한 이탈(연속·빈발)과 CUSUM 지속편향만 '경보'로 올리고,
+    단일일 이탈은 '주의'로 낮춰 알람 피로를 방지합니다 (anomaly_rules_service 참고).
     """
     anomaly_df = _fetch_anomaly_data(base_date)
-    n_anomalies = len(anomaly_df)
+    series_df = _fetch_band_rule_series(base_date)
+    rules = evaluate_band_rules(series_df, base_date, recent_days=ANOMALY_LOOKBACK_DAYS)
+    drift_signals = rules["drift_signals"]
 
-    # over/under 카운트 — v5.2 행만 정확. 폴백된 v5.1 행은 'over'로 본다(SQL이 actual>pred만 통과시킴).
-    if not anomaly_df.empty and "band_status" in anomaly_df.columns:
-        bs_series = anomaly_df["band_status"].fillna("over_legacy")
-        n_over = int((bs_series == "over").sum() + (bs_series == "over_legacy").sum())
-        n_under = int((bs_series == "under").sum())
-    else:
-        n_over = n_anomalies
-        n_under = 0
+    # run rule 판정(severity/rules)을 이상 행에 병합 — 키: (공장, 타겟, 날짜)
+    if not anomaly_df.empty:
+        anomaly_df = anomaly_df.copy()
+        anomaly_df["_date_key"] = pd.to_datetime(anomaly_df["pred_date"]).dt.strftime("%Y-%m-%d")
+        row_flags = rules["row_flags"]
+        if not row_flags.empty:
+            rf = row_flags.copy()
+            rf["_date_key"] = pd.to_datetime(rf["pred_date"]).dt.strftime("%Y-%m-%d")
+            anomaly_df = anomaly_df.merge(
+                rf[["factory", "target", "_date_key", "severity", "rules"]],
+                on=["factory", "target", "_date_key"],
+                how="left",
+            )
+        if "severity" not in anomaly_df.columns:
+            anomaly_df["severity"] = None
+        if "rules" not in anomaly_df.columns:
+            anomaly_df["rules"] = None
+        # 밴드 없는 v5.1 폴백 행 등 규칙 판정 불가 행은 '주의'로 분류
+        anomaly_df["severity"] = anomaly_df["severity"].fillna(SEVERITY_WATCH)
+        anomaly_df["rules"] = anomaly_df["rules"].fillna("")
+        # 경보 먼저, 그 안에서는 기존 정렬(|위치| 내림차순) 유지
+        anomaly_df["_sev_rank"] = (anomaly_df["severity"] != SEVERITY_ALERT).astype(int)
+        anomaly_df = (
+            anomaly_df.sort_values("_sev_rank", kind="stable")
+            .drop(columns=["_sev_rank", "_date_key"])
+            .reset_index(drop=True)
+        )
 
-    if n_anomalies == 0:
+    n_alert = int((anomaly_df["severity"] == SEVERITY_ALERT).sum()) if not anomaly_df.empty else 0
+    n_watch = int(len(anomaly_df)) - n_alert if not anomaly_df.empty else 0
+    n_drift = len(drift_signals)
+
+    if n_alert == 0 and n_drift == 0 and n_watch == 0:
         # 정상 상태 배너
         st.markdown(f"""
         <div style="
@@ -657,20 +870,26 @@ def _render_anomaly_alert(base_date: date):
             <div>
                 <div style="color: #10b981; font-weight: 700; font-size: 0.92rem;">AI 이상감지: 정상</div>
                 <div style="color: {_TEXT_SECONDARY}; font-size: 0.78rem;">
-                    최근 {ANOMALY_LOOKBACK_DAYS}일간 실측값이 모델 정상범주(P05~P95) 안에 머물렀습니다.
+                    최근 {ANOMALY_LOOKBACK_DAYS}일간 실측값이 모델 정상범주(P05~P95) 안에 머물렀고,
+                    지속편향(CUSUM) 신호도 없습니다.
                 </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
-    else:
-        # 이상 감지 경고 배너 — over/under 구분
-        breakdown_parts = []
-        if n_over > 0:
-            breakdown_parts.append(f"<span style='color:#ef4444;font-weight:700;'>과사용 ↑ {n_over}건</span>")
-        if n_under > 0:
-            breakdown_parts.append(f"<span style='color:#f59e0b;font-weight:700;'>저사용 ↓ {n_under}건</span>")
-        breakdown_html = " · ".join(breakdown_parts) if breakdown_parts else f"{n_anomalies}건"
+        return
 
+    if n_alert > 0 or n_drift > 0:
+        # ── 경보 배너 (빨강): run rule 확인 이탈 또는 지속편향 ──
+        title_parts = []
+        if n_alert > 0:
+            title_parts.append(f"반복 이탈 {n_alert}건")
+        if n_drift > 0:
+            title_parts.append(f"계속 높음/낮음 {n_drift}건")
+        title_text = " · ".join(title_parts)
+        watch_suffix = (
+            f" <span style='color:#f59e0b;font-weight:600;'>(그 외 주의 {n_watch}건)</span>"
+            if n_watch > 0 else ""
+        )
         st.markdown(f"""
         <div style="
             background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(239, 68, 68, 0.05) 100%);
@@ -692,23 +911,83 @@ def _render_anomaly_alert(base_date: date):
             ">🚨</div>
             <div style="flex: 1;">
                 <div style="color: #ef4444; font-weight: 700; font-size: 0.92rem;">
-                    AI 이상감지: 정상범주 이탈 {n_anomalies}건 ({breakdown_html})
+                    AI 이상감지: 경보 — {title_text}{watch_suffix}
                 </div>
                 <div style="color: {_TEXT_SECONDARY}; font-size: 0.78rem;">
-                    최근 {ANOMALY_LOOKBACK_DAYS}일간 실측이 모델이 학습한 정상범주(P05~P95) 밖으로 벗어난 항목입니다.
+                    우연으로 보기 어려운 패턴입니다 — 같은 방향 이탈이
+                    연속 {CONSECUTIVE_RUN_MIN}영업일 이상 / {ANOMALY_LOOKBACK_DAYS}일 내
+                    {FREQUENT_COUNT_MIN}회 이상 반복되거나, 실측이 AI 예측보다 계속 높거나 낮게 유지되고 있습니다.
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # ── 주의 배너 (주황): 단일일 이탈만 — 통계적 우연 가능 ──
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.10) 0%, rgba(245, 158, 11, 0.04) 100%);
+            border: 1px solid rgba(245, 158, 11, 0.40);
+            border-radius: 10px;
+            padding: 12px 20px;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        ">
+            <div style="
+                width: 36px; height: 36px;
+                background: rgba(245, 158, 11, 0.15);
+                border-radius: 50%;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 1.1rem;
+            ">⚠️</div>
+            <div style="flex: 1;">
+                <div style="color: #f59e0b; font-weight: 700; font-size: 0.92rem;">
+                    AI 이상감지: 주의 {n_watch}건 (경보 없음)
+                </div>
+                <div style="color: {_TEXT_SECONDARY}; font-size: 0.78rem;">
+                    하루 단위 이탈입니다. 정상범위는 통계 구간이라 하루쯤은 우연히 벗어날 수
+                    있으며, 같은 방향 이탈이 반복되면 경보로 올라갑니다.
                 </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        # 상세 항목을 expander로 표시 — 행마다 [🔍 AI 진단] 버튼
-        with st.expander(f"🔍 이상 감지 상세 ({n_anomalies}건)", expanded=False):
-            _render_anomaly_detail_table(anomaly_df)
-            st.caption(
-                "※ 판정 기준: 실측이 정상범주 [P05, P95] 밖이면 이상 | "
-                f"조회 기간: 최근 {ANOMALY_LOOKBACK_DAYS}일 | "
-                "위치(±) = (실측−P50)/(밴드폭/2), |위치|≥1 = 밴드 경계 초과"
+    # 상세 항목을 expander로 표시 — 지속편향 신호 + 행별 [🔍 AI 진단] 버튼
+    expander_label = f"🔍 이상 감지 상세 (경보 {n_alert} · 주의 {n_watch} · 계속 높음/낮음 {n_drift})"
+    with st.expander(expander_label, expanded=(n_alert + n_drift > 0)):
+        if drift_signals:
+            for sig in drift_signals:
+                is_over = sig["direction"] == "over"
+                dir_ko = "계속 높음 📈" if is_over else "계속 낮음 📉"
+                sig_color = "#ef4444" if is_over else "#f59e0b"
+                bias_txt = (
+                    f" · AI 예측 대비 평균 {sig['mean_bias_pct']:+.1f}%"
+                    if sig.get("mean_bias_pct") is not None else ""
+                )
+                st.markdown(
+                    f"<div style='font-size:0.85rem; padding:4px 0; color:{_TEXT_PRIMARY};'>"
+                    f"<b>{sig['factory']} · {sig['target']}</b> "
+                    f"<span style='color:{sig_color}; font-weight:700;'>{dir_ko}</span>"
+                    f" — {sig['start_date'].strftime('%m/%d')}부터 {sig['days']}영업일째"
+                    f"{bias_txt}"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            st.markdown(
+                f"<div style='height:1px; background:{_BORDER_COLOR}; margin:6px 0 10px;'></div>",
+                unsafe_allow_html=True,
             )
+        if not anomaly_df.empty:
+            _render_anomaly_detail_table(anomaly_df)
+        st.caption(
+            f"※ 경보 = 같은 방향 이탈이 연속 {CONSECUTIVE_RUN_MIN}영업일 이상 또는 "
+            f"{ANOMALY_LOOKBACK_DAYS}일 내 {FREQUENT_COUNT_MIN}회 이상 반복 · "
+            "계속 높음/낮음 = 실측이 AI 예측보다 한쪽으로 계속 치우침 | "
+            "주의 = 하루 단위 정상범위 이탈(우연 가능) | "
+            f"조회 기간: 최근 {ANOMALY_LOOKBACK_DAYS}일 | "
+            "위치 = 정상범위 중심에서 벗어난 정도 (±1 = 범위 가장자리)"
+        )
 
 
 # ──────────────────────────────────────
@@ -723,11 +1002,12 @@ def _diag_session_key(factory: str, pred_date_str: str, target: str) -> str:
 def _render_anomaly_detail_table(anomaly_df: pd.DataFrame) -> None:
     """이상감지 상세 — 헤더 + 행별 컴포넌트(분석 버튼 포함).
 
-    v5.2 컬럼: 날짜 / 공장 / 항목 / 정상범위 [P05~P95] / 실측 / 상태(↑/↓) / 위치 / 진단
+    v5.2 컬럼: 날짜 / 공장 / 항목 / 정상범위 [P05~P95] / 실측 / 상태(↑/↓) / 위치 / 판정 / 진단
+    판정: run rule 통과 여부 — 경보(연속·빈발 이탈) vs 주의(단일일 이탈).
     v5.1 폴백: 정상범위는 '—'로 표시.
     """
     # ── 헤더 행 ──
-    col_widths = [0.6, 0.8, 0.6, 1.4, 1.0, 0.9, 0.7, 0.8]
+    col_widths = [0.6, 0.7, 0.6, 1.3, 1.0, 0.8, 0.6, 1.2, 0.8]
     header_cols = st.columns(col_widths)
     header_style = (
         f"color:{_TEXT_SECONDARY}; font-size:0.78rem; font-weight:600; "
@@ -735,7 +1015,7 @@ def _render_anomaly_detail_table(anomaly_df: pd.DataFrame) -> None:
         f"border-bottom:1px solid {_BORDER_COLOR};"
     )
     for i, label in enumerate(
-        ["날짜", "공장", "항목", "정상범위 [P05~P95]", "실측값", "상태", "위치", "AI 진단"]
+        ["날짜", "공장", "항목", "정상범위 [P05~P95]", "실측값", "상태", "위치", "판정", "AI 진단"]
     ):
         with header_cols[i]:
             st.markdown(
@@ -789,6 +1069,20 @@ def _render_anomaly_detail_table(anomaly_df: pd.DataFrame) -> None:
         else:
             band_text = "—"
 
+        # 판정 (경보/주의) — _render_anomaly_alert 에서 병합된 severity/rules
+        severity = row.get("severity") if "severity" in anomaly_df.columns else None
+        rules_text = str(row.get("rules") or "") if "rules" in anomaly_df.columns else ""
+        if severity == SEVERITY_ALERT:
+            sev_html = (
+                "<span style='color:#ef4444; font-weight:700;'>🚨 경보</span>"
+                + (
+                    f"<br><span style='color:{_TEXT_MUTED}; font-size:0.72rem;'>{rules_text}</span>"
+                    if rules_text else ""
+                )
+            )
+        else:
+            sev_html = "<span style='color:#f59e0b; font-weight:600;'>⚠ 주의</span>"
+
         cell_style = (
             f"font-size:0.85rem; padding:8px 0; text-align:center; "
             f"color:{_TEXT_PRIMARY}; border-bottom:1px solid {_BORDER_COLOR};"
@@ -816,8 +1110,10 @@ def _render_anomaly_detail_table(anomaly_df: pd.DataFrame) -> None:
                 f"<div style='{num_style}'><span style='color:{pos_color}; font-weight:700;'>{pos_text}</span></div>",
                 unsafe_allow_html=True,
             )
-        sess_key = _diag_session_key(factory, pred_date_str, target)
         with cols[7]:
+            st.markdown(f"<div style='{cell_style}'>{sev_html}</div>", unsafe_allow_html=True)
+        sess_key = _diag_session_key(factory, pred_date_str, target)
+        with cols[8]:
             # 캐시 존재 시에는 다른 라벨 노출 — 무료(캐시) vs LLM 호출 명시
             cached = get_cached_diagnosis(factory, pred_date_str, target)
             btn_label = "📂 보기" if cached else "🔍 분석"
@@ -1086,20 +1382,18 @@ def _date_label(date_str: str) -> str:
 
 # trend chart 화면을 구성합니다.
 def render_trend_chart(base_date: str):
-    # mix-ton / 원단위는 사내 표준 용어지만 외부·신규 사용자에게는 낯설 수 있어 hover 도움말 제공.
-    intensity_help = (
-        "원단위(Intensity) = 사용량 / 생산량. "
-        "예: 전력 원단위 [kWh/mix-ton] = 전력 사용량(kWh) ÷ 믹스 생산량(ton). "
-        "낮을수록 같은 양을 만들 때 에너지를 적게 쓰는 효율적 운영을 의미합니다. "
+    usage_help = (
+        "각 선은 최근 7일 중앙값을 100으로 둔 지수입니다. "
+        "생산량과 사용량의 증감 방향이 반대로 움직인 날짜를 마커로 강조합니다."
     )
     st.markdown(f"""
-    <div class="section-header" title="{intensity_help}">
+    <div class="section-header" title="{usage_help}">
         <span class="section-icon">📈</span>
-        7일간 생산량 · 원단위 추이 ⓘ
+        7일간 생산량 · 사용량 방향 비교 ⓘ
     </div>
     """, unsafe_allow_html=True)
 
-    # ── 컨트롤 행: 사업장 선택 + 데이터 값 표시 토글 ──
+    # ── 컨트롤 행: 사업장 선택 + 지수 값 표시 토글 ──
     ctrl_factory_label, ctrl_factory, ctrl_show_val = st.columns([1, 3.2, 0.8])
     with ctrl_factory_label:
         st.markdown(
@@ -1119,7 +1413,7 @@ def render_trend_chart(base_date: str):
     with ctrl_show_val:
         persist("trend_show_values")
         show_trend_values = st.checkbox(
-            "데이터 값 표시", value=False, key="trend_show_values"
+            "지수 값 표시", value=False, key="trend_show_values"
         )
 
     trend_df = get_7day_trend(base_date, factory=selected_factory)
@@ -1149,28 +1443,29 @@ def render_trend_chart(base_date: str):
 
     x_labels = [_date_label(d) for d in trend_df["date"]]
     prod_vals = trend_df["mix_prod_kg"].tolist()
-    
+    prod_idx, prod_base = _median_index(prod_vals)
+    prod_change = _change_pct(prod_vals)
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    unit_keys = list(UNIT_OPTIONS.keys())
-    
+    usage_keys = list(TREND_USAGE_OPTIONS.keys())
+
     for row_idx in range(2):
         cols = st.columns(2)
         for col_idx in range(2):
             idx = row_idx * 2 + col_idx
-            unit_label = unit_keys[idx]
-            selected_col = UNIT_OPTIONS[unit_label]
-            unit_color = UNIT_COLORS[selected_col]
+            usage_axis_label = usage_keys[idx]
+            selected_col = TREND_USAGE_OPTIONS[usage_axis_label]
+            usage_color = TREND_USAGE_COLORS[selected_col]
+            usage_label, energy_target = TREND_USAGE_INFO[selected_col]
 
             with cols[col_idx]:
                 # ── 차트 헤더: 에너지원 라벨 ──
-                # 빨간 박스 위치(차트 좌상단)에 어느 에너지원의 추이인지 한눈에 보이도록
-                # 아이콘 + 한글 제목 + (단위) 를 표시. 색상은 차트 라인 색과 일치시켜
+                # 차트 좌상단에 어느 에너지원의 사용량 추이인지 한눈에 보이도록
+                # 아이콘 + 한글 제목 + 단위를 표시. 색상은 차트 라인 색과 일치시켜
                 # 4개 차트가 시각적으로도 구분되도록 함.
-                _h_icon, _h_name = UNIT_HEADERS[selected_col]
-                _h_unit = unit_label.split("[", 1)[1].rstrip("]") if "[" in unit_label else ""
-                # 단위가 없는 지표(폐수/용수 비)는 빈 대괄호([])를 표시하지 않는다.
+                _h_icon, _h_name = TREND_USAGE_HEADERS[selected_col]
+                _h_unit = usage_axis_label.split("[", 1)[1].rstrip("]") if "[" in usage_axis_label else ""
                 _h_unit_html = (
                     f'<span style="font-size:0.75rem; color:{_TEXT_SECONDARY}; '
                     f'font-weight:500;">[{_h_unit}]</span>' if _h_unit else ""
@@ -1179,8 +1474,8 @@ def render_trend_chart(base_date: str):
                     f"""
                     <div style="display:inline-flex; align-items:center; gap:8px;
                                 padding:6px 14px; margin:0 0 6px 4px;
-                                background: {unit_color}1A;
-                                border-left: 3px solid {unit_color};
+                                background: {usage_color}1A;
+                                border-left: 3px solid {usage_color};
                                 border-radius: 6px;">
                         <span style="font-size:1.0rem;">{_h_icon}</span>
                         <span style="font-size:0.95rem; font-weight:700;
@@ -1191,48 +1486,109 @@ def render_trend_chart(base_date: str):
                     unsafe_allow_html=True,
                 )
 
+                usage_vals = trend_df[selected_col].tolist()
+                usage_idx, usage_base = _median_index(usage_vals)
+                usage_change = _change_pct(usage_vals)
+                direction_rows = _direction_rows(prod_vals, usage_vals, prod_base, usage_base)
+
+                prod_hover = [
+                    [_fmt_trend_value(v), _fmt_change_pct(ch)]
+                    for v, ch in zip(prod_vals, prod_change)
+                ]
+                usage_hover = [
+                    [_fmt_trend_value(v), _fmt_change_pct(ch)]
+                    for v, ch in zip(usage_vals, usage_change)
+                ]
+
                 fig = go.Figure()
 
-                # 좌축: 생산량
                 prod_mode = "lines+markers+text" if show_trend_values else "lines+markers"
                 fig.add_trace(go.Scatter(
                     x=x_labels,
-                    y=prod_vals,
-                    name="믹스량[kg]",
+                    y=prod_idx,
+                    name="믹스량 지수",
                     mode=prod_mode,
-                    line=dict(color=PROD_COLOR, width=2),
+                    line=dict(color=PROD_COLOR, width=2.4),
                     marker=dict(size=7, color=PROD_COLOR),
-                    text=[f"{v:,.0f}" if v is not None and v > 0 else "" for v in prod_vals] if show_trend_values else None,
+                    text=[_fmt_index(v) for v in prod_idx] if show_trend_values else None,
                     textposition="bottom center",
-                    textfont=dict(size=15, color=PROD_COLOR),
+                    textfont=dict(size=13, color=PROD_COLOR),
+                    customdata=prod_hover,
+                    hovertemplate=(
+                        "%{x}<br>믹스량 지수: %{y:.1f}"
+                        "<br>실제: %{customdata[0]} kg"
+                        "<br>전일 대비: %{customdata[1]}<extra></extra>"
+                    ),
                     connectgaps=True,
-                    yaxis="y1",
                 ))
 
-                # 우축: 원단위 (폐수/용수 비는 소수점 2자리로 표시)
-                short_legend = unit_label.replace(" 원단위 [", "원단위[")
-                unit_vals = trend_df[selected_col].tolist()
-                _val_dec = 2 if selected_col == "wastewater_ratio" else 1
-                unit_mode = "lines+markers+text" if show_trend_values else "lines+markers"
+                usage_mode = "lines+markers+text" if show_trend_values else "lines+markers"
                 fig.add_trace(go.Scatter(
                     x=x_labels,
-                    y=unit_vals,
-                    name=short_legend,
-                    mode=unit_mode,
-                    line=dict(color=unit_color, width=2.5),
-                    marker=dict(size=7, color=unit_color),
-                    text=[f"{v:.{_val_dec}f}" if v is not None else "" for v in unit_vals] if show_trend_values else None,
+                    y=usage_idx,
+                    name=f"{_h_name} 지수",
+                    mode=usage_mode,
+                    line=dict(color=usage_color, width=2.6),
+                    marker=dict(size=7, color=usage_color),
+                    text=[_fmt_index(v) for v in usage_idx] if show_trend_values else None,
                     textposition="top center",
-                    textfont=dict(size=15, color=unit_color),
+                    textfont=dict(size=13, color=usage_color),
+                    customdata=usage_hover,
+                    hovertemplate=(
+                        f"%{{x}}<br>{_h_name} 지수: %{{y:.1f}}"
+                        f"<br>실제: %{{customdata[0]}} {_h_unit}"
+                        "<br>전일 대비: %{customdata[1]}<extra></extra>"
+                    ),
                     connectgaps=True,
-                    yaxis="y2",
                 ))
+
+                signal_points = {
+                    "good": {"x": [], "y": [], "text": [], "hover": []},
+                    "warn": {"x": [], "y": [], "text": [], "hover": []},
+                }
+                for i, row in enumerate(direction_rows):
+                    tone = row["tone"]
+                    if tone not in signal_points:
+                        continue
+                    y_candidates = [v for v in (prod_idx[i], usage_idx[i]) if v is not None]
+                    marker_y = (max(y_candidates) if y_candidates else 100) + 7
+                    signal_points[tone]["x"].append(x_labels[i])
+                    signal_points[tone]["y"].append(marker_y)
+                    signal_points[tone]["text"].append(row["label"])
+                    signal_points[tone]["hover"].append(
+                        f"{x_labels[i]}<br>{row['label']}"
+                        f"<br>생산량 전일 대비: {_fmt_change_pct(prod_change[i])}"
+                        f"<br>{_h_name} 전일 대비: {_fmt_change_pct(usage_change[i])}"
+                    )
+
+                for tone, cfg in {
+                    "good": ("생산↑ 사용↓", "#3b82f6"),
+                    "warn": ("생산↓ 사용↑", "#ef4444"),
+                }.items():
+                    pts = signal_points[tone]
+                    if not pts["x"]:
+                        continue
+                    fig.add_trace(go.Scatter(
+                        x=pts["x"],
+                        y=pts["y"],
+                        mode="markers+text",
+                        name=cfg[0],
+                        marker=dict(
+                            symbol="diamond",
+                            size=13,
+                            color=cfg[1],
+                            line=dict(color="white", width=1.2),
+                        ),
+                        text=pts["text"],
+                        textposition="top center",
+                        textfont=dict(size=12, color=cfg[1]),
+                        customdata=pts["hover"],
+                        hovertemplate="%{customdata}<extra></extra>",
+                    ))
 
                 # ── 이벤트 메모 마커 (해당 에너지원 + 같은 기간/공장에 등록된 메모) ──
                 # 실무자가 차트 스파이크 발생 시 남긴 원인/조치 기록을 시각적으로 표시.
                 from app.services.event_annotation_service import list_events_for_chart as _list_evt
-                # 폐수/용수 비 차트의 이벤트 메모는 폐수(wastewater) 타깃과 연결.
-                energy_target = "wastewater" if selected_col == "wastewater_ratio" else selected_col.replace("_per_ton", "")
                 _date_strs = pd.to_datetime(trend_df["date"]).dt.strftime("%Y-%m-%d").tolist()
                 if _date_strs:
                     _ev_df = _list_evt(
@@ -1243,13 +1599,13 @@ def render_trend_chart(base_date: str):
                     )
                     if not _ev_df.empty:
                         _date_to_label = {d: x_labels[i] for i, d in enumerate(_date_strs)}
-                        _date_to_unit = {d: unit_vals[i] for i, d in enumerate(_date_strs)}
+                        _date_to_usage_idx = {d: usage_idx[i] for i, d in enumerate(_date_strs)}
                         ev_x: list = []; ev_y: list = []; ev_text: list = []
                         for _, _r in _ev_df.iterrows():
                             _d = pd.to_datetime(_r["event_date"]).strftime("%Y-%m-%d")
                             if _d not in _date_to_label:
                                 continue
-                            _event_y = _date_to_unit.get(_d)
+                            _event_y = _date_to_usage_idx.get(_d)
                             if _event_y is None or pd.isna(_event_y):
                                 continue
                             ev_x.append(_date_to_label[_d])
@@ -1267,68 +1623,166 @@ def render_trend_chart(base_date: str):
                                 name="이벤트 메모",
                                 hovertemplate="%{text}<extra></extra>",
                                 text=ev_text,
-                                yaxis="y2",
                                 showlegend=True,
                             ))
 
+                y_values = [v for v in [*prod_idx, *usage_idx] if v is not None]
+                signal_y_values = [
+                    y for tone in signal_points.values() for y in tone["y"] if y is not None
+                ]
+                all_y_values = [*y_values, *signal_y_values]
+                if all_y_values:
+                    y_min = max(0, min(all_y_values) - 15)
+                    y_max = max(all_y_values) + 20
+                    if y_max - y_min < 40:
+                        y_min = max(0, y_min - 10)
+                        y_max += 10
+                    y_range = [y_min, y_max]
+                else:
+                    y_range = None
 
                 fig.update_layout(
                     **DARK_CHART,
-                    height=260, # 공간 최적화를 위해 높이 축소
-                    margin=dict(l=40, r=40, t=20, b=40), # 불필요한 여백 최소화
+                    height=285,
+                    margin=dict(l=44, r=20, t=20, b=50),
                     legend=dict(
                         orientation="h", y=-0.25, x=0.5, xanchor="center",
-                        font=dict(size=16),
+                        font=dict(size=15),
                     ),
                     xaxis=dict(
                         gridcolor=_GRID_COLOR,
                         tickfont=dict(size=15, color=_FONT_COLOR),
                     ),
                     yaxis=dict(
-                        tickfont=dict(color=_FONT_COLOR, size=15),
+                        title=dict(text="지수 (7일 중앙값=100)", font=dict(size=12, color=_TEXT_SECONDARY)),
+                        tickfont=dict(color=_FONT_COLOR, size=14),
                         gridcolor=_GRID_COLOR,
-                        tickformat="~s",
-                    ),
-                    yaxis2=dict(
-                        tickfont=dict(color=unit_color, size=15),
-                        overlaying="y",
-                        side="right",
-                        gridcolor="rgba(0,0,0,0)",
-                        tickformat=f".{_val_dec}f",
+                        zeroline=False,
+                        range=y_range,
                     ),
                 )
 
                 st.plotly_chart(fig, use_container_width=True, key=f"trend_{selected_col}")
 
                 # ── 데이터 테이블 상세보기 토글 ──
-                usage_col, usage_label, unit_long = UNIT_USAGE_INFO.get(
-                    selected_col, (None, None, unit_label)
-                )
                 with st.expander("📄 데이터 테이블 상세보기", expanded=False):
-                    tbl_cols = ["date", "mix_prod_kg"]
-                    rename_map = {"date": "날짜", "mix_prod_kg": "믹스 생산량 (kg)"}
-                    if usage_col and usage_col in trend_df.columns:
-                        tbl_cols.append(usage_col)
-                        rename_map[usage_col] = usage_label
-                    tbl_cols.append(selected_col)
-                    rename_map[selected_col] = unit_long
+                    tbl_cols = ["date", "mix_prod_kg", selected_col]
+                    rename_map = {
+                        "date": "날짜",
+                        "mix_prod_kg": "믹스 생산량 (kg)",
+                        selected_col: usage_label,
+                    }
                     tbl_df = trend_df[tbl_cols].copy().rename(columns=rename_map)
                     tbl_df["날짜"] = pd.to_datetime(tbl_df["날짜"]).dt.strftime("%Y-%m-%d")
+                    tbl_df["믹스 생산량 지수"] = prod_idx
+                    tbl_df[f"{usage_label} 지수"] = usage_idx
+                    tbl_df["생산량 전일대비"] = [_fmt_change_pct(v) for v in prod_change]
+                    tbl_df["사용량 전일대비"] = [_fmt_change_pct(v) for v in usage_change]
+                    tbl_df["비교 신호"] = [r["label"] for r in direction_rows]
                     st.dataframe(
                         tbl_df,
                         use_container_width=True,
                         hide_index=True,
                         column_config={
                             "믹스 생산량 (kg)": st.column_config.NumberColumn(format="%,.0f"),
-                            **(
-                                {usage_label: st.column_config.NumberColumn(format="%,.0f")}
-                                if usage_col else {}
-                            ),
-                            unit_long: st.column_config.NumberColumn(format="%,.2f"),
+                            usage_label: st.column_config.NumberColumn(format="%,.0f"),
+                            "믹스 생산량 지수": st.column_config.NumberColumn(format="%.1f"),
+                            f"{usage_label} 지수": st.column_config.NumberColumn(format="%.1f"),
                         },
                     )
 
 
+
+def _clean_number(v):
+    if v is None or pd.isna(v):
+        return None
+    return float(v)
+
+
+def _fmt_trend_value(v) -> str:
+    v = _clean_number(v)
+    if v is None:
+        return "-"
+    return f"{v:,.0f}"
+
+
+def _fmt_index(v) -> str:
+    if v is None or pd.isna(v):
+        return ""
+    return f"{v:.0f}"
+
+
+def _fmt_change_pct(v) -> str:
+    if v is None or pd.isna(v):
+        return "-"
+    return f"{v:+.1f}%"
+
+
+def _median_index(values: list):
+    nums = []
+    for v in values:
+        fv = _clean_number(v)
+        if fv is not None and abs(fv) > 1e-9:
+            nums.append(fv)
+    if not nums:
+        return [None for _ in values], None
+    base = float(pd.Series(nums).median())
+    if abs(base) <= 1e-9:
+        return [None for _ in values], None
+    indexed = []
+    for v in values:
+        fv = _clean_number(v)
+        indexed.append((fv / base) * 100 if fv is not None else None)
+    return indexed, base
+
+
+def _change_pct(values: list):
+    changes = [None]
+    for i in range(1, len(values)):
+        prev = _clean_number(values[i - 1])
+        curr = _clean_number(values[i])
+        if prev is None or curr is None or abs(prev) <= 1e-9:
+            changes.append(None)
+        else:
+            changes.append(((curr - prev) / abs(prev)) * 100)
+    return changes
+
+
+def _trend_direction(curr, prev, base) -> int:
+    curr = _clean_number(curr)
+    prev = _clean_number(prev)
+    if curr is None or prev is None or base is None:
+        return 0
+    diff = curr - prev
+    # 7일 중앙값의 1% 이하는 작은 흔들림으로 보고 신호에서 제외한다.
+    threshold = max(abs(base) * 0.01, 1e-9)
+    if diff > threshold:
+        return 1
+    if diff < -threshold:
+        return -1
+    return 0
+
+
+def _direction_rows(prod_values: list, usage_values: list, prod_base, usage_base):
+    rows = [{"label": "기준", "tone": None}]
+    for i in range(1, len(prod_values)):
+        p_dir = _trend_direction(prod_values[i], prod_values[i - 1], prod_base)
+        u_dir = _trend_direction(usage_values[i], usage_values[i - 1], usage_base)
+        if p_dir > 0 and u_dir < 0:
+            rows.append({"label": "생산↑ 사용↓", "tone": "good"})
+        elif p_dir < 0 and u_dir > 0:
+            rows.append({"label": "생산↓ 사용↑", "tone": "warn"})
+        elif p_dir > 0 and u_dir > 0:
+            rows.append({"label": "동반 증가", "tone": None})
+        elif p_dir < 0 and u_dir < 0:
+            rows.append({"label": "동반 감소", "tone": None})
+        elif p_dir == 0 and u_dir == 0:
+            rows.append({"label": "변화 작음", "tone": None})
+        elif p_dir == 0:
+            rows.append({"label": "생산 유지", "tone": None})
+        else:
+            rows.append({"label": "사용 유지", "tone": None})
+    return rows
 
 # ──────────────────────────────────────
 # 섹션 2: 월간 원단위 전년비 절감 현황 차트
@@ -1711,6 +2165,119 @@ def _resolve_compare_mode(compare_mode: str):
     return ("당해누계", "전년동기비", "전년동기", "전년 동기 대비")
 
 
+# 공장별 전년비 그리드 열 정의
+# (source_df, 구분 라벨, 표시명, 아이콘, 단위, 높을수록 좋은 지표 여부)
+_UNIT_GRID_DEFS = [
+    ("usage", "믹스 생산량\n[ton]", "생산량", "🍦", "ton", True),
+    ("unit", "전력 원단위\n[kWh/mix-ton]", "전력", "⚡", "kWh/mix-ton", False),
+    ("unit", "연료 원단위\n[Nm³/mix-ton]", "연료", "🔥", "Nm³/mix-ton", False),
+    ("unit", "용수 원단위\n[ton/mix-ton]", "용수", "💧", "ton/mix-ton", False),
+    ("unit", "폐수/용수", "용폐수비", "🚿", "폐수/용수", False),
+]
+
+
+def _render_unit_yoy_grid(unit_df: pd.DataFrame, usage_df: pd.DataFrame, cmp_curr: str,
+                          cmp_ratio: str, cmp_label: str) -> None:
+    """5개 실공장 × 5개 핵심 지표 전년비 그리드.
+
+    비교 기준 라디오(MTD/YTD)와 연동 — 선택된 기간의 전년비로 색상 표시.
+    원단위/용폐수비는 낮을수록 좋고, 생산량은 높을수록 좋음.
+    """
+    from app.services.v5_common import FACTORY_PHYSICAL_DISPLAY_ORDER
+
+    if (unit_df is None or unit_df.empty) and (usage_df is None or usage_df.empty):
+        return
+
+    head_style = (
+        f"font-size:1.0rem; color:{_TEXT_PRIMARY}; font-weight:700; "
+        f"padding:2px 3px; text-align:center; white-space:nowrap;"
+    )
+    fac_style = (
+        f"font-size:1.0rem; color:{_TEXT_PRIMARY}; font-weight:600; "
+        f"text-align:center; padding:2px 8px 2px 2px; white-space:nowrap; width:12%;"
+    )
+
+    def _is_missing(value) -> bool:
+        return value is None or pd.isna(value)
+
+    def _format_curr(curr, unit_text: str, higher_is_better: bool) -> tuple[str, str]:
+        if _is_missing(curr):
+            return "—", unit_text
+        if unit_text == "폐수/용수":
+            return f"{float(curr):,.2f}", unit_text
+        if higher_is_better:
+            return f"{float(curr):,.0f}", unit_text
+        return f"{float(curr):,.1f}", unit_text
+
+    def _cell(ratio, curr, unit_text: str, higher_is_better: bool) -> str:
+        if _is_missing(ratio):
+            return (
+                f"<td style='background:transparent; border:1px solid rgba(122,164,224,0.15); "
+                f"border-radius:10px; padding:8px 4px; text-align:center; width:17.6%;'>"
+                f"<div style='font-size:0.85rem; font-weight:700; color:{_TEXT_SECONDARY};'>—</div>"
+                f"<div style='font-size:0.68rem; color:{_TEXT_SECONDARY}; margin-top:2px;'>데이터 없음</div>"
+                f"</td>"
+            )
+        change_pct = (float(ratio) - 1.0) * 100.0
+        improved = change_pct >= 0 if higher_is_better else change_pct < 0
+        color = "#3b82f6" if improved else "#ef4444"
+        bg = "rgba(59,130,246,0.10)" if improved else "rgba(239,68,68,0.10)"
+        border = "rgba(59,130,246,0.38)" if improved else "rgba(239,68,68,0.38)"
+        arrow = "↑" if change_pct >= 0 else "↓"
+        curr_value, curr_unit = _format_curr(curr, unit_text, higher_is_better)
+        return (
+            f"<td style='background:{bg}; border:1px solid {border}; "
+            f"border-radius:10px; padding:8px 4px; text-align:center; width:17.6%;'>"
+            f"<div style='font-size:0.88rem; font-weight:700; color:{color}; "
+            f"font-variant-numeric:tabular-nums;'>{arrow} {abs(change_pct):.1f}%</div>"
+            f"<div style='font-size:1.0rem; color:#dbeafe; font-weight:650; "
+            f"font-variant-numeric:tabular-nums; margin-top:2px; white-space:nowrap;'>{curr_value}</div>"
+            f"<div style='font-size:0.72rem; color:#bcd2f5; font-weight:600; "
+            f"margin-top:1px; white-space:nowrap;'>{curr_unit}</div>"
+            f"</td>"
+        )
+
+    rows_html: list[str] = []
+    header_cells = "".join(
+        f"<th style='{head_style}'>{icon} {name}</th>"
+        for _src, _lbl, name, icon, _u, _higher in _UNIT_GRID_DEFS
+    )
+    rows_html.append(f"<tr><th></th>{header_cells}</tr>")
+
+    for fac in FACTORY_PHYSICAL_DISPLAY_ORDER:
+        cells: list[str] = []
+        for source, unit_label, _name, _icon, unit_text, higher_is_better in _UNIT_GRID_DEFS:
+            df = usage_df if source == "usage" else unit_df
+            sub = (
+                df[(df["구분"] == unit_label) & (df["공장"] == fac)]
+                if df is not None and not df.empty
+                else pd.DataFrame()
+            )
+            if sub.empty:
+                cells.append(_cell(None, None, unit_text, higher_is_better))
+                continue
+            r = sub.iloc[0]
+            cells.append(_cell(r.get(cmp_ratio), r.get(cmp_curr), unit_text, higher_is_better))
+        rows_html.append(f"<tr><th style='{fac_style}'>{fac}</th>{''.join(cells)}</tr>")
+
+    st.markdown(
+        f"<div style='font-size:0.88rem; font-weight:600; color:{_TEXT_PRIMARY}; margin:14px 0 2px;'>"
+        f"🏭 공장 × 주요 지표 — {cmp_label}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<table style='width:100%; border-collapse:separate; border-spacing:5px; "
+        "table-layout:fixed; margin:2px 0 4px;'>" + "".join(rows_html) + "</table>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "전력·연료·용수 원단위와 용폐수비는 낮을수록, 생산량은 높을수록 좋습니다 — "
+        "파랑 = 전년보다 개선 · 빨강 = 악화. "
+        "상단 비교 기준(MTD/YTD) 선택에 따라 함께 바뀝니다."
+    )
+
+
 def _render_kpi_summary_top(
     unit_df: pd.DataFrame,
     usage_df: pd.DataFrame,
@@ -1740,6 +2307,9 @@ def _render_kpi_summary_top(
 
     # KPI 요약 카드 (전체 너비) — 목표 대비 달성 현황을 한눈에
     _render_kpi_cards(unit_df, usage_df, cmp_curr, cmp_ratio, cmp_prev, cmp_label, base_date_str)
+
+    # 공장 × 주요 지표 전년비 그리드 — 위 라디오(MTD/YTD)와 동일 기준으로 연동
+    _render_unit_yoy_grid(unit_df, usage_df, cmp_curr, cmp_ratio, cmp_label)
 
     # 컨테이너 하단 보더가 카드 위로 올라오는 시각적 컷오프 방지용 spacer.
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
@@ -2088,7 +2658,7 @@ def _render_energy_composition(usage_df, base_date_str):
 
     bd = pd.to_datetime(base_date_str)
     st.markdown(f"""<div class="section-header"><span class="section-icon">🍩</span>
-        에너지 사용량 구성 <span style="font-size:0.82rem;color:{_TEXT_SECONDARY};">({bd.year}-{bd.month:02d})</span></div>""",
+        공장별 에너지 사용 비율 <span style="font-size:0.82rem;color:{_TEXT_SECONDARY};">({bd.year}-{bd.month:02d})</span></div>""",
         unsafe_allow_html=True)
     if usage_df.empty:
         st.info("사용량 데이터가 없습니다."); return
@@ -2105,10 +2675,12 @@ def _render_energy_composition(usage_df, base_date_str):
         ts = f"{total:,.0f}" if total >= 1000 else f"{total:,.1f}"
         fig = go.Figure(go.Pie(labels=labels, values=vals, hole=0.55,
             marker=dict(colors=dc),
-            textinfo="percent",
+            textinfo="text",
+            texttemplate="%{percent:.1%}",
             textposition="inside",
+            insidetextorientation="horizontal",
             textfont=dict(size=14, color=slice_text_color, weight="bold"),
-            hovertemplate="%{label}: %{value:,.0f} " + unit + " (%{percent})<extra></extra>"))
+            hovertemplate="%{label}: %{value:,.0f} " + unit + " (%{percent:.1%})<extra></extra>"))
         fig.update_layout(**DARK_CHART, height=220, margin=dict(l=5, r=5, t=30, b=5),
             title=dict(text=ct, font=dict(size=16, color=_FONT_COLOR), x=0.5, xanchor="center"),
             showlegend=False,
@@ -2577,29 +3149,29 @@ def render_main_dashboard():
         _render_exec_summary_view(base_date, unit_df, usage_df)
         return
 
+    # 섹션별 색조(tone) — 스크롤 중에도 어느 섹션인지 배경색으로 즉시 구분
     # ── 섹션 0: KPI 요약 (목표 대비 달성 현황판) ──
     with st.container(border=True):
+        section_tone("cyan")
         _render_kpi_summary_top(unit_df, usage_df, base_date_str)
 
-    # ── 섹션 1: AI 예측 이상 알림 + SPC 관리도 ──
-    with st.container(border=True):
-        _render_anomaly_alert(base_date)
-        st.markdown(
-            f"<div style='height:1px; background:{_BORDER_COLOR}; margin:8px 0 6px;'></div>",
-            unsafe_allow_html=True,
-        )
-        _render_spc_section(base_date)
+    # ── (제거됨) AI 예측 이상 알림 + 관리도 섹션 ──
+    # 모델 정확도가 장기 안정화될 때까지 홈에서 제외 (2026-07 결정).
+    # 관련 렌더 함수(_render_anomaly_alert/_render_spc_section 등)는 AI 예측
+    # 페이지로의 재배치 후보로 파일에 유지. 임원 요약 보고서의 이상감지 요약은 유지.
 
     # ── 섹션 2: 7일 추이 차트 ──
     with st.container(border=True):
+        section_tone("emerald")
         render_trend_chart(base_date_str)
 
     # ── 섹션 3: 월간 실적 전년비 현황 차트 ──
     with st.container(border=True):
+        section_tone("violet")
         render_yoy_chart(base_date)
 
     # ── 섹션 4: 분석 영역 (알람/이슈 + 사용량 구성 + 상세 테이블) ──
     with st.container(border=True):
+        section_tone("amber")
         _render_dashboard_analysis_sections(unit_df, usage_df, base_date_str)
-
 

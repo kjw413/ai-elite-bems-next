@@ -47,6 +47,7 @@ from app.services.production_correction_service import (
     WIP_TRUSTED_FACTORIES,
 )
 from app.utils.df_format import numeric_column_config
+from app.utils.page_common import section_tone
 from app.utils.page_state import persist_many
 
 
@@ -389,6 +390,7 @@ def render_production_performance():
 
     # ── 1) 조회 조건 ────────────────────────────────
     with st.container(border=True):
+        section_tone("cyan")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">⚙️</span>조회 조건'
@@ -444,6 +446,7 @@ def render_production_performance():
     # ── 2) KPI ─────────────────────────────────────
     pace = _calc_pace_summary(summary, int(year), int(month), today)
     with st.container(border=True):
+        section_tone("emerald")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">📊</span>요약 KPI'
@@ -494,6 +497,7 @@ def render_production_performance():
 
     # ── 2b) 이달 진도 Burn-up S-커브 ─────────────────
     with st.container(border=True):
+        section_tone("violet")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">📈</span>이달 진도 — Burn-up S-커브'
@@ -545,6 +549,7 @@ def render_production_performance():
 
     # ── 3) 제품유형 비중 (도넛 2개) ─────────────────
     with st.container(border=True):
+        section_tone("amber")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">🍩</span>제품유형(category2)별 생산량 비중'
@@ -603,6 +608,7 @@ def render_production_performance():
 
     # ── 4) 일별 추이 ────────────────────────────────
     with st.container(border=True):
+        section_tone("cyan")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">📈</span>일별 생산량 추이 (제품유형별)'
@@ -654,6 +660,7 @@ def render_production_performance():
 
     # ── 5) 계획 미달/초과 품목 ─────────────────────
     with st.container(border=True):
+        section_tone("rose")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">🏅</span>계획 대비 품목 랭킹'
@@ -753,6 +760,7 @@ def render_production_performance():
     date_to = f"{int(year)}-{int(month):02d}-{last_day:02d}"
 
     with st.container(border=True):
+        section_tone("emerald")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">🧮</span>에너지 원단위 생산량 (Mix-kg 환산)'
@@ -829,6 +837,7 @@ def render_production_performance():
 
     # ── 6) 에너지 vs 생산량 ────────────────────────
     with st.container(border=True):
+        section_tone("amber")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">⚡</span>에너지 사용량 vs 생산량'
@@ -951,6 +960,7 @@ def render_production_performance():
 
     # ── 8) 연간 월별 실적 — 월별 전년비 (공장·제품유형 single-select) ──
     with st.container(border=True):
+        section_tone("violet")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">📆</span>연간 월별 실적 — 전년비'

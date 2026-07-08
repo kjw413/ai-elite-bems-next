@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from app.services.audit_service import get_audit_history
 from app.services.query_service import get_factories
 from app.utils.excel_parser import COLUMN_DISPLAY_NAMES
+from app.utils.page_common import section_tone
 from app.utils.page_state import persist_many
 
 
@@ -106,6 +107,7 @@ def _render_audit_history_tab():
     default_from = today - timedelta(days=30)
 
     with st.container(border=True):
+        section_tone("cyan")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">⚙️</span>조회 조건'
@@ -169,6 +171,7 @@ def _render_audit_history_tab():
     n_users = audit_df["changed_by"].nunique()
 
     with st.container(border=True):
+        section_tone("emerald")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">📊</span>요약 KPI'
@@ -287,6 +290,7 @@ def _render_event_memo_tab():
     today = date.today()
 
     with st.container(border=True):
+        section_tone("violet")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">🔎</span>이벤트 메모 조회'

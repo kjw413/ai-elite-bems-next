@@ -22,7 +22,7 @@ from app.services.query_service import (
 from app.utils.excel_parser import rename_columns_to_korean
 from app.utils.df_format import numeric_column_config
 from app.utils.page_state import persist_many
-from app.utils.page_common import get_theme_vars, get_ref_date, month_list
+from app.utils.page_common import get_theme_vars, get_ref_date, month_list, section_tone
 
 
 # 원단위 = SUM(사용량)/SUM(생산톤) 구조의 지표만 노출.
@@ -91,6 +91,7 @@ def render_energy_intensity():
 
     with st.container(border=True):
         # ── 섹션 1: 일별 및 기간별 추이 ─────────────────────────────────────
+        section_tone("cyan")
 
         months = month_list(db_min, db_max)
         default_month = ref_date.strftime("%Y-%m")
@@ -245,6 +246,7 @@ def render_energy_intensity():
 
     with st.container(border=True):
         # ── 섹션 3: 전년대비 사용 분석 ─────────────────────────────────────
+        section_tone("violet")
         st.markdown('<div class="chart-title" style="font-size:1.05rem;"><div class="chart-title-dot"></div>📈 전년대비 원단위 분석</div>', unsafe_allow_html=True)
 
         col_y1, col_y2 = st.columns([1, 3])

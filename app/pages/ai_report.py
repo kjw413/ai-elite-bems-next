@@ -10,6 +10,7 @@ from datetime import datetime
 from app.services.query_service import get_factories
 from app.services.ai_report_service import get_saved_report, save_report
 from app.services.ai_db_service import run_agent_report
+from app.utils.page_common import section_tone
 from app.utils.page_state import persist_many
 
 
@@ -36,6 +37,7 @@ def render_ai_report():
     
     # 상단 컨트롤 패널
     with st.container(border=True):
+        section_tone("cyan")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">⚙️</span>보고서 생성 조건'
@@ -99,6 +101,7 @@ def render_ai_report():
     # 보고서 출력 영역
     if saved_report:
         with st.container(border=True):
+            section_tone("emerald")
             st.markdown(
                 '<div class="section-title">'
                 '<span class="section-title-icon">📋</span>'
@@ -118,6 +121,7 @@ def render_ai_report():
             st.caption(f"🕘 최초 생성일: {created_at}  |  🔄 최종 수정일: {updated_at}")
     elif not saved_report and not generate_btn:
         with st.container(border=True):
+            section_tone("violet")
             st.markdown("""
             <div style="text-align:center; padding:60px 20px;">
                 <div style="font-size:3rem; margin-bottom:10px;">📄</div>

@@ -593,18 +593,72 @@ html:has(section[data-testid="stSidebar"][aria-expanded="false"]) a.bems-mini-he
 ::-webkit-scrollbar-thumb:hover {{ background:#94a3b8; background-clip: padding-box; }}
 
 /* ===== SECTION BOX =====
-   st.container(border=True)이 만드는 wrapper를 깔끔한 카드 프레임으로 변환.
-   라이트 모드에서는 흰 배경 + 미세한 그림자 + 좌측 액센트 바로 위계를 표현.
-*/
-[data-testid="stVerticalBlockBorderWrapper"] {{
+   st.container(border=True) 섹션을 네이비 카드 프레임으로 변환.
+
+   [Streamlit 1.49+ DOM 변경 대응]
+   기존 data-testid="stVerticalBlockBorderWrapper"가 제거되고 모든 레이아웃 블록이
+   data-testid="stLayoutWrapper"로 감싸짐(보더 여부 무관). stLayoutWrapper를 그대로
+   스타일하면 컬럼/일반 블록까지 전부 카드가 되므로, 섹션 컨테이너 첫 줄에 넣는
+   .sec-tone 마커(page_common.section_tone)를 "직계 체인"으로 매칭해 섹션만 선별:
+     stLayoutWrapper > stVerticalBlock > stElementContainer(마커 보유)
+   직계 체인이므로 조상 블록·중첩 컨테이너는 매칭되지 않음.
+   → 섹션 카드로 보이려면 반드시 section_tone() 호출 필요. */
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stLayoutWrapper"]:has(> [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] .sec-tone) {{
     background: var(--section-box-bg) !important;
     border: 1px solid var(--section-box-border) !important;
     border-left: 3px solid var(--section-box-accent) !important;
     border-radius: 14px !important;
     padding: 20px 24px !important;
-    margin-bottom: 16px !important;
-    box-shadow: var(--shadow-xs) !important;
-    backdrop-filter: blur(6px) !important;
+    margin-bottom: 22px !important;   /* 섹션 사이 검정 배경이 드러나도록 간격 확대 */
+    /* 상단 인셋 하이라이트로 유리판이 떠 있는 느낌 + 은은한 딥 섀도 */
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 28px rgba(0,0,0,0.55) !important;
+}}
+/* Streamlit 기본 컨테이너 보더/패딩은 내부 stVerticalBlock에 그려짐 → 이중 보더 방지 */
+[data-testid="stLayoutWrapper"]:has(> [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] .sec-tone) > [data-testid="stVerticalBlock"] {{
+    border: none !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+}}
+
+/* ===== 섹션 색조 (SECTION TONES) =====
+   page_common.section_tone("cyan"|"emerald"|"violet"|"amber"|"rose") 를
+   st.container(border=True) 첫 줄에서 호출하면 해당 섹션에 색조 틴트 적용.
+   섹션마다 다른 색조를 부여 → 스크롤 중에도 어느 섹션인지 즉시 구분됨. */
+div[data-testid="stElementContainer"]:has(.sec-tone) {{
+    display: none !important;
+    margin: 0 !important; padding: 0 !important; height: 0 !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.sec-tone-cyan),
+[data-testid="stLayoutWrapper"]:has(> [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] .sec-tone-cyan) {{
+    background: linear-gradient(165deg, rgba(56,189,248,0.16) 0%, rgba(56,189,248,0.05) 45%, rgba(56,189,248,0.02) 100%), var(--section-box-bg) !important;
+    border-color: rgba(56,189,248,0.30) !important;
+    border-left-color: #38bdf8 !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.sec-tone-emerald),
+[data-testid="stLayoutWrapper"]:has(> [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] .sec-tone-emerald) {{
+    background: linear-gradient(165deg, rgba(52,211,153,0.15) 0%, rgba(52,211,153,0.05) 45%, rgba(52,211,153,0.02) 100%), var(--section-box-bg) !important;
+    border-color: rgba(52,211,153,0.30) !important;
+    border-left-color: #34d399 !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.sec-tone-violet),
+[data-testid="stLayoutWrapper"]:has(> [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] .sec-tone-violet) {{
+    background: linear-gradient(165deg, rgba(167,139,250,0.16) 0%, rgba(167,139,250,0.05) 45%, rgba(167,139,250,0.02) 100%), var(--section-box-bg) !important;
+    border-color: rgba(167,139,250,0.30) !important;
+    border-left-color: #a78bfa !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.sec-tone-amber),
+[data-testid="stLayoutWrapper"]:has(> [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] .sec-tone-amber) {{
+    background: linear-gradient(165deg, rgba(251,191,36,0.13) 0%, rgba(251,191,36,0.04) 45%, rgba(251,191,36,0.02) 100%), var(--section-box-bg) !important;
+    border-color: rgba(251,191,36,0.28) !important;
+    border-left-color: #fbbf24 !important;
+}}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.sec-tone-rose),
+[data-testid="stLayoutWrapper"]:has(> [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] .sec-tone-rose) {{
+    background: linear-gradient(165deg, rgba(251,113,133,0.15) 0%, rgba(251,113,133,0.05) 45%, rgba(251,113,133,0.02) 100%), var(--section-box-bg) !important;
+    border-color: rgba(251,113,133,0.30) !important;
+    border-left-color: #fb7185 !important;
 }}
 
 .section-title {{

@@ -22,7 +22,7 @@ from app.services.query_service import (
 from app.utils.excel_parser import rename_columns_to_korean
 from app.utils.df_format import numeric_column_config
 from app.utils.page_state import persist_many
-from app.utils.page_common import get_theme_vars, get_ref_date, month_list
+from app.utils.page_common import get_theme_vars, get_ref_date, month_list, section_tone
 
 
 # 공장 연료 용수 화면을 구성합니다.
@@ -69,6 +69,7 @@ def render_factory_fuel_water():
 
     with st.container(border=True):
         # ── 섹션 1: 일별 사용량 비교 ─────────────────────────────────────
+        section_tone("cyan")
         st.markdown('<div class="chart-title" style="font-size:1.05rem; margin-top:8px;"><div class="chart-title-dot"></div>📅 일별 사용량 비교</div>', unsafe_allow_html=True)
 
         months = month_list(db_min, db_max)
@@ -156,6 +157,7 @@ def render_factory_fuel_water():
 
     with st.container(border=True):
         # ── 섹션 2: 기간별 사용량 비교 ─────────────────────────────────────
+        section_tone("emerald")
         st.markdown('<div class="chart-title" style="font-size:1.05rem;"><div class="chart-title-dot"></div>📆 기간별 사용량 비교</div>', unsafe_allow_html=True)
 
         db_min_date = pd.to_datetime(db_min).date()
@@ -238,6 +240,7 @@ def render_factory_fuel_water():
 
     with st.container(border=True):
         # ── 섹션 3: 전년대비 사용 분석 ─────────────────────────────────────
+        section_tone("violet")
         st.markdown('<div class="chart-title" style="font-size:1.05rem;"><div class="chart-title-dot"></div>📈 전년대비 연료/용수 사용 분석</div>', unsafe_allow_html=True)
 
         col_y1, col_y2 = st.columns([1, 3])

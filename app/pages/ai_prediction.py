@@ -37,6 +37,7 @@ from app.services.prediction_monitoring_service import (
 )
 from app.services.v5_retrain_service import trigger_v5_retrain
 from app.utils.df_format import numeric_column_config
+from app.utils.page_common import section_tone
 from app.utils.page_state import persist_many
 try:
     from app.services.weather_sync_service import sync_all_stations, get_weather_sync_status
@@ -231,6 +232,7 @@ def _render_weather_sync_panel():
         return
 
     with st.container(border=True):
+        section_tone("cyan")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">🌤️</span>날씨 데이터 동기화'
@@ -334,6 +336,7 @@ def _render_single_factory_result(
     if not rows:
         return
     with st.container(border=True):
+        section_tone("emerald")
         # 좌측 상단 — 어떤 공장 결과인지 한눈에 보이는 칩 배지
         st.markdown(
             f'<div style="display:inline-flex; align-items:center; gap:8px;'
@@ -493,6 +496,7 @@ def _render_batch_prediction_tab():
     factories = list(PREDICTION_FACTORY_OPTIONS)
 
     with st.container(border=True):
+        section_tone("violet")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">⚙️</span>예측 조건'
@@ -887,6 +891,7 @@ def _render_prediction_monitoring_panel(df_hist: pd.DataFrame) -> None:
     overall = get_monitoring_overall_status(monitoring_df)
 
     with st.container(border=True):
+        section_tone("rose")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">🩺</span>모델 성능 감지'
@@ -983,6 +988,7 @@ def _render_history_tab():
     factories = list(PREDICTION_FACTORY_OPTIONS)
 
     with st.container(border=True):
+        section_tone("cyan")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">🔎</span>이력 조회 조건'
@@ -1092,6 +1098,7 @@ def _render_history_tab():
 
     # Summary cards — v5.2: PICP(밴드 안 비율) + MAPE 보조 표시
     with st.container(border=True):
+        section_tone("emerald")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">📊</span>이력 요약'
@@ -1145,6 +1152,7 @@ def _render_history_tab():
     # 추이 차트
     factory_filter = hist_factory if hist_factory != "전체" else None
     with st.container(border=True):
+        section_tone("violet")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">📈</span>예측 vs 실측 추이'
@@ -1156,6 +1164,7 @@ def _render_history_tab():
 
     # 상세 이력 테이블
     with st.container(border=True):
+        section_tone("amber")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">📋</span>상세 이력'

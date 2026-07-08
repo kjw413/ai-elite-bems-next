@@ -18,6 +18,20 @@ def get_theme_vars():
     }
 
 
+# ─ 섹션 색조(tone) 마커 ─
+# st.container(border=True) 블록의 첫 줄에서 호출하면 main.py의
+# :has(.sec-tone-*) CSS가 그 컨테이너를 네이비 카드 + 색조 틴트로 전환합니다.
+# 사용 가능 tone: cyan / emerald / violet / amber / rose
+#
+# Streamlit 1.49+에서는 모든 레이아웃 블록이 stLayoutWrapper로 감싸여
+# CSS만으로는 "보더 컨테이너"를 구별할 수 없음 → 이 마커가 섹션 식별자 역할.
+# 즉, 섹션 카드 스타일(네이비 배경/좌측 액센트/패딩)을 받으려면 호출이 필수.
+# 매칭은 직계 체인(stLayoutWrapper > stVerticalBlock > stElementContainer)이라
+# 조상 블록/중첩 컨테이너로 번지지 않음.
+def section_tone(tone: str) -> None:
+    st.markdown(f'<span class="sec-tone sec-tone-{tone}"></span>', unsafe_allow_html=True)
+
+
 # 기준 날짜 값을 가져옵니다.
 def get_ref_date() -> date:
     return st.session_state.get("filter_date_to", date.today() - timedelta(days=1))
