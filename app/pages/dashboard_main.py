@@ -2189,11 +2189,11 @@ def _render_unit_yoy_grid(unit_df: pd.DataFrame, usage_df: pd.DataFrame, cmp_cur
         return
 
     head_style = (
-        f"font-size:1.0rem; color:{_TEXT_PRIMARY}; font-weight:700; "
+        f"font-size:1.2rem; color:{_TEXT_PRIMARY}; font-weight:700; "
         f"padding:2px 3px; text-align:center; white-space:nowrap;"
     )
     fac_style = (
-        f"font-size:1.0rem; color:{_TEXT_PRIMARY}; font-weight:600; "
+        f"font-size:1.2rem; color:{_TEXT_PRIMARY}; font-weight:600; "
         f"text-align:center; padding:2px 8px 2px 2px; white-space:nowrap; width:12%;"
     )
 
@@ -2214,8 +2214,8 @@ def _render_unit_yoy_grid(unit_df: pd.DataFrame, usage_df: pd.DataFrame, cmp_cur
             return (
                 f"<td style='background:transparent; border:1px solid rgba(122,164,224,0.15); "
                 f"border-radius:10px; padding:8px 4px; text-align:center; width:17.6%;'>"
-                f"<div style='font-size:0.85rem; font-weight:700; color:{_TEXT_SECONDARY};'>—</div>"
-                f"<div style='font-size:0.68rem; color:{_TEXT_SECONDARY}; margin-top:2px;'>데이터 없음</div>"
+                f"<div style='font-size:1.2rem; font-weight:700; color:{_TEXT_SECONDARY};'>—</div>"
+                f"<div style='font-size:0.8rem; color:{_TEXT_SECONDARY}; margin-top:2px;'>데이터 없음</div>"
                 f"</td>"
             )
         change_pct = (float(ratio) - 1.0) * 100.0
