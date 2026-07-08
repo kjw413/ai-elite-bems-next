@@ -1,6 +1,5 @@
 # 이 파일은 v2 예측 모델을 학습하고 평가합니다.
 import re
-import os
 import sys
 import pandas as pd
 import numpy as np

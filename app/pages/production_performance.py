@@ -15,7 +15,7 @@ production_daily 테이블 기반 월별 생산실적 분석.
   - 제품유형 비중 도넛
   - 일별 추이 라인 (제품유형별)
   - 계획 미달/초과 Top 품목
-  - 에너지 사용량 vs 생산량 일별 비교
+  - 에너지 사용량 vs 생산량 일별 비교 (공장·카테고리·에너지원 섹션 필터)
   - 인사이트 + 월별 추이 + 상세 테이블
 """
 # 이 파일은 생산실적을 DB(production_daily)에서 조회해 시각화합니다.
@@ -31,6 +31,7 @@ import streamlit as st
 
 from app.domain.factories import (
     FACTORY_CODE_TO_KR,
+    FACTORY_DISPLAY_ORDER,
     FACTORY_KR_TO_CODE,
     NAMYANGJU_PARENT_CODE,
     expand_factory_members,
@@ -71,6 +72,13 @@ _CAT1_COLORS = {
     "냉동": "#7dd3fc",
     "냉장": "#a78bfa",
     "상온": "#fb923c",
+}
+
+# 에너지원 → (energy_daily 컬럼, y2축 라벨, 사용량 단위, 라인 색상)
+_ENERGY_SOURCE_SPECS = {
+    "전력": ("total_power_kwh", "전력 (kWh)", "kWh", "#f59e0b"),
+    "연료": ("fuel_nm3", "연료 (Nm³)", "Nm³", "#ef4444"),
+    "용수": ("water_ton", "용수 (ton)", "ton", "#38bdf8"),
 }
 
 # 공장 코드 → 표시명 매핑 (production_daily 는 F-코드로 저장돼 있어 UI 표기 변환 필요)
@@ -333,11 +341,14 @@ def render_production_performance():
     """생산실적 페이지 (DB 기반, 두 차원 독립 분류)."""
     # 페이지 이동 후 재방문에도 필터 값을 유지
     persist_many({
-        "prod_year_db":     None,
-        "prod_month_db":    None,
-        "prod_fac_db":      None,
-        "prod_cat1_db":     None,
-        "prod_cat2_db":     None,
+        "prod_year_db":       None,
+        "prod_month_db":      None,
+        "prod_fac_db":        None,
+        "prod_cat1_db":       None,
+        "prod_cat2_db":       None,
+        "prod_energy_fac_db": None,
+        "prod_energy_cat_db": None,
+        "prod_energy_src_db": None,
     })
 
     _t = _theme_colors()
@@ -715,10 +726,11 @@ def render_production_performance():
                 "item_code": "Item Code", "item_name": "Item 명", "cat2": "제품유형",
                 "planned": "누계 계획", "actual": "누계 실적", "variance": "편차", "achievement_pct": "달성률(%)",
             })
-            st.dataframe(
-                detail, use_container_width=True, hide_index=True,
-                column_config=numeric_column_config(detail),
-            )
+            with st.expander("📄 상세 데이터 보기"):
+                st.dataframe(
+                    detail, use_container_width=True, hide_index=True,
+                    column_config=numeric_column_config(detail),
+                )
 
         under_tab, over_tab = st.tabs(["계획 미달 Top", "계획 초과 Top"])
         with under_tab:
@@ -743,14 +755,12 @@ def render_production_performance():
     with st.container(border=True):
         st.markdown(
             '<div class="section-title">'
-            '<span class="section-title-icon">🧮</span>에너지 믹스 ↔ 생산실적 보정 (KG 분해)'
+            '<span class="section-title-icon">🧮</span>에너지 원단위 생산량 (Mix-kg 환산)'
             '<span class="section-title-sub">완제품 · 재공품 · 외주(임가공)</span>'
             "</div>", unsafe_allow_html=True,
         )
         st.caption(
             "📘 광주공장은 자사 완제품 외에 **외부 판매용 재공품**(탈지분유·살균유·생크림·유크림믹스 등)을 별도로 생산합니다. "
-            "RawDB_에너지의 `mix_prod_kg` 는 이 재공품 분량이 빠진 raw 값이라, 프론트엔드 분모는 "
-            "`raw mix_prod_kg + DB_재공품(믹스 환산)` 으로 합산합니다. "
             "수분 제거 후 무게로 기록되는 품목은 **믹스 환산계수**(260014 탈지분유 × 10.91954, 260042 유크림믹스 × 4)를 적용합니다."
         )
 
@@ -781,19 +791,12 @@ def render_production_performance():
             })
         if rows:
             df_break = pd.DataFrame(rows)
-            st.dataframe(
-                df_break, use_container_width=True, hide_index=True,
-                column_config=numeric_column_config(df_break),
-            )
-            # 적층 막대로 시각화
+            # 적층 막대로 시각화 (외주/잔차는 차트에서 제외 — 상세 테이블에서만 제공)
             fig_b = go.Figure()
             fig_b.add_trace(go.Bar(name="완제품(자사)", x=df_break["공장"], y=df_break["완제품 (kg)"],
                                    marker_color="#10b981"))
             fig_b.add_trace(go.Bar(name="재공품(반제품·외부판매·믹스환산)", x=df_break["공장"], y=df_break["재공품 (kg)"],
                                    marker_color="#a78bfa"))
-            fig_b.add_trace(go.Bar(name="외주/잔차(임가공 추정)", x=df_break["공장"],
-                                   y=df_break["외주/잔차 (kg)"].clip(lower=0),
-                                   marker_color="#f59e0b"))
             fig_b.update_layout(
                 barmode="stack",
                 height=320, margin=dict(l=20, r=20, t=10, b=30),
@@ -818,17 +821,55 @@ def render_production_performance():
                     st.caption(f"• {f}: {build_breakdown_caption(b)}"
                                + (f" — {b.notes}" if b.notes else ""))
 
+            with st.expander("📄 상세 데이터 보기"):
+                st.dataframe(
+                    df_break, use_container_width=True, hide_index=True,
+                    column_config=numeric_column_config(df_break),
+                )
+
     # ── 6) 에너지 vs 생산량 ────────────────────────
     with st.container(border=True):
-        _energy_scope = "전사" if set(sel_factories) == set(factories_all) else "선택 공장"
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">⚡</span>에너지 사용량 vs 생산량'
-            f'<span class="section-title-sub">일별 · {_energy_scope} 합계 (energy_daily 조인)</span>'
+            '<span class="section-title-sub">일별 · 공장·카테고리·에너지원 필터 (energy_daily 조인)</span>'
             "</div>", unsafe_allow_html=True,
         )
+
+        # 섹션 전용 필터 — 상단 조회 조건으로 좁혀진 데이터 안에서 추가로 좁혀 봄
+        ef1, ef2, ef3, _ef4 = st.columns([1, 1, 1, 1.5])
+        with ef1:
+            sel_ep_fac = st.selectbox("공장", list(FACTORY_DISPLAY_ORDER),
+                                      key="prod_energy_fac_db")
+        with ef2:
+            sel_ep_cat = st.selectbox("카테고리", ["전체", "IC", "MY", "FM", "SN"],
+                                      key="prod_energy_cat_db",
+                                      format_func=lambda c: _CAT2_DISPLAY.get(c, c))
+        with ef3:
+            sel_ep_src = st.selectbox("에너지원", list(_ENERGY_SOURCE_SPECS.keys()),
+                                      key="prod_energy_src_db")
+
+        src_col, src_axis_label, src_unit, src_color = _ENERGY_SOURCE_SPECS[sel_ep_src]
+
+        # 공장 필터 → 생산(F-코드) / 에너지(한글 라벨) 양쪽에 동일 범위 적용
+        if sel_ep_fac == "전사":
+            df_ep = df
+            ep_fac_codes = tuple(sel_factories)
+            ep_break_targets = breakdown_targets
+        else:
+            ep_members = expand_factory_members(sel_ep_fac)  # 남양주 → (남양주1, 남양주2)
+            ep_codes = {FACTORY_KR_TO_CODE[m] for m in ep_members}
+            if sel_ep_fac == "남양주":
+                ep_codes.add(NAMYANGJU_PARENT_CODE)  # 재동기화 전 F10 레거시 행 포함
+            df_ep = df[df["factory"].isin(ep_codes)]
+            ep_fac_codes = tuple(sorted(ep_codes))
+            ep_break_targets = sorted(ep_members)
+        # 카테고리 필터는 생산실적에만 적용 (energy_daily 는 카테고리 구분 없음)
+        if sel_ep_cat != "전체":
+            df_ep = df_ep[df_ep["category2"] == sel_ep_cat]
+
         try:
-            ec = _energy_cross(df, int(year), int(month), tuple(sel_factories))
+            ec = _energy_cross(df_ep, int(year), int(month), ep_fac_codes)
         except Exception as exc:
             st.warning(f"에너지 데이터 조인 실패: {exc}")
             ec = pd.DataFrame()
@@ -838,9 +879,9 @@ def render_production_performance():
             fig = go.Figure()
             fig.add_trace(go.Bar(name="총 생산량 (생산실적)", x=ec["day"], y=ec["total_prod"],
                                  marker_color="#10b981", yaxis="y1", opacity=0.6))
-            fig.add_trace(go.Scatter(name="전력 사용량 (kWh)", x=ec["day"], y=ec["total_power_kwh"],
+            fig.add_trace(go.Scatter(name=f"{sel_ep_src} 사용량 ({src_unit})", x=ec["day"], y=ec[src_col],
                                      mode="lines+markers",
-                                     line=dict(color="#f59e0b", width=2), yaxis="y2"))
+                                     line=dict(color=src_color, width=2), yaxis="y2"))
             fig.add_trace(go.Scatter(name="믹스 생산량 (kg, 에너지 DB)", x=ec["day"], y=ec["mix_prod_kg"],
                                      mode="lines+markers",
                                      line=dict(color="#a78bfa", width=2, dash="dot"), yaxis="y1"))
@@ -853,7 +894,7 @@ def render_production_performance():
                 yaxis=dict(title=dict(text="생산량", font=dict(color=_t["TEXT_PRIMARY"])),
                            side="left", gridcolor=_t["GRID"], tickformat="~s",
                            tickfont=dict(color=_t["TEXT_PRIMARY"], size=16)),
-                yaxis2=dict(title=dict(text="전력 (kWh)", font=dict(color=_t["TEXT_PRIMARY"])),
+                yaxis2=dict(title=dict(text=src_axis_label, font=dict(color=_t["TEXT_PRIMARY"])),
                             side="right", overlaying="y", tickformat="~s",
                             tickfont=dict(color=_t["TEXT_PRIMARY"], size=16)),
                 legend=dict(orientation="h", y=1.10, x=0.5, xanchor="center"),
@@ -861,13 +902,13 @@ def render_production_performance():
             st.plotly_chart(fig, use_container_width=True, key="energy_vs_prod_db")
 
             tp = float(ec["total_prod"].sum())
-            tw = float(ec["total_power_kwh"].sum())
+            tw = float(ec[src_col].sum())
             mix = float(ec["mix_prod_kg"].sum())
 
-            # 보정된 분모(완제품 + 재공품) 합산 — 선택된 공장 전체에 대해 한 번 계산
+            # 보정된 분모(완제품 + 재공품) 합산 — 섹션에서 선택된 공장 범위로 계산
             wip_total = 0.0
             finished_total = 0.0
-            for f in breakdown_targets:
+            for f in ep_break_targets:
                 try:
                     b = get_breakdown(f, date_from, date_to)
                     wip_total += b.wip_kg
@@ -878,9 +919,12 @@ def render_production_performance():
 
             cap_cols = st.columns(3)
             with cap_cols[0]:
+                _prod_label = "자사 완제품(생산실적)" if sel_ep_cat == "전체" \
+                    else f"자사 완제품({sel_ep_cat})"
                 st.caption(
-                    f"💡 자사 완제품(생산실적) 합계: **{tp:,.0f} kg**"
-                    + (f" + 재공품 **{wip_total:,.0f} kg**" if wip_total > 0 else "")
+                    f"💡 {_prod_label} 합계: **{tp:,.0f} kg**"
+                    + (f" + 재공품 **{wip_total:,.0f} kg**"
+                       if sel_ep_cat == "전체" and wip_total > 0 else "")
                     if tp > 0 else "생산실적 합계: -"
                 )
             with cap_cols[1]:
@@ -896,12 +940,12 @@ def render_production_performance():
                 # 원단위는 에너지 DB 분모(외주 포함) 기준으로 계산해야 공장간 비교가 일관됨.
                 if mix > 0 and tw > 0:
                     intensity = tw / mix * 1000
-                    st.caption(f"⚡ 전력 원단위(에너지 DB 분모): **{intensity:,.1f} kWh/ton**")
+                    st.caption(f"⚡ {sel_ep_src} 원단위(에너지 DB 분모): **{intensity:,.1f} {src_unit}/ton**")
                 elif tp > 0 and tw > 0:
                     intensity = tw / tp * 1000
-                    st.caption(f"⚡ 전력 원단위(완제품 분모): **{intensity:,.1f} kWh/ton**")
+                    st.caption(f"⚡ {sel_ep_src} 원단위(완제품 분모): **{intensity:,.1f} {src_unit}/ton**")
                 else:
-                    st.caption("추정 전력 원단위: -")
+                    st.caption(f"추정 {sel_ep_src} 원단위: -")
 
     # ── 7) (인사이트는 대시보드 페이지로 이동됨) ─────
 

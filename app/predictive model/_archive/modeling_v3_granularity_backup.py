@@ -9,10 +9,8 @@ import requests
 import re
 import time
 from pathlib import Path
-from datetime import datetime, timedelta
 from dotenv import load_dotenv, find_dotenv
 from lightgbm import LGBMRegressor, early_stopping, log_evaluation
-from scipy.optimize import minimize
 
 # 1. 환경 설정 - 프로젝트 루트의 .env 파일 로드
 load_dotenv(find_dotenv())

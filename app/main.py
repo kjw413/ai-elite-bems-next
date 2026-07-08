@@ -43,14 +43,28 @@ try:
 except Exception as _exc:
     print(f"[startup] daily energy auto-sync 실패(계속 진행): {_exc}")
 
-# 일별 생산실적 데이터 자동 동기화 (프로세스당 1회)
+# 일별 생산실적 데이터 자동 동기화 (매 rerun, mtime 변경 시에만 실제 sync)
 # 통합 파일(E:\Sampled DB\DB_생산실적.xlsx)이 갱신돼 있으면 production_daily에 UPSERT.
 # 파일이 없으면 graceful skip — Raw 폴더 통합을 안 돌렸으면 그냥 건너뜀.
+# 실제 UPSERT(status="synced")가 있었다면 query_service의 cache_data를 비워 즉시 화면 반영.
 try:
     from app.services.production_dw_sync_service import auto_sync_production_once
-    auto_sync_production_once()
+    _prod_sync_result = auto_sync_production_once()
+    if _prod_sync_result and _prod_sync_result.get("status") == "synced":
+        st.cache_data.clear()
 except Exception as _exc:
     print(f"[startup] production auto-sync 실패(계속 진행): {_exc}")
+
+# 재공품(DB_재공품.xlsx) 변경 감지 → 즉시 캐시 무효화.
+# 재공품은 DB 동기화 대상이 아니라 엑셀 직접 읽기(production_correction_service)라,
+# 파일만 단독으로 바뀌면 query_service의 ttl=120s 캐시 만료 전까지 화면 반영이 지연됨.
+# 파일 mtime 변경이 감지되면 여기서 cache_data를 비워 다음 렌더에 바로 반영.
+try:
+    from app.services.production_correction_service import wip_changed_needs_cache_clear
+    if wip_changed_needs_cache_clear():
+        st.cache_data.clear()
+except Exception as _exc:
+    print(f"[startup] 재공품 변경 감지 실패(계속 진행): {_exc}")
 
 # ── Session State ──
 # 권한(is_admin)은 클라이언트 IP 기반으로 매 호출 시 판단하므로 세션에 보관하지 않습니다.

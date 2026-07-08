@@ -40,7 +40,6 @@ import json
 import logging
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -60,7 +59,6 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv()
 
 from app.database.db_connection import get_connection  # noqa: E402
-from app.services.production_correction_service import get_breakdown  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

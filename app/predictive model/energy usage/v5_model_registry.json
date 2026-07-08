@@ -29,7 +29,9 @@
   "data_end_date_global": "2026-06-24",
   "train_end_date_global": "2026-02-09",
   "missing_model_keys": [
-    "v5"
+    "v5",
+    "v5.1",
+    "v5.2"
   ],
   "artifacts": {
     "app\\predictive model\\energy usage\\v5.3_20260623_115529.pkl": {

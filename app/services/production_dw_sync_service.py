@@ -1,11 +1,11 @@
 # 이 파일은 통합된 일별 생산실적 데이터셋(DB_생산실적.xlsx 의 'daily' 시트)을
 # production_daily 테이블에 UPSERT 하는 동기화 서비스입니다.
 #
-# 트리거: app.main 시작 시 init_db() 직후 1회 (auto_sync_production_once)
-# Skip 조건: 마지막 동기화 이후 소스 파일 mtime 변화 없음
+# 트리거: app.main 의 매 Streamlit rerun (auto_sync_production_once) — mtime 변경 시에만 실제 UPSERT
+# Skip 조건: 마지막 동기화 이후 소스 파일 mtime 변화 없음 (변경 없으면 stat+JSON 1회로 즉시 return)
 #
 # 설계 의도:
-#   - daily_energy_sync_service 와 동일한 패턴 (state JSON / process-once / admin 자격증명)
+#   - daily_energy_sync_service 와 동일한 패턴 (state JSON / 매 rerun mtime 비교 / admin 자격증명)
 #   - 0인 일자도 그대로 적재 (사용자 명시: 상관관계/완전성 확보용)
 #   - 275k+ 행 → executemany 배치 INSERT...ON DUPLICATE KEY UPDATE
 #   - 소스 파일이 없으면 graceful skip (앱 기동은 막지 않음)
@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,8 +28,7 @@ logger = logging.getLogger(__name__)
 # 동기화 상태 파일 (마지막 mtime/시각/행수 기록)
 SYNC_STATE_PATH = Path(__file__).resolve().parent.parent.parent / "app" / "predictive model" / "energy usage" / "_production_dw_sync_state.json"
 
-# 프로세스당 1회 실행 플래그 (Streamlit rerun에서 재실행 방지)
-_auto_sync_done: bool = False
+# 마지막 동기화 결과 (UI 배지/디버깅용 모듈 캐시). 매 rerun마다 갱신됨.
 _last_sync_result: dict[str, Any] | None = None
 
 # 배치 단위 (executemany 한 번에 보낼 행 수)
@@ -147,7 +146,12 @@ def auto_sync_production_once(
     src_path: Path | str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    """프로세스 생애 1회만 실행되는 자동 동기화 진입점.
+    """자동 동기화 진입점. app.main 의 매 Streamlit rerun에서 호출된다.
+
+    daily_energy_sync_service.auto_sync_once 와 동일하게, 매 호출 시 소스 파일
+    mtime을 state JSON과 비교해 **변경됐을 때만** 실제 UPSERT를 수행한다. 변경이
+    없으면 stat + JSON 1회만 읽고 즉시 return(수 ms)하므로, 상시 서버에서 매 rerun
+    호출돼도 부하가 무시할 수준이며 서버 재시작 없이 신규 데이터가 반영된다.
 
     Parameters
     ----------
@@ -156,19 +160,17 @@ def auto_sync_production_once(
 
     Returns
     -------
-    dict {status, message, ...} — UI/로그용 요약
+    dict {status, message, ...} — UI/로그용 요약.
+        status="synced" 일 때만 실제 DB 변경이 발생한 것이다.
     """
-    global _auto_sync_done, _last_sync_result
-    if _auto_sync_done and not force:
-        return _last_sync_result or {"status": "already_done"}
+    global _last_sync_result
 
     src = Path(src_path) if src_path else DEFAULT_OUTPUT_PATH
     result: dict[str, Any] = {"status": "skipped", "src": str(src)}
 
     if not src.exists():
         result.update(status="missing_source", message=f"통합 파일 없음: {src}")
-        logger.info(f"[production_sync] {result['message']} — skip")
-        _auto_sync_done = True
+        logger.debug(f"[production_sync] {result['message']} — skip")
         _last_sync_result = result
         return result
 
@@ -183,8 +185,8 @@ def auto_sync_production_once(
             mtime=mtime,
             last_rows=state.get("last_rows"),
         )
-        logger.info(f"[production_sync] {result['message']}")
-        _auto_sync_done = True
+        # 매 rerun 호출되므로 unchanged 로그는 debug 로 (INFO 스팸 방지)
+        logger.debug(f"[production_sync] {result['message']}")
         _last_sync_result = result
         return result
 
@@ -220,7 +222,6 @@ def auto_sync_production_once(
         result.update(status="error", message=f"동기화 실패: {exc}")
         logger.error(f"[production_sync] {result['message']}", exc_info=True)
 
-    _auto_sync_done = True
     _last_sync_result = result
     return result
 

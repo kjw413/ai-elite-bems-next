@@ -60,6 +60,10 @@ _WIP_CACHE: dict[str, pd.DataFrame] = {}
 _WIP_CACHE_MTIME: float | None = None
 _WIP_LOCK = threading.Lock()
 
+# 다운스트림 st.cache_data(예: query_service 보정 결과) 무효화 판단용 마커.
+# _WIP_CACHE_MTIME(로더 캐시)과 독립적으로 관리해 상호 간섭을 막는다.
+_WIP_CACHE_CLEAR_MTIME: float | None = None
+
 # 공장별 WIP 단위 신뢰도.
 # DB_재공품 의 일부 시트(김해 등)는 KG 가 아닌 EA/BT/CS2 단위 품목까지 합산되어 있어
 # kg-환산이 어려우므로, "원본 합산을 그대로 KG로 신뢰할 수 있는 공장" 만 white-list 한다.
@@ -192,6 +196,33 @@ def reload_wip(force: bool = True) -> dict[str, pd.DataFrame]:
             _WIP_CACHE = {}
             _WIP_CACHE_MTIME = None
     return _load_wip_workbook()
+
+
+def wip_changed_needs_cache_clear() -> bool:
+    """DB_재공품.xlsx 가 '마지막 확인 시점' 이후 변경됐으면 True(1회성) 반환.
+
+    재공품은 DB 동기화 대상이 아니라 엑셀 직접 읽기라, 파일만 단독으로 바뀌면
+    query_service 의 ttl=120s @st.cache_data 만료 전까지 화면에 옛 보정값이 남는다.
+    app.main 이 매 rerun 에서 이 함수를 호출하고, True 일 때 st.cache_data.clear()
+    를 수행하면 재공품 파일 단독 변경도 즉시 반영된다.
+
+    - 파일이 없으면 False.
+    - 최초 관측 시엔 기준선(mtime)만 기록하고 False (기동 직후 불필요한 clear 방지).
+    - 이후 mtime 이 달라지면 True 를 1회 반환하고 기준선을 갱신한다.
+    - 로더의 _WIP_CACHE_MTIME 과 독립된 마커라, 로더 재로드 여부와 무관하게 동작한다.
+    """
+    global _WIP_CACHE_CLEAR_MTIME
+    src = Path(PATH_WIP_SUMMARY)
+    if not src.exists():
+        return False
+    mtime = src.stat().st_mtime
+    if _WIP_CACHE_CLEAR_MTIME is None:
+        _WIP_CACHE_CLEAR_MTIME = mtime
+        return False
+    if _WIP_CACHE_CLEAR_MTIME != mtime:
+        _WIP_CACHE_CLEAR_MTIME = mtime
+        return True
+    return False
 
 
 def get_wip_daily(factory: str) -> pd.DataFrame:
@@ -439,4 +470,5 @@ __all__ = [
     "get_breakdown_daily",
     "build_breakdown_caption",
     "reload_wip",
+    "wip_changed_needs_cache_clear",
 ]

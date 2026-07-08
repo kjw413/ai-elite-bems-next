@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul 2>&1
-title FEMS - Setup (Run Once)
+title BEMS - Setup (Run Once)
 
 echo.
 echo ============================================================
-echo   FEMS - Factory Energy Management System
+echo   BEMS - Binggrae Energy Management System
 echo   Environment Setup  (Run this ONCE before first launch)
 echo ============================================================
 echo.

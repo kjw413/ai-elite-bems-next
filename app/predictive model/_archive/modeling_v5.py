@@ -1,7 +1,5 @@
 # 이 파일은 v5 예측 모델을 학습하고 결과 파일을 저장합니다.
-import re
 import os
-import requests
 import json
 import joblib
 import pandas as pd
@@ -82,9 +80,8 @@ def get_weather_data(stn_name, start_date, end_date):
             df_xl["날짜"] = pd.to_datetime(df_xl["일시"])
         except: pass
 
-    cache = {}
     if Path(PATH_CACHE).exists():
-        with open(PATH_CACHE, "r", encoding="utf-8") as f: cache = json.load(f)
+        with open(PATH_CACHE, "r", encoding="utf-8") as f: json.load(f)
 
     # Missing date logic via API (Skipped as we rely on cache/excel mostly)
     

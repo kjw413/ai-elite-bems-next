@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS prediction_log (
 
 -- 6. 일별 생산실적 테이블 (사내 DW에서 추출한 품목 단위 실적)
 --    - 출처: app/services/production_dw_service.py (Raw_생산실적/*.xlsx 통합)
---    - 동기화: app/services/production_dw_sync_service.py 가 앱 기동시 1회 UPSERT
+--    - 동기화: app/services/production_dw_sync_service.py 가 매 rerun mtime 비교로 UPSERT (변경 시에만)
 --    - 0인 일자도 보존 (상관관계 분석 / 일자 완전성)
 --    - category1(보관유형) 과 category2(제품유형)은 독립 차원
 --      예) 김해 멸균 유음료: (category1=상온, category2=MY)

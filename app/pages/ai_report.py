@@ -6,7 +6,6 @@ AI Energy Report Page
 # 이 파일은 AI 리포트 화면을 보여줍니다.
 
 import streamlit as st
-import pandas as pd
 from datetime import datetime
 from app.services.query_service import get_factories
 from app.services.ai_report_service import get_saved_report, save_report

@@ -11,6 +11,7 @@ Daily Energy Intensity Mail - 엔트리 포인트
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, date
 from pathlib import Path
@@ -24,6 +25,48 @@ from tools.mail.config import get_mail_config, LOG_DIR
 from tools.mail.logger import get_logger
 from tools.mail.daily_report_builder import build_daily_report
 from tools.mail.mail_service import MailMessage, send_mail, MailSendError
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    value = os.getenv(name)
+    if value is None or str(value).strip() == "":
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _sync_latest_energy_data(log) -> int:
+    """메일 실적 생성 전에 RawDB_에너지.xlsx 변경분을 DB에 반영한다."""
+    if not _env_flag("DAILY_REPORT_SYNC_BEFORE_BUILD", True):
+        log.info("메일 전 에너지 데이터 자동 동기화 비활성화(DAILY_REPORT_SYNC_BEFORE_BUILD=false)")
+        return 0
+
+    try:
+        from app.services.daily_energy_sync_service import sync_daily_energy_from_source
+    except Exception as exc:
+        log.exception(f"에너지 데이터 동기화 모듈 로드 실패: {exc}")
+        return 6
+
+    try:
+        result = sync_daily_energy_from_source()
+    except Exception as exc:
+        log.exception(f"메일 전 에너지 데이터 자동 동기화 예외: {exc}")
+        return 6
+
+    if not result.get("success"):
+        log.error(
+            "메일 전 에너지 데이터 자동 동기화 실패: "
+            f"{result.get('message') or ', '.join(result.get('errors') or [])}"
+        )
+        return 6
+
+    if result.get("file_unchanged"):
+        log.info("메일 전 에너지 데이터 자동 동기화: 원본 변경 없음")
+    else:
+        log.info(
+            "메일 전 에너지 데이터 자동 동기화 완료: "
+            f"신규 {result.get('inserted', 0)}건 / 갱신 {result.get('updated', 0)}건"
+        )
+    return 0
 
 
 def _parse_date(s: str) -> date:
@@ -46,7 +89,12 @@ def main() -> int:
     # 1) 기준일 결정
     ref = _parse_date(args.ref_date) if args.ref_date else None
 
-    # 2) 리포트 빌드
+    # 2) 최신 RawDB_에너지.xlsx 변경분을 DB에 먼저 반영
+    sync_rc = _sync_latest_energy_data(log)
+    if sync_rc != 0:
+        return sync_rc
+
+    # 3) 리포트 빌드
     try:
         report = build_daily_report(ref_date=ref)
     except Exception as e:
@@ -56,7 +104,7 @@ def main() -> int:
     if report.record_count == 0:
         log.warning(f"기준일({report.ref_date}) DB 데이터가 없습니다. 그래도 발송을 시도합니다.")
 
-    # 3) 메시지 구성
+    # 4) 메시지 구성
     msg = MailMessage(
         subject=report.subject,
         html_body=report.html,
@@ -65,7 +113,7 @@ def main() -> int:
         cc=[x.strip() for x in args.cc.split(",") if x.strip()] if args.cc else None,
     )
 
-    # 4) Dry-run 시 파일로만 저장
+    # 5) Dry-run 시 파일로만 저장
     if args.dry_run:
         out = LOG_DIR / f"daily_report_{report.ref_date}_DRYRUN.html"
         out.write_text(report.html, encoding="utf-8")
@@ -74,7 +122,7 @@ def main() -> int:
         log.info(f"[DRY-RUN] 인라인 이미지: {len(report.inline_images)}개")
         return 0
 
-    # 5) 발송
+    # 6) 발송
     try:
         cfg = get_mail_config()
         if not cfg.is_valid:

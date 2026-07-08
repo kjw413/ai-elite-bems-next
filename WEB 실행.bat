@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul 2>&1
-title FEMS - Factory Energy Management System
+title BEMS - Binggrae Energy Management System
 
 echo.
 echo ============================================================
-echo   FEMS - Factory Energy Management System
+echo   BEMS - Binggrae Energy Management System
 echo ============================================================
 echo.
 
@@ -69,7 +69,7 @@ netstat -ano 2>nul | findstr ":%PORT% " | findstr "LISTENING" >nul 2>&1
 if %errorlevel% equ 0 (
     echo.
     echo ============================================================
-    echo   [NOTICE] FEMS is already running on port %PORT%.
+    echo   [NOTICE] BEMS is already running on port %PORT%.
     echo   Please use the existing window or access:
     echo   URL: http://localhost:%PORT%
     echo ============================================================

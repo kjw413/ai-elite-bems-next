@@ -7,8 +7,7 @@ Validation Service
 
 import pandas as pd
 from typing import Optional
-from app.utils.excel_parser import EXPECTED_COLUMNS, NUMERIC_COLUMNS, FACTORY_CODES, get_display_name
-from app.database.db_connection import get_connection
+from app.utils.excel_parser import EXPECTED_COLUMNS, NUMERIC_COLUMNS, get_display_name
 
 
 class ValidationError:

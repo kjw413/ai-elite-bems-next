@@ -2,7 +2,6 @@
 import re
 import os
 import sys
-import requests
 import json
 import pandas as pd
 import numpy as np
@@ -72,16 +71,15 @@ def get_weather_data(stn_name, start_date, end_date):
         except: pass
     
     # 2. Cache 로드
-    cache = {}
     if Path(PATH_CACHE).exists():
-        with open(PATH_CACHE, "r", encoding="utf-8") as f: cache = json.load(f)
+        with open(PATH_CACHE, "r", encoding="utf-8") as f: json.load(f)
     
     # 3. 부족분 API 호출 (필요시)
     dates_needed = pd.date_range(start_date, end_date)
     missing = [d for d in dates_needed if df_xl.empty or d not in df_xl["날짜"].values]
     
     if missing and KMA_API_KEY != "YOUR_API_KEY_HERE":
-        stn_code = STATION_CODE.get(stn_name)
+        STATION_CODE.get(stn_name)
         # API 로직 생략 (v3와 동일하게 작동한다고 가정, 여기서는 엑셀 데이터 위주로 처리)
         pass
 
