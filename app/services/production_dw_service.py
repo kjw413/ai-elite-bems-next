@@ -83,6 +83,55 @@ def query_production_daily(
     return df
 
 
+def query_production_range(
+    date_from: str,
+    date_to: str,
+    factories: list[str] | None = None,
+    category1_values: list[str] | None = None,
+    category2_values: list[str] | None = None,
+) -> pd.DataFrame:
+    """기간 조회 -> tidy DataFrame."""
+    from app.database.db_connection import get_connection
+
+    where, params = _build_filter_clause(factories, category1_values, category2_values)
+    sql = (
+        "SELECT date, item_code, item_name, factory, category1, category2, "
+        "planned_qty, actual_qty FROM production_daily "
+        "WHERE date BETWEEN %s AND %s" + where +
+        " ORDER BY date, factory, item_code"
+    )
+    full_params = [date_from, date_to] + params
+    conn = get_connection()
+    try:
+        df = pd.read_sql_query(sql, conn, params=tuple(full_params))
+    finally:
+        conn.close()
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"])
+    return df
+
+
+def query_production_date_range() -> tuple[str | None, str | None]:
+    """production_daily 테이블의 날짜 범위 조회."""
+    from app.database.db_connection import get_connection
+
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT MIN(date), MAX(date) FROM production_daily")
+        row = cursor.fetchone()
+        if row and row[0]:
+            return (
+                row[0].strftime("%Y-%m-%d") if pd.notnull(row[0]) else None,
+                row[1].strftime("%Y-%m-%d") if pd.notnull(row[1]) else None,
+            )
+        return None, None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        conn.close()
+
 def query_monthly_summary(
     year_from: int,
     month_from: int,

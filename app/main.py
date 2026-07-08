@@ -1332,9 +1332,10 @@ def render_sidebar_body():
     )
 
     if energy_open:
-        _nav("전력 사용량",   ":material/bolt:",                  "energy", "power",      is_sub=True)
-        _nav("연료·용수 사용량",  ":material/local_fire_department:", "energy", "fuel_water", is_sub=True)
+        _nav("사용량 통합",   ":material/monitoring:",            "energy", "usage",      is_sub=True)
         _nav("원단위",       ":material/straighten:",            "energy", "intensity",  is_sub=True)
+
+    _nav("생산실적 분석",      ":material/factory:",         "production")
 
     # AI 에너지 분석 그룹 (서브메뉴: 에너지 사용 예측 / 에너지 실적 보고서)
     ai_open = st.session_state.ai_submenu_open or (st.session_state.current_page == "ai")
@@ -1353,9 +1354,6 @@ def render_sidebar_body():
     if ai_open:
         _nav("에너지 사용 예측",         ":material/insights:", "ai", "prediction", is_sub=True)
         _nav("에너지 실적 보고서",       ":material/description:", "ai", "report",     is_sub=True)
-
-    _nav("에너지 절감관리 (개발예정)",  ":material/savings:",     "savings")
-    _nav("생산실적 분석",      ":material/factory:",         "production")
 
     admin_mode = is_admin()
 
@@ -1405,8 +1403,9 @@ sub  = st.session_state.current_submenu
 _PAGE_DISPLAY_NAMES: dict[tuple[str, str | None], str] = {
     ("dashboard", None):       "대시보드",
     ("production", None):      "생산 실적",
-    ("energy", "power"):       "에너지 모니터링 / 전력 사용량",
-    ("energy", "fuel_water"):  "에너지 모니터링 / 연료·용수 사용량",
+    ("energy", "usage"):       "에너지 모니터링 / 사용량 통합",
+    ("energy", "power"):       "에너지 모니터링 / 사용량 통합",
+    ("energy", "fuel_water"):  "에너지 모니터링 / 사용량 통합",
     ("energy", "intensity"):   "에너지 모니터링 / 원단위",
     ("energy", None):          "에너지 모니터링",
     ("savings", None):         "에너지 절감관리",
@@ -1448,15 +1447,16 @@ elif page == "production":
     render_production_performance()
 
 elif page == "energy":
-    if sub == "power" or sub is None:
-        from app.pages.energy_factory_power import render_factory_power
-        render_factory_power()
-    elif sub == "fuel_water":
-        from app.pages.energy_factory_fuel_water import render_factory_fuel_water
-        render_factory_fuel_water()
-    elif sub == "intensity":
+    if sub == "intensity":
         from app.pages.energy_intensity import render_energy_intensity
         render_energy_intensity()
+    else:
+        if sub == "power":
+            st.session_state["eu_source"] = "전력"
+        elif sub == "fuel_water":
+            st.session_state["eu_source"] = "연료"
+        from app.pages.energy_usage import render_energy_usage
+        render_energy_usage()
 
 elif page == "savings":
     t1, t2 = st.tabs(["절감 계획 관리", "절감 실적 현황"])

@@ -48,7 +48,7 @@ app/
   config/paths.py    # SAMPLED_DB_DIR 경로 해석
   domain/factories.py# 공장 마스터/코드 매핑/집계 헬퍼
   database/          # db_connection(root/viewer 분리, init_db), schema.sql(9 테이블)
-  pages/             # 11개 페이지
+  pages/             # 9개 라우트(사용량 통합/원단위/생산실적/AI/관리자 등)
   services/          # 24개 서비스
   prompts/           # LLM 시스템 프롬프트(ai_report / anomaly_diagnosis)
   utils/, predictive model/(energy usage/: v5 .pkl + registry)
@@ -63,10 +63,10 @@ app/
 
 ## 5. 현재 구현 범위
 
-구현됨: 대시보드, 에너지 모니터링 3화면, **생산실적 분석**, 데이터 업로드, 업로드·변경 이력,
+구현됨: 대시보드, 에너지 모니터링 2화면(사용량 통합/원단위), **생산실적 분석**, 데이터 업로드, 업로드·변경 이력,
 AI 실적 보고서, **에너지 사용 예측(v5.3, 권한별 탭, 이상감지)**.
 
-플레이스홀더(미구현): 절감 계획 관리, 절감 실적 현황.
+메뉴에서 제외됨: 절감 계획 관리, 절감 실적 현황.
 
 ---
 

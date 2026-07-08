@@ -22,7 +22,7 @@ production_daily 테이블 기반 월별 생산실적 분석.
 from __future__ import annotations
 
 import calendar
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import plotly.express as px
@@ -40,6 +40,8 @@ from app.services.production_dw_service import (
     query_distinct_items,
     query_monthly_summary,
     query_production_daily,
+    query_production_date_range,
+    query_production_range,
 )
 from app.services.production_correction_service import (
     get_breakdown,
@@ -49,6 +51,7 @@ from app.services.production_correction_service import (
 from app.utils.df_format import numeric_column_config
 from app.utils.page_common import section_tone
 from app.utils.page_state import persist_many
+from app.components.production_modes import render_range_production_view
 
 
 # ── 색상/라벨 매핑 ────────────────────────────────────────────
@@ -120,6 +123,27 @@ def _load_month(
         category2_values=list(cat2_vals) if cat2_vals else None,
     )
 
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _load_range(
+    date_from: str,
+    date_to: str,
+    factories: tuple[str, ...],
+    cat1_vals: tuple[str, ...],
+    cat2_vals: tuple[str | None, ...],
+) -> pd.DataFrame:
+    return query_production_range(
+        date_from,
+        date_to,
+        factories=list(factories) if factories else None,
+        category1_values=list(cat1_vals) if cat1_vals else None,
+        category2_values=list(cat2_vals) if cat2_vals else None,
+    )
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _load_production_bounds() -> tuple[str | None, str | None]:
+    return query_production_date_range()
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _load_annual_factory_cat2(
@@ -275,81 +299,98 @@ def _generate_insights(df: pd.DataFrame, summary: dict) -> list[str]:
 
 # ── 에너지 cross-analyze ──────────────────────────────────────
 def _energy_factories_for(prod_factories: tuple[str, ...]) -> list[str]:
-    """생산 페이지에서 선택된 공장 코드를 energy_daily 의 공장 라벨로 매핑.
-
-    생산 DB 는 F-코드(F10A/F10B/F20/F30/F40, 과거 F10)로, 에너지 DB 는 한글
-    라벨(남양주1/남양주2/김해/광주/논산)로 공장을 식별하므로 코드 체계를 변환한다.
-    남양주 통합(F10/남양주)은 남양주1·남양주2 두 실공장으로 확장한다.
-    """
+    """생산 페이지 공장 코드를 energy_daily 공장 라벨로 변환."""
     labels: list[str] = []
     for code in prod_factories:
         labels.extend(expand_factory_members(_factory_display(code)))
     return list(dict.fromkeys(labels))
 
 
-def _energy_cross(
-    df_prod: pd.DataFrame, year: int, month: int,
+def _energy_cross_range(
+    df_prod: pd.DataFrame,
+    date_from: str,
+    date_to: str,
     factories: tuple[str, ...] = (),
 ) -> pd.DataFrame:
-    """선택 공장의 일별 에너지 사용량 × 생산실적 조인.
+    """선택 기간의 에너지 사용량 × 생산실적 조인.
 
-    factories: 생산 페이지에서 선택된 공장 코드. energy_daily 조회에도 동일
-    공장 필터를 적용해, 생산(df_prod)과 에너지 라인이 같은 공장 범위를 가리키게
-    한다(과거에는 에너지가 항상 전사 합산이라 부분 선택 시 차트가 왜곡됨).
+    에너지 값은 반드시 query_service.get_daily_data()를 경유한다. 이 경로 안에서
+    광주 재공품 보정과 전사/남양주 집계 원단위 재계산이 처리되므로, 직접 SQL로
+    energy_daily를 읽으면 광주·전사 수치가 틀어질 수 있다.
     """
-    from app.database.db_connection import get_connection
-    last_day = calendar.monthrange(year, month)[1]
+    from app.services.query_service import get_daily_data
 
     energy_labels = _energy_factories_for(factories)
-    sql = (
-        "SELECT date, SUM(mix_prod_kg) AS mix_prod_kg, "
-        "SUM(total_power_kwh) AS total_power_kwh, "
-        "SUM(fuel_nm3) AS fuel_nm3, SUM(water_ton) AS water_ton "
-        "FROM energy_daily WHERE date BETWEEN %s AND %s "
+    energy_df = get_daily_data(
+        factories=energy_labels if energy_labels else None,
+        date_from=date_from,
+        date_to=date_to,
     )
-    params: list = [f"{year}-{month:02d}-01", f"{year}-{month:02d}-{last_day:02d}"]
-    if energy_labels:
-        placeholders = ", ".join(["%s"] * len(energy_labels))
-        sql += f"AND factory IN ({placeholders}) "
-        params.extend(energy_labels)
-    sql += "GROUP BY date"
-
-    conn = get_connection()
-    try:
-        df_e = pd.read_sql_query(sql, conn, params=tuple(params))
-    finally:
-        conn.close()
-    if df_e.empty:
+    if energy_df.empty:
         return pd.DataFrame()
-    df_e["day"] = pd.to_datetime(df_e["date"]).dt.day
-    energy_daily = df_e.groupby("day")[["mix_prod_kg", "total_power_kwh", "fuel_nm3", "water_ton"]].sum().reset_index()
+
+    energy_df = energy_df.copy()
+    energy_df["date"] = pd.to_datetime(energy_df["date"]).dt.normalize()
+    energy_cols = [
+        "mix_prod_kg",
+        "total_power_kwh",
+        "fuel_nm3",
+        "water_ton",
+        "wastewater_ton",
+    ]
+    energy_daily = (
+        energy_df.groupby("date", as_index=False)[[c for c in energy_cols if c in energy_df.columns]]
+        .sum()
+        .sort_values("date")
+    )
+    energy_daily["day"] = energy_daily["date"].dt.day
 
     if df_prod.empty:
         return energy_daily.assign(total_prod=0.0)
 
-    prod_daily = df_prod.assign(day=df_prod["date"].dt.day)
+    prod_daily = df_prod.copy()
+    prod_daily["date"] = pd.to_datetime(prod_daily["date"]).dt.normalize()
     prod_pivot = (
-        prod_daily.groupby(["day", "category2"], dropna=False)["actual_qty"].sum().reset_index()
+        prod_daily.groupby(["date", "category2"], dropna=False)["actual_qty"].sum().reset_index()
         .assign(category2=lambda d: d["category2"].fillna("(미분류)"))
-        .pivot(index="day", columns="category2", values="actual_qty").fillna(0.0)
+        .pivot(index="date", columns="category2", values="actual_qty").fillna(0.0)
     )
     prod_pivot["total_prod"] = prod_pivot.sum(axis=1)
-    return energy_daily.merge(prod_pivot.reset_index(), on="day", how="outer").fillna(0.0).sort_values("day").reset_index(drop=True)
+    out = energy_daily.merge(prod_pivot.reset_index(), on="date", how="outer").fillna(0.0)
+    out["date"] = pd.to_datetime(out["date"])
+    out["day"] = out["date"].dt.day
+    return out.sort_values("date").reset_index(drop=True)
 
 
+def _energy_cross(
+    df_prod: pd.DataFrame, year: int, month: int,
+    factories: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """월별 호환 wrapper."""
+    last_day = calendar.monthrange(year, month)[1]
+    return _energy_cross_range(
+        df_prod,
+        f"{year}-{month:02d}-01",
+        f"{year}-{month:02d}-{last_day:02d}",
+        factories,
+    )
 # ─────────────────────────────────────────────────────────────
 def render_production_performance():
     """생산실적 페이지 (DB 기반, 두 차원 독립 분류)."""
     # 페이지 이동 후 재방문에도 필터 값을 유지
     persist_many({
+        "prod_mode_db":       None,
         "prod_year_db":       None,
         "prod_month_db":      None,
+        "prod_start_date_db": None,
+        "prod_end_date_db":   None,
         "prod_fac_db":        None,
         "prod_cat1_db":       None,
         "prod_cat2_db":       None,
         "prod_energy_fac_db": None,
         "prod_energy_cat_db": None,
         "prod_energy_src_db": None,
+        "prod_range_energy_src_db": None,
     })
 
     _t = _theme_colors()
@@ -388,23 +429,57 @@ def render_production_performance():
     cat2_all = sorted([s for s in cat2_raw if s is not None])
     has_null_cat2 = any(s is None for s in cat2_raw)
 
+    prod_min, prod_max = _load_production_bounds()
+    prod_min_date = pd.to_datetime(prod_min).date() if prod_min else datetime(today.year - 2, 1, 1).date()
+    prod_max_date = pd.to_datetime(prod_max).date() if prod_max else today.date()
+    min_year = prod_min_date.year
+    max_year = max(prod_max_date.year, today.year)
+    year_options = list(range(max_year, min_year - 1, -1))
+
     # ── 1) 조회 조건 ────────────────────────────────
     with st.container(border=True):
         section_tone("cyan")
         st.markdown(
             '<div class="section-title">'
             '<span class="section-title-icon">⚙️</span>조회 조건'
-            '<span class="section-title-sub">연·월 · 공장 · 보관유형 · 제품유형</span>'
+            '<span class="section-title-sub">월별 · 기간별 · 연간 · 공장 · 보관유형 · 제품유형</span>'
             "</div>", unsafe_allow_html=True,
         )
-        # 모든 멀티셀렉트가 비슷한 폭이 되도록 균형 분배
-        c1, c2, c3, c4, c5 = st.columns([0.6, 0.5, 1.3, 1.3, 1.3])
-        with c1:
-            year = st.selectbox("연도", options=list(range(today.year - 2, today.year + 1)),
-                                index=2, key="prod_year_db")
-        with c2:
-            month = st.selectbox("월", options=list(range(1, 13)),
-                                 index=today.month - 1, key="prod_month_db")
+        mode = st.radio("조회 모드", ["월별", "기간별", "연간"], horizontal=True, key="prod_mode_db")
+        default_year = today.year if today.year in year_options else max_year
+        if st.session_state.get("prod_year_db") not in year_options:
+            st.session_state["prod_year_db"] = default_year
+
+        if mode == "월별":
+            c1, c2, c3, c4, c5 = st.columns([0.6, 0.5, 1.3, 1.3, 1.3])
+            with c1:
+                year = st.selectbox("연도", options=year_options, index=year_options.index(default_year), key="prod_year_db")
+            with c2:
+                month = st.selectbox("월", options=list(range(1, 13)), index=today.month - 1, key="prod_month_db")
+            date_from = f"{int(year)}-{int(month):02d}-01"
+            date_to = f"{int(year)}-{int(month):02d}-{calendar.monthrange(int(year), int(month))[1]:02d}"
+        elif mode == "기간별":
+            c1, c2, c3, c4, c5 = st.columns([1.0, 1.0, 1.2, 1.2, 1.2])
+            default_end = prod_max_date
+            default_start = max(default_end - timedelta(days=30), prod_min_date)
+            with c1:
+                start_date = st.date_input("시작일", value=default_start, min_value=prod_min_date, max_value=prod_max_date, key="prod_start_date_db")
+            with c2:
+                end_date = st.date_input("종료일", value=default_end, min_value=prod_min_date, max_value=prod_max_date, key="prod_end_date_db")
+            if start_date > end_date:
+                st.warning("시작일이 종료일보다 늦어 종료일과 맞췄습니다.")
+                start_date = end_date
+            year = int(start_date.year)
+            month = int(start_date.month)
+            date_from = start_date.strftime("%Y-%m-%d")
+            date_to = end_date.strftime("%Y-%m-%d")
+        else:
+            c1, c2, c3, c4, c5 = st.columns([0.7, 0.1, 1.3, 1.3, 1.3])
+            with c1:
+                year = st.selectbox("연도", options=year_options, index=year_options.index(default_year), key="prod_year_db")
+            month = 1
+            date_from = f"{int(year)}-01-01"
+            date_to = f"{int(year)}-12-31"
         with c3:
             sel_factories = st.multiselect(
                 "공장",
@@ -414,10 +489,8 @@ def render_production_performance():
                 format_func=_factory_display,
             )
         with c4:
-            sel_cat1 = st.multiselect("보관유형 (category1)", options=cat1_all, default=cat1_all,
-                                      key="prod_cat1_db")
+            sel_cat1 = st.multiselect("보관유형 (category1)", options=cat1_all, default=cat1_all, key="prod_cat1_db")
         with c5:
-            # IC/MY/FM/SN 코드만 표시 (한글 병기 제거 — 공간 절약)
             cat2_options = cat2_all + (["(미분류)"] if has_null_cat2 else [])
             sel_cat2_display = st.multiselect(
                 "제품유형 (category2)",
@@ -435,13 +508,32 @@ def render_production_performance():
         else:
             cat2_query.append(s)
 
-    df = _load_month(int(year), int(month),
-                     tuple(sel_factories), tuple(sel_cat1), tuple(cat2_query))
+    if mode == "월별":
+        df = _load_month(int(year), int(month),
+                         tuple(sel_factories), tuple(sel_cat1), tuple(cat2_query))
+    else:
+        df = _load_range(date_from, date_to,
+                         tuple(sel_factories), tuple(sel_cat1), tuple(cat2_query))
     if df.empty:
-        st.info(f"{year}년 {month}월 — 선택한 필터 조건에 해당하는 데이터가 없습니다.")
+        period_label = f"{year}년 {month}월" if mode == "월별" else f"{date_from} ~ {date_to}"
+        st.info(f"{period_label} — 선택한 필터 조건에 해당하는 데이터가 없습니다.")
         return
 
     summary = _calc_summary(df)
+
+    if mode != "월별":
+        render_range_production_view(
+            mode=mode,
+            df=df,
+            summary=summary,
+            date_from=date_from,
+            date_to=date_to,
+            selected_year=int(year),
+            sel_factories=list(sel_factories),
+            today=today,
+            theme=_t,
+        )
+        return
 
     # ── 2) KPI ─────────────────────────────────────
     pace = _calc_pace_summary(summary, int(year), int(month), today)
