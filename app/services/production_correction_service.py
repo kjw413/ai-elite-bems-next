@@ -79,6 +79,12 @@ WIP_TRUSTED_FACTORIES: set[str] = {"광주"}
 # How to apply: 시트명(`광주`) 기준으로 ItemCode 별 가중치를 곱한 뒤 행합산한다.
 #   값이 1.0 인 품목은 이미 믹스 무게로 기록돼 환산이 필요 없다.
 #   여기에 없는 ItemCode 는 기본 1.0 으로 처리.
+# 외탁 제외(2026-07-09): 광주 260014(탈지분유)·260016(생크림 냉동)은 raw 의
+#   Job_Number 가 숫자로만 구성된 경우 외탁(임가공) 생산분으로, 자공장 에너지를
+#   사용하지 않는다. 이 제외는 상류 RPA 빌더
+#   (E:\AI-Elite_MIS_RPA\mis_rpa\wip_refactoring.py 의 OUTSOURCED_EXCLUDE_ITEMCODES)가
+#   DB_재공품.xlsx 적재 시점에 실적량 0 처리로 수행하므로, 이 모듈은 파일 값을
+#   그대로 신뢰하면 된다 (Job 단위 정보는 요약본에 없음).
 WIP_MIX_CONVERSION: dict[str, dict[str, float]] = {
     "광주": {
         "260014": 10.91954,  # 탈지분유 (분말; 수분 제거 후 무게)
