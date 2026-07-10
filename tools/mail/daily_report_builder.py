@@ -1,22 +1,24 @@
 """
-Daily Energy Intensity Report Builder (v5 — v5.2 정상범주 밴드 적용)
+Daily Energy Intensity Report Builder
 ======================================================================
-기준일(D-N) 일일 에너지 원단위 실적을 3섹션 1페이지로 정리:
+기준일(D-N) 일일 에너지 원단위 실적 메일. 실제 발송되는 섹션:
 
-  1) 사업장별 원단위 표    — 5 사업장(전사/남양주/김해/광주/논산) × 4 원단위
+  1) 사업장별 원단위 표    — 전사+실공장 × (생산량 + 원단위 3종 + 폐수/용수)
                               각 셀: MTD 값 + MTD 전년비, YTD 값 + YTD 전년비
-  2) 연 진척 게이지        — 전사 4개 원단위 연간 목표 대비 YTD 달성 페이스
-  3) 정상범주 상한 초과    — 기준일 5개 실공장 × 3타겟(전력/연료/용수) 중
-                              실측이 v5.2 정상범주 상한(P95)을 넘은 항목
-                              (이전 "AI 이상 감지" 섹션을 v5.2 밴드 기반으로 교체)
-  + 전력 원단위 7일 추이 차트(공장별 라인)
+  2) 연 진척 게이지        — 전사 원단위 3종 연간 목표 대비 YTD 달성 페이스
+
+비활성 상태(코드 잔재):
+  · 정상범주(P95) 초과 감지 — 빌더는 데이터를 계산해 템플릿에 넘기지만,
+    템플릿에서 해당 섹션이 Jinja 주석으로 비활성화되어 있음
+    (정상가동일 오탐 검증 전까지 미노출 — 관련 모델은 v5.3 으로 업데이트됨).
+
+주간/월간 메일은 period_report_builder.py 가 본 모듈의 집계 함수를 재사용한다.
 
 비교축 (식품공장 계절성 + 일별 noise 고려):
   · MTD = 이번 달 1일~기준일 가중평균 vs 전년 동월 1일~동일 day
   · YTD = 올해 1/1~기준일 가중평균 vs 전년 동기간 1/1~동일 day
 
-원단위 계산: SUM(사용량) / SUM(생산량_kg/1000). mix_prod_kg ≤ 0 공장은 제외
-(raw 데이터 결측 보정 — 분자/분모 정합성).
+원단위 계산: SUM(사용량) / SUM(생산량_kg/1000).
 
 남양주 = 남양주1 + 남양주2 합산 (query_service 의 표시 컨벤션과 동일).
 """
@@ -525,64 +527,6 @@ def _build_p95_exceedance_items(rows: List[dict]) -> List[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 차트 (전력 원단위 7일 추이 1장만 — 메일 분량 압축)
-# ─────────────────────────────────────────────────────────────────────────────
-def _try_make_weekly_trend_chart(
-    rows_weekly: List[dict],
-    title: str,
-) -> Optional[bytes]:
-    """공장별 전력 원단위 7일 일자 추이 PNG. plotly/kaleido 없으면 None."""
-    try:
-        import plotly.graph_objects as go      # type: ignore
-    except ImportError:
-        log.warning("plotly 미설치 → 차트 생략")
-        return None
-
-    power_metric = next(m for m in INTENSITY_METRICS if m["key"] == "power")
-    by_factory: Dict[str, List[Tuple[date, float]]] = {}
-    for r in rows_weekly:
-        prod_kg = float(r.get("mix_prod_kg") or 0)
-        if prod_kg <= 0:
-            continue
-        intensity = float(r.get(power_metric["usage_col"]) or 0) / (prod_kg / 1000.0)
-        d = r["date"]
-        if isinstance(d, str):
-            d = datetime.strptime(d, "%Y-%m-%d").date()
-        by_factory.setdefault(r["factory"], []).append((d, intensity))
-
-    if not by_factory:
-        return None
-
-    fig = go.Figure()
-    palette = ["#2563eb", "#f97316", "#7b2ff7", "#10b981", "#ecc94b", "#ef4444"]
-    for i, (fac, series) in enumerate(sorted(by_factory.items())):
-        series.sort(key=lambda x: x[0])
-        fig.add_trace(go.Scatter(
-            x=[s[0] for s in series],
-            y=[s[1] for s in series],
-            mode="lines+markers",
-            name=FACTORY_LABELS.get(fac, fac),
-            line=dict(width=2, color=palette[i % len(palette)]),
-        ))
-
-    fig.update_layout(
-        title=dict(text=title, x=0.02, font=dict(size=13, color="#1f2937")),
-        height=280,
-        margin=dict(l=40, r=20, t=44, b=36),
-        paper_bgcolor="white", plot_bgcolor="white",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
-        font=dict(color="#1f2937", size=11),
-        xaxis=dict(showgrid=True, gridcolor="#e5e7eb", title=""),
-        yaxis=dict(showgrid=True, gridcolor="#e5e7eb", title=power_metric["unit"]),
-    )
-    try:
-        return fig.to_image(format="png", width=760, height=280, scale=2)
-    except Exception as e:
-        log.warning(f"차트 PNG 변환 실패(kaleido 미설치 가능): {e}")
-        return None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # 메인 엔트리
 # ─────────────────────────────────────────────────────────────────────────────
 def build_daily_report(
@@ -637,11 +581,6 @@ def build_daily_report(
     target_progress = _build_target_progress(ref_date, ytd_curr, prev_year_full)
     p95_items       = _build_p95_exceedance_items(p95_exceed_rows)
 
-    # 추이 차트는 메일 본문에서 제외 — HTML 템플릿이 더 이상 참조하지 않으므로
-    # PNG 생성/inline 첨부도 생략 (참조 없는 orphan 첨부 방지).
-    inline_images: List[InlineImage] = []
-    chart_cid = None
-
     # 제목 (verdict 제거 — 가벼운 알림 톤)
     n_curr_factories = mtd_curr.get("n_factories", 0) if mtd_curr else 0
     subject = f"[생산기술팀] 일일 에너지 원단위 alert {ref_date} ({WEEKDAY_KR[ref_date.weekday()]})"
@@ -674,20 +613,19 @@ def build_daily_report(
         n_with_band        = p95_summary["with_band"],
         n_expected_band    = p95_summary["expected"],
         missing_band_pairs = p95_summary["missing_factory_targets"],
-        chart_cid          = chart_cid,
     )
 
     log.info(
-        f"리포트 v5 생성 완료 - 표 {len(factory_rate_rows)}행, "
+        f"리포트 생성 완료 - 표 {len(factory_rate_rows)}행, "
         f"P95 초과 {p95_summary['exceeded']}건 "
-        f"(밴드 보유 {p95_summary['with_band']}/{p95_summary['expected']}), "
-        f"목표 {len(target_progress)}건, 차트={'O' if chart_cid else 'X'}"
+        f"(밴드 보유 {p95_summary['with_band']}/{p95_summary['expected']} — 섹션 비활성), "
+        f"목표 {len(target_progress)}건"
     )
 
     return BuiltReport(
         subject=subject,
         html=html,
-        inline_images=inline_images,
+        inline_images=[],
         ref_date=ref_date,
         record_count=n_curr_factories,
     )

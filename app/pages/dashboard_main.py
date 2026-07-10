@@ -109,7 +109,7 @@ def _ratio_html(val, invert: bool = False) -> str:
     invert=True  : 높을수록 좋음 (생산량) → ≥100% 파란, <100% 빨강
     invert=False : 낙을수록 좋음 (원단위/사용량) → ≤100% 파란, >100% 빨강
     """
-    if val is None:
+    if val is None or pd.isna(val):
         return f'<span style="color:{_TEXT_SECONDARY}">-</span>'
     pct = val * 100
     if invert:
@@ -2089,7 +2089,7 @@ def _render_comparison_table(
 
             # fmt val 관련 처리를 담당합니다.
             def fmt_val(v):
-                if v is None:
+                if v is None or pd.isna(v):
                     return "-"
                 if is_ratio:
                     return f"{v:.2f}"
@@ -2210,12 +2210,26 @@ def _render_unit_yoy_grid(unit_df: pd.DataFrame, usage_df: pd.DataFrame, cmp_cur
         return f"{float(curr):,.1f}", unit_text
 
     def _cell(ratio, curr, unit_text: str, higher_is_better: bool) -> str:
-        if _is_missing(ratio):
+        if _is_missing(curr):
             return (
                 f"<td style='background:transparent; border:1px solid rgba(122,164,224,0.15); "
                 f"border-radius:10px; padding:8px 4px; text-align:center; width:17.6%;'>"
                 f"<div style='font-size:1.2rem; font-weight:700; color:{_TEXT_SECONDARY};'>—</div>"
                 f"<div style='font-size:0.8rem; color:{_TEXT_SECONDARY}; margin-top:2px;'>데이터 없음</div>"
+                f"</td>"
+            )
+        if _is_missing(ratio):
+            # 당해값은 있으나 전년 동기 데이터가 없어 비교 불가 (예: 신설 공장) —
+            # "데이터 없음"이 아니라 값만 중립 스타일로 표시.
+            curr_value, curr_unit = _format_curr(curr, unit_text, higher_is_better)
+            return (
+                f"<td style='background:transparent; border:1px solid rgba(122,164,224,0.15); "
+                f"border-radius:10px; padding:8px 4px; text-align:center; width:17.6%;'>"
+                f"<div style='font-size:0.88rem; font-weight:700; color:{_TEXT_SECONDARY};'>전년 비교 불가</div>"
+                f"<div style='font-size:1.0rem; color:#dbeafe; font-weight:650; "
+                f"font-variant-numeric:tabular-nums; margin-top:2px; white-space:nowrap;'>{curr_value}</div>"
+                f"<div style='font-size:0.72rem; color:#bcd2f5; font-weight:600; "
+                f"margin-top:1px; white-space:nowrap;'>{curr_unit}</div>"
                 f"</td>"
             )
         change_pct = (float(ratio) - 1.0) * 100.0
@@ -2993,17 +3007,23 @@ def _render_exec_summary_view(base_date: date, unit_df: pd.DataFrame, usage_df: 
 # 메일 송부 핸들러 (대시보드 액션바)
 # ──────────────────────────────────────
 
-def _send_dashboard_report_mail(ref_date: date) -> None:
-    """대시보드의 '📧 메일 송부' 버튼 핸들러.
+def _send_dashboard_report_mail(ref_date: date, period: str = "일간") -> None:
+    """대시보드의 '📧 메일 송부' 핸들러 (관리자 전용 — 호출부에서 is_admin 게이트).
 
-    기존 CLI(`tools/mail/run_daily_mail.py`)와 동일한 빌더/발송 파이프라인을
-    재사용하여, 현재 기준일(`ref_date`)의 일일 에너지 원단위 리포트를 .env의
-    `MAIL_RECIPIENTS` 로 즉시 발송한다. 발송 결과는 토스트와 배너로 안내.
+    CLI(`tools/mail/run_mail.py`)와 동일한 빌더/발송 파이프라인을 재사용하여,
+    선택한 주기의 에너지 원단위 리포트를 .env의 `MAIL_RECIPIENTS` 로 즉시 발송한다.
+    · 일간: 현재 기준일(ref_date)
+    · 주간: ref_date 가 속한 주 (월~일)
+    · 월간: 직전 완결 월
     """
-    # 무거운 의존성(plotly→PNG, jinja2, smtplib)은 사용 시점에만 로드.
+    # 무거운 의존성(jinja2, smtplib)은 사용 시점에만 로드.
     try:
         from tools.mail.config import get_mail_config
         from tools.mail.daily_report_builder import build_daily_report
+        from tools.mail.period_report_builder import (
+            build_monthly_report,
+            build_weekly_report,
+        )
         from tools.mail.mail_service import (
             MailMessage,
             MailSendError,
@@ -3022,8 +3042,13 @@ def _send_dashboard_report_mail(ref_date: date) -> None:
         return
 
     try:
-        with st.spinner(f"{ref_date} 기준 리포트 생성 및 발송 중..."):
-            report = build_daily_report(ref_date=ref_date)
+        with st.spinner(f"{period} 리포트 생성 및 발송 중..."):
+            if period == "주간":
+                report = build_weekly_report(ref_date=ref_date)
+            elif period == "월간":
+                report = build_monthly_report()
+            else:
+                report = build_daily_report(ref_date=ref_date)
             msg = MailMessage(
                 subject=report.subject,
                 html_body=report.html,
@@ -3039,9 +3064,9 @@ def _send_dashboard_report_mail(ref_date: date) -> None:
 
     to_list = result.get("to") or cfg.recipients
     to_str = ", ".join(to_list) if isinstance(to_list, list) else str(to_list)
-    st.toast(f"✅ 메일 발송 완료 — {to_str}", icon="📧")
+    st.toast(f"✅ {period} 메일 발송 완료 — {to_str}", icon="📧")
     st.success(
-        f"메일 발송 완료 · 기준일 {report.ref_date} · 공장 {report.record_count}개 · "
+        f"{period} 메일 발송 완료 · 기준 {report.ref_date} · 공장 {report.record_count}개 · "
         f"수신: {to_str}"
     )
 
@@ -3105,15 +3130,30 @@ def render_main_dashboard():
         </div>
         """, unsafe_allow_html=True)
     with col_mail:
-        # 기준일 기준 일일 에너지 원단위 HTML 리포트를 .env의 MAIL_RECIPIENTS 에게 즉시 발송.
-        # 본문은 tools.mail.daily_report_builder 재사용 (CLI .bat과 동일 산출물).
-        if st.button(
-            "📧 메일 송부",
-            key="dashboard_send_mail_btn",
-            use_container_width=True,
-            help="현재 기준일의 일일 에너지 원단위 리포트를 .env의 MAIL_RECIPIENTS 에게 발송합니다.",
-        ):
-            _send_dashboard_report_mail(base_date)
+        # 에너지 원단위 HTML 리포트를 .env의 MAIL_RECIPIENTS 에게 즉시 발송.
+        # 본문은 tools.mail 빌더 재사용 (CLI run_mail.bat 과 동일 산출물).
+        # 관리자(호스트 PC) 전용 — 외부 PC 뷰어에게는 버튼 자체를 노출하지 않음.
+        if is_admin():
+            with st.popover("📧 메일 송부", use_container_width=True):
+                mail_period = st.radio(
+                    "발송 주기",
+                    options=["일간", "주간", "월간"],
+                    horizontal=True,
+                    key="dashboard_mail_period",
+                )
+                _period_help = {
+                    "일간": f"기준일 {base_date} 실적 (MTD/YTD 전년비)",
+                    "주간": f"{base_date} 가 속한 주 (월~일, 전주비·전년동주비)",
+                    "월간": "직전 완결 월 (전년 동월비·YTD·목표 진척)",
+                }
+                st.caption(_period_help[mail_period])
+                if st.button(
+                    "발송",
+                    key="dashboard_send_mail_btn",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    _send_dashboard_report_mail(base_date, mail_period)
 
     base_date_str = base_date.strftime("%Y-%m-%d")
     progress = _progress_rate(base_date)

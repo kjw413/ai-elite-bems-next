@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>{{ subject }}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f6fb; font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif; color:#1f2937;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6fb; padding:24px 0;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="780" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 4px 14px rgba(0,0,0,0.06);">
+
+        <!-- 헤더 -->
+        <tr>
+          <td style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #00d4ff 100%); padding:20px 28px; color:#ffffff;">
+            <div style="font-size:12px; opacity:0.85; letter-spacing:1px;">생산담당 생산기술팀</div>
+            <div style="font-size:20px; font-weight:700; margin-top:4px;">{{ report_title }}</div>
+            <div style="font-size:13px; margin-top:6px; opacity:0.95;">
+              {{ period_label|safe }} ・ 생성 {{ generated_at }}
+            </div>
+          </td>
+        </tr>
+
+        <!-- ── 섹션 1: 사업장별 원단위 표 ── -->
+        <tr>
+          <td style="padding:18px 28px 4px 28px;">
+            <div style="font-size:15px; font-weight:700; color:#1f2937; margin-bottom:4px;">
+              <span style="display:inline-block; width:5px; height:16px; background:#2563eb; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
+              사업장별 원단위
+            </div>
+            <div style="font-size:11px; color:#6b7280; margin-bottom:10px; padding-left:13px;">
+              {{ table_note }}
+            </div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="border-collapse:collapse; font-size:12px;">
+              <thead>
+                <tr style="background:#f1f5f9; color:#475569;">
+                  <th align="center" rowspan="2" style="padding:10px 4px; border:1px solid #e5e7eb; width:44px;">사업장</th>
+                  <th align="center" rowspan="2" style="padding:10px 4px; border:1px solid #e5e7eb; width:52px;">구분</th>
+                  {% for m in factory_table_metrics %}
+                  <th align="center" colspan="2"
+                      style="padding:8px 6px; border:1px solid #e5e7eb;
+                             background:{{ m.header_bg }}; border-top:2px solid {{ m.color }};">
+                    <div style="font-weight:700; color:#1f2937;">{{ m.label }}</div>
+                    <div style="font-weight:400; color:#64748b; font-size:10.5px; margin-top:2px;">{{ m.unit }}</div>
+                  </th>
+                  {% endfor %}
+                </tr>
+                <tr style="color:#64748b; font-size:10.5px;">
+                  {% for m in factory_table_metrics %}
+                  <th align="center" style="padding:6px 4px; border:1px solid #e5e7eb;
+                                            font-weight:600; background:{{ m.cell_bg }};">
+                    실적
+                  </th>
+                  <th align="center" style="padding:6px 4px; border:1px solid #e5e7eb;
+                                            font-weight:600; background:{{ m.cell_bg }};">
+                    증감
+                  </th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in factory_rows %}
+                {% for axis in axis_defs %}
+                {% set axis_i = loop.index0 %}
+                <tr {% if row.is_total %}style="background:#f8fafc; font-weight:700;"{% endif %}>
+                  {% if axis_i == 0 %}
+                  <td align="center" rowspan="{{ axis_defs|length }}" style="padding:10px 4px; border:1px solid #e5e7eb;
+                                            {% if row.is_total %}color:#1e40af;{% else %}color:#374151;{% endif %}">
+                    {{ row.factory }}
+                  </td>
+                  {% endif %}
+                  <td align="center" style="padding:8px 4px; border:1px solid #e5e7eb; font-size:11px; color:#475569; font-weight:600;">
+                    {{ axis.label }}<div style="font-size:9.5px; color:#94a3b8; font-weight:400;">{{ axis.delta_header }}</div>
+                  </td>
+                  {% for cell in row.axes_cells[axis_i] %}
+                  {% set m = factory_table_metrics[loop.index0] %}
+                  <td align="right" style="padding:8px 8px; border:1px solid #e5e7eb; font-variant-numeric:tabular-nums;
+                                           font-size:13px; color:#0f172a; font-weight:700;
+                                           background:{{ m.cell_bg }};">
+                    {{ cell.value }}
+                  </td>
+                  <td align="right" style="padding:8px 6px; border:1px solid #e5e7eb; font-variant-numeric:tabular-nums;
+                                           color:{{ cell.color }}; font-weight:600; font-size:12px;
+                                           background:{{ m.cell_bg }};">
+                    {{ cell.delta }}
+                    {% if cell.delta2 %}
+                    <div style="font-size:9.5px; color:{{ cell.delta2_color }}; font-weight:400; margin-top:2px; white-space:nowrap;">{{ cell.delta2 }}</div>
+                    {% endif %}
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+                {% endfor %}
+              </tbody>
+            </table>
+            <div style="font-size:10.5px; color:#94a3b8; padding-left:13px; margin-top:6px;">
+              색상: <b style="color:#dc2626;">적색(악화)</b> = 원단위↑ · 생산량↓,
+              <b style="color:#2563eb;">청색(개선)</b> = 원단위↓ · 생산량↑. '-' = 비교 대상 기간 데이터 없음.
+            </div>
+          </td>
+        </tr>
+
+        <!-- ── 섹션 2: 추이 표 (주간=최근 4주 / 월간=당해 월별, 전사 기준) ── -->
+        {% if extra_table and extra_table.rows %}
+        <tr>
+          <td style="padding:18px 28px 4px 28px;">
+            <div style="font-size:15px; font-weight:700; color:#1f2937; margin-bottom:4px;">
+              <span style="display:inline-block; width:5px; height:16px; background:#2563eb; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
+              {{ extra_table.title }}
+            </div>
+            <div style="font-size:11px; color:#6b7280; margin-bottom:10px; padding-left:13px;">
+              {{ extra_table.note }}
+            </div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                   style="border-collapse:collapse; font-size:11.5px;">
+              <thead>
+                <tr style="background:#f1f5f9; color:#475569;">
+                  <th align="center" style="padding:8px 6px; border:1px solid #e5e7eb; width:118px;">기간</th>
+                  {% for m in factory_table_metrics %}
+                  <th align="center" style="padding:8px 6px; border:1px solid #e5e7eb;
+                                            background:{{ m.header_bg }}; border-top:2px solid {{ m.color }};">
+                    <div style="font-weight:700; color:#1f2937;">{{ m.label }}</div>
+                    <div style="font-weight:400; color:#64748b; font-size:10px; margin-top:2px;">{{ m.unit }}</div>
+                  </th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in extra_table.rows %}
+                <tr>
+                  <td align="center" style="padding:7px 6px; border:1px solid #e5e7eb; color:#374151; font-weight:600; font-variant-numeric:tabular-nums;">
+                    {{ row.label }}
+                  </td>
+                  {% for cell in row.cells %}
+                  {% set m = factory_table_metrics[loop.index0] %}
+                  <td align="right" style="padding:7px 8px; border:1px solid #e5e7eb; font-variant-numeric:tabular-nums;
+                                           background:{{ m.cell_bg }};">
+                    <span style="font-size:12px; color:#0f172a; font-weight:700;">{{ cell.value }}</span>
+                    <span style="font-size:10.5px; color:{{ cell.color }}; font-weight:600;">&nbsp;{{ cell.delta }}</span>
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        {% endif %}
+
+        <!-- ── 섹션 3: 연간 목표 대비 사용률 (월간 전용) ── -->
+        {% if target_progress %}
+        <tr>
+          <td style="padding:18px 28px 8px 28px;">
+            <div style="font-size:15px; font-weight:700; color:#1f2937; margin-bottom:4px;">
+              <span style="display:inline-block; width:5px; height:16px; background:#2563eb; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
+              전사 원단위 목표 대비 사용률
+            </div>
+            <div style="font-size:11px; color:#6b7280; margin-bottom:10px; padding-left:13px;">
+              {{ target_note }}
+            </div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              {% for t in target_progress %}
+              <tr>
+                <td width="38%" style="padding:6px 8px 6px 13px; font-size:12px; color:#374151;">
+                  <div><b>{{ t.label }}</b></div>
+                  <div style="font-size:10.5px; color:#94a3b8; margin-top:2px; font-variant-numeric:tabular-nums;">
+                    YTD <b style="color:#475569;">{{ '%.2f' % t.actual_value }}</b>
+                    / 목표 <b style="color:#475569;">{{ '%.2f' % t.target_value }}</b>
+                    <span style="color:#cbd5e1;">({{ t.unit }})</span>
+                  </div>
+                </td>
+                <td style="padding:6px 8px;">
+                  <div style="background:#e5e7eb; border-radius:6px; height:10px; position:relative; overflow:hidden;">
+                    <div style="background:{{ t.color }}; width:{{ '%.0f' % t.bar_width }}%; height:100%; border-radius:6px;"></div>
+                  </div>
+                </td>
+                <td width="22%" style="padding:6px 13px 6px 8px; font-size:13px; color:{{ t.color }}; font-weight:700; text-align:right; font-variant-numeric:tabular-nums;">
+                  {% if t.achievement <= 100 %}✓ {{ '%.1f' % t.achievement }}%{% else %}{{ '%.1f' % t.achievement }}%{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </table>
+            <div style="font-size:10.5px; color:#94a3b8; padding-left:13px; margin-top:6px;">
+              원단위는 낮을수록 좋으므로 100% 이하면 목표 범위입니다.
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+
+        <!-- 푸터 -->
+        <tr>
+          <td style="background:#f9fafb; padding:14px 28px; border-top:1px solid #e5e7eb; font-size:11px; color:#64748b;">
+            본 메일은 AI 자동화 모듈에 의해 발송되었습니다.
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>
