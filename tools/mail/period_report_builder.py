@@ -1,18 +1,14 @@
 """
-Weekly / Monthly Energy Intensity Report Builder
-================================================
-일일 메일(daily_report_builder)과 동일한 집계·표 구조를 재사용해
-주간/월간 alert 메일을 생성한다. 렌더링은 공용 템플릿
-templates/period_energy_report.html 하나를 두 주기가 공유한다.
+Weekly / Monthly Energy Report Builder
+======================================
+일일 메일의 공용 집계 함수를 재사용하되 주기별 목적에 맞춰 별도 구조로 렌더링한다.
 
-비교축 설계 (계절성이 강한 식품공장 특성 반영):
-  · 주간 — 주 비교 = 전주 대비 (인접 주는 기온·생산 믹스가 유사해
-            운영 변화가 잘 드러남), 보조 = 전년 동일 ISO 주차 (계절 보정).
-  · 월간 — 주 비교 = 전년 동월 (전월 대비는 계절성 때문에 성과 판단 부적합
-            → 회색 참고값으로만 표기), 보조 = YTD 누계 전년비 + 연간 목표 게이지.
+  · 주간 — 전주 대비와 전년 동일 ISO 주차를 비교하고 최근 4주 추이를 제공한다.
+             templates/period_energy_report.html 사용.
+  · 월간 — 직전 완결 월의 MTD와 YTD를 각각 전년 동일 기간과 비교한다.
+             templates/monthly_energy_report.html 사용.
 
-신설 공장(예: 경산 2026-04~)은 전년 데이터가 없어 전년비가 '-' 로 표시되며,
-주간의 전주 대비 / 월간의 전월 참고비가 유일한 비교축이 된다.
+신설 공장(예: 경산 2026-04~)은 전년 데이터가 없는 기간에 전년비가 '-'로 표시된다.
 """
 
 from __future__ import annotations
@@ -30,7 +26,6 @@ from tools.mail.daily_report_builder import (
     FACTORY_DISPLAY_ORDER,
     FACTORY_TABLE_METRICS,
     _aggregate_weighted,
-    _build_target_progress,
     _fetch_rows_range,
     _filter_rows_by_factory,
     _fmt,
@@ -143,6 +138,34 @@ def _build_period_factory_rows(axis_specs: List[dict]) -> List[dict]:
         })
     return rows
 
+def _build_monthly_comparison_rows(
+    curr_rows: List[dict], prev_rows: List[dict]
+) -> List[dict]:
+    """월간 전용: 사업장별 현재·전년 실적·증감률을 한 셀에 묶어 생성."""
+    rows = []
+    for label, codes in FACTORY_DISPLAY_ORDER:
+        curr = _aggregate_weighted(_filter_rows_by_factory(curr_rows, codes))
+        prev = _aggregate_weighted(_filter_rows_by_factory(prev_rows, codes))
+        cells = []
+        for metric in FACTORY_TABLE_METRICS:
+            col = metric["unit_col"]
+            curr_v = curr.get(col) if curr else None
+            prev_v = prev.get(col) if prev else None
+            delta, delta_color, _ = _pct_delta(
+                curr_v, prev_v, invert=metric.get("invert", False),
+            )
+            cells.append({
+                "current": _fmt(curr_v, metric.get("decimals", 2)),
+                "previous": _fmt(prev_v, metric.get("decimals", 2)),
+                "delta": delta,
+                "delta_color": delta_color,
+            })
+        rows.append({
+            "factory": label,
+            "is_total": codes is None,
+            "cells": cells,
+        })
+    return rows
 
 def _trend_row(
     label: str,
@@ -171,12 +194,12 @@ def _trend_row(
 # ─────────────────────────────────────────────────────────────────────────────
 # 렌더 공통
 # ─────────────────────────────────────────────────────────────────────────────
-def _render(context: dict) -> str:
+def _render(context: dict, template_name: str = "period_energy_report.html") -> str:
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATE_DIR)),
         autoescape=select_autoescape(["html", "xml"]),
     )
-    return env.get_template("period_energy_report.html").render(**context)
+    return env.get_template(template_name).render(**context)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -255,8 +278,6 @@ def build_weekly_report(ref_date: Optional[date] = None) -> BuiltReport:
             "note": "각 행의 증감(%)은 직전 주 대비입니다. 최신 주가 맨 위.",
             "rows": trend_rows,
         },
-        target_progress=[],
-        target_note="",
     ))
 
     log.info(f"주간 리포트 생성 완료 — 표 {len(factory_rows)}행, 추이 {len(trend_rows)}주")
@@ -273,87 +294,54 @@ def build_monthly_report(
     year: Optional[int] = None,
     month: Optional[int] = None,
 ) -> BuiltReport:
-    """월간 메일. (year, month) 미지정 시 직전 완결 월."""
+    """성과 평가용 월간 메일. (year, month) 미지정 시 직전 완결 월."""
     if year is None or month is None:
         year, month = last_complete_month()
 
     m_from, m_to = _month_range(year, month)
-    pm_year, pm_month = (year - 1, 12) if month == 1 else (year, month - 1)
-    pm_from, pm_to = _month_range(pm_year, pm_month)          # 전월 (회색 참고)
-    yoy_from, yoy_to = _month_range(year - 1, month)          # 전년 동월 (주 비교)
+    yoy_from, yoy_to = _month_range(year - 1, month)
     ytd_from, ytd_to = date(year, 1, 1), m_to
-    ytd_y_from, ytd_y_to = date(year - 1, 1, 1), _month_range(year - 1, month)[1]
-    prev_year_from, prev_year_to = date(year - 1, 1, 1), date(year - 1, 12, 31)
+    ytd_y_from = date(year - 1, 1, 1)
+    ytd_y_to = _month_range(year - 1, month)[1]
 
-    log.info(f"월간 리포트 시작 — 대상 {year}-{month:02d}, "
-             f"전년동월 {yoy_from}~{yoy_to}, 전월(참고) {pm_from}~{pm_to}")
-
+    log.info(
+        f"월간 성과 리포트 시작 — 대상 {year}-{month:02d}, "
+        f"전년동월 {yoy_from}~{yoy_to}, YTD {ytd_from}~{ytd_to}"
+    )
     rows_m = _fetch_rows_range(m_from, m_to)
-    rows_pm = _fetch_rows_range(pm_from, pm_to)
     rows_yoy = _fetch_rows_range(yoy_from, yoy_to)
     rows_ytd = _fetch_rows_range(ytd_from, ytd_to)
     rows_ytd_y = _fetch_rows_range(ytd_y_from, ytd_y_to)
-    rows_prev_full = _fetch_rows_range(prev_year_from, prev_year_to)
 
-    factory_rows = _build_period_factory_rows([
-        # 축0: 당월 실적 + 전년 동월비 (주 비교) + 전월비 (회색 참고)
-        dict(value_rows=rows_m, cmp_curr_rows=rows_m, cmp_base_rows=rows_yoy,
-             ref2_rows=rows_pm, ref2_label="전월비"),
-        # 축1: YTD 누계 + 전년 동기비
-        dict(value_rows=rows_ytd, cmp_curr_rows=rows_ytd, cmp_base_rows=rows_ytd_y),
-    ])
-
-    # 당해 월별 전사 추이 (1월~당월, 최신이 위) — 각 월은 전년 동월 대비 델타
-    trend_rows = []
-    for mm in range(month, 0, -1):
-        mm_from, mm_to = _month_range(year, mm)
-        yy_from, yy_to = _month_range(year - 1, mm)
-        trend_rows.append(_trend_row(
-            f"{year}-{mm:02d}",
-            _fetch_rows_range(mm_from, mm_to),
-            _fetch_rows_range(yy_from, yy_to),
-        ))
-
-    # 연간 목표 게이지 — 일간 메일과 동일 로직 (YTD ÷ [전년 전체 × 0.95])
-    ytd_curr = _aggregate_weighted(rows_ytd)
-    prev_year_full = _aggregate_weighted(rows_prev_full)
-    target_progress = _build_target_progress(m_to, ytd_curr, prev_year_full)
-
+    mtd_rows = _build_monthly_comparison_rows(rows_m, rows_yoy)
+    ytd_rows = _build_monthly_comparison_rows(rows_ytd, rows_ytd_y)
     n_factories = (_aggregate_weighted(rows_m) or {}).get("n_factories", 0)
-    subject = f"[생산기술팀] 월간 에너지 원단위 alert {year}년 {month}월"
+    subject = f"[생산기술팀] 월간 에너지 성과 리포트 {year}년 {month}월"
 
-    html = _render(dict(
-        subject=subject,
-        report_title="월간 에너지 원단위 Alert",
-        period_label=f"대상 월 <b>{year}년 {month}월</b> "
-                     f"({m_from.strftime('%Y-%m-%d')} ~ {m_to.strftime('%Y-%m-%d')})",
-        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        table_note=(
-            f"당월: {year}-{month:02d} · 전년비: vs {year - 1}-{month:02d} (계절 정렬 주 비교) · "
-            f"회색 전월비는 계절성 미보정 참고값 · YTD: {ytd_from.strftime('%m/%d')}~{ytd_to.strftime('%m/%d')} 누계. "
-            "신설 공장은 전년 데이터가 없어 전년비가 '-' 로 표시됩니다."
-        ),
-        axis_defs=[
-            {"label": f"{month}월", "delta_header": "전년비"},
-            {"label": "YTD", "delta_header": "전년비"},
-        ],
-        factory_table_metrics=FACTORY_TABLE_METRICS,
-        factory_rows=factory_rows,
-        extra_table={
-            "title": f"{year}년 월별 전사 추이",
-            "note": "각 행의 증감(%)은 전년 동월 대비입니다. 최신 월이 맨 위.",
-            "rows": trend_rows,
-        },
-        target_progress=target_progress,
-        target_note=(
-            f"사용률 = 누적 YTD/'{str(year)[2:]}년 목표, "
-            f"'{str(year)[2:]}년 목표 = '{str(year - 1)[2:]}년 전체 누계 × 0.95 (전년비 5% 절감)"
-        ),
-    ))
+    html = _render({
+        "subject": subject,
+        "year": year,
+        "previous_year": year - 1,
+        "month": month,
+        "period_from": m_from.strftime("%Y-%m-%d"),
+        "period_to": m_to.strftime("%Y-%m-%d"),
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "factory_table_metrics": FACTORY_TABLE_METRICS,
+        "mtd_rows": mtd_rows,
+        "ytd_rows": ytd_rows,
+        "mtd_current_label": f"{year}.{month:02d}",
+        "mtd_previous_label": f"{year - 1}.{month:02d}",
+        "ytd_current_label": f"{year}.01~{month:02d}",
+        "ytd_previous_label": f"{year - 1}.01~{month:02d}",
+    }, template_name="monthly_energy_report.html")
 
-    log.info(f"월간 리포트 생성 완료 — 표 {len(factory_rows)}행, "
-             f"추이 {len(trend_rows)}개월, 목표 {len(target_progress)}건")
+    log.info(
+        f"월간 성과 리포트 생성 완료 — MTD {len(mtd_rows)}행, YTD {len(ytd_rows)}행"
+    )
     return BuiltReport(
-        subject=subject, html=html, inline_images=[],
-        ref_date=m_to, record_count=n_factories,
+        subject=subject,
+        html=html,
+        inline_images=[],
+        ref_date=m_to,
+        record_count=n_factories,
     )

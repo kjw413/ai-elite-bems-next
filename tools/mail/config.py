@@ -92,7 +92,7 @@ def get_mail_config() -> MailConfig:
         sender_name       = os.getenv("MAIL_SENDER_NAME", "AI-Elite Energy Dashboard"),
         recipients        = _split_csv(os.getenv("MAIL_RECIPIENTS")),
         cc                = _split_csv(os.getenv("MAIL_CC")),
-        subject_prefix    = os.getenv("MAIL_SUBJECT_PREFIX", "[FEMS][일일 에너지 원단위]"),
+        subject_prefix    = os.getenv("MAIL_SUBJECT_PREFIX", "[FEMS][일일 에너지 이상 Alert]"),
         use_tls           = os.getenv("SMTP_USE_TLS", "true").lower() in ("true", "1", "yes"),
     )
 

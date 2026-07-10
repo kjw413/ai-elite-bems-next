@@ -1,32 +1,23 @@
 """
-Daily Energy Intensity Report Builder
-======================================================================
-기준일(D-N) 일일 에너지 원단위 실적 메일. 실제 발송되는 섹션:
+Daily Energy Alert Report Builder
+=================================
+기준일(D-N)의 당일 운영 이상을 빠르게 확인하는 일일 메일.
 
-  1) 사업장별 원단위 표    — 전사+실공장 × (생산량 + 원단위 3종 + 폐수/용수)
-                              각 셀: MTD 값 + MTD 전년비, YTD 값 + YTD 전년비
-  2) 연 진척 게이지        — 전사 원단위 3종 연간 목표 대비 YTD 달성 페이스
+  1) 5개 사업장 생산량·사용량 방향 신호
+     - 홈 대시보드와 동일하게 최근 7일 중앙값의 1%를 유효 변화 기준으로 사용
+     - 생산량 감소 + 에너지 사용량 증가 조합을 즉시 점검 대상으로 요약
+  2) 당일·전일·전일비 상세 실적
+     - 생산량과 전력·연료·용수·폐수 원시 사용량을 사업장별로 표시
 
-비활성 상태(코드 잔재):
-  · 정상범주(P95) 초과 감지 — 빌더는 데이터를 계산해 템플릿에 넘기지만,
-    템플릿에서 해당 섹션이 Jinja 주석으로 비활성화되어 있음
-    (정상가동일 오탐 검증 전까지 미노출 — 관련 모델은 v5.3 으로 업데이트됨).
-
-주간/월간 메일은 period_report_builder.py 가 본 모듈의 집계 함수를 재사용한다.
-
-비교축 (식품공장 계절성 + 일별 noise 고려):
-  · MTD = 이번 달 1일~기준일 가중평균 vs 전년 동월 1일~동일 day
-  · YTD = 올해 1/1~기준일 가중평균 vs 전년 동기간 1/1~동일 day
-
-원단위 계산: SUM(사용량) / SUM(생산량_kg/1000).
-
-남양주 = 남양주1 + 남양주2 합산 (query_service 의 표시 컨벤션과 동일).
+주간/월간 메일은 period_report_builder.py가 본 모듈의 공용 집계 함수를 재사용한다.
+광주 생산량은 대시보드와 동일하게 판매용 재공품 환산량을 보정한다.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from statistics import median
 from typing import Dict, List, Optional, Tuple
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -66,7 +57,7 @@ FACTORY_DISPLAY_ORDER: List[Tuple[str, Optional[List[str]]]] = [
     ("경산",   ["경산"]),
 ]
 
-# 원단위 메트릭 정의. target_service 의 metric 키와 동기.
+# 원단위 메트릭 정의.
 # color: 대시보드 7일 원단위 추이 차트의 에너지원별 상징색과 동기.
 #   header_bg : 헤더(colspan=2) 셀 배경 — 상징색 ~20% + 흰색 80%
 #   cell_bg   : 본문 값/델타 셀 배경 — 상징색 ~6% + 흰색 94% (텍스트 가독성 유지)
@@ -75,57 +66,67 @@ FACTORY_DISPLAY_ORDER: List[Tuple[str, Optional[List[str]]]] = [
 # 이전 버전의 icon(⚡🔥💧🚿🍦)은 사내 그룹웨어 "전달" 시 Namo 에디터의 sanitizer가
 # Supplementary Plane 이모지를 통째로 잘라내 빈 칸으로 보이는 이슈가 있어 제거.
 # 시각 구분은 header_bg + border-top color 만으로 유지한다.
-# 연간 절감 목표(섹션 2)가 적용되는 진짜 '원단위' 3종. SUM(사용량)/SUM(생산톤) 구조.
+# SUM(사용량)/SUM(생산톤) 구조의 원단위 3종.
 INTENSITY_METRICS = [
     {"key": "power",      "label": "전력 원단위", "unit": "kWh/ton",
      "color": "#F6C90E", "header_bg": "#FDF4CF", "cell_bg": "#FEFAEC",
-     "usage_col": "total_power_kwh", "unit_col": "power_per_ton_kwh",   "target_key": "power_per_ton",
+     "usage_col": "total_power_kwh", "unit_col": "power_per_ton_kwh",
      "decimals": 2, "invert": False},
     {"key": "fuel",       "label": "연료 원단위", "unit": "Nm³/ton",
      "color": "#E8450A", "header_bg": "#FADACE", "cell_bg": "#FDF0EB",
-     "usage_col": "fuel_nm3",        "unit_col": "fuel_per_ton_nm3",    "target_key": "fuel_per_ton",
+     "usage_col": "fuel_nm3",        "unit_col": "fuel_per_ton_nm3",
      "decimals": 2, "invert": False},
     {"key": "water",      "label": "용수 원단위", "unit": "ton/ton",
      "color": "#0EA5E9", "header_bg": "#CFEDFB", "cell_bg": "#ECF7FD",
-     "usage_col": "water_ton",       "unit_col": "water_per_ton_ton",   "target_key": "water_per_ton",
+     "usage_col": "water_ton",       "unit_col": "water_per_ton_ton",
      "decimals": 2, "invert": False},
 ]
 
-# 폐수/용수 = 폐수량 / 용수량 (소수점 비). '원단위'(사용량/생산톤)가 아닌 비이므로
-# 연간 절감 목표 대상에서 제외(target_key=None)하고 사업장별 표에만 노출한다.
+# 폐수/용수 = 폐수량 / 용수량 (소수점 비). '원단위'(사용량/생산톤)가 아니며
+# 사업장별 표에만 노출한다.
 # unit_col 은 _aggregate_weighted 가 별도로 채우는 파생 키 'wastewater_ratio'.
 WASTEWATER_RATIO_METRIC = {
     "key": "wastewater_ratio", "label": "폐수/용수", "unit": "폐수량/용수량",
     "color": "#6B7280", "header_bg": "#E1E3E6", "cell_bg": "#F3F4F5",
-    "usage_col": None, "unit_col": "wastewater_ratio", "target_key": None,
+    "usage_col": None, "unit_col": "wastewater_ratio",
     "decimals": 2, "invert": False,
 }
 
-# 생산량 — 원단위와 부호 해석이 반대이며(증가=개선) 5% 절감 목표 대상이 아니므로
-# 연간 목표 달성률 섹션(_build_target_progress)에는 포함하지 않고, 사업장별 표에만
-# 5번째 컬럼으로 노출한다. 원단위는 고정부하 영향으로 생산량 변동분에 종속적이라
+# 생산량 — 원단위와 부호 해석이 반대이며(증가=개선), 사업장별 표의 5번째 컬럼으로
+# 노출한다. 원단위는 고정부하 영향으로 생산량 변동분에 종속적이라
 # 같은 표에서 함께 봐야 해석 가능 (생산↓ → 고정부하 분담 ↑ → 원단위 악화 등).
 PRODUCTION_METRIC = {
     "key": "production", "label": "생산량", "unit": "ton",
     # 메로나 연녹색 — 대시보드 PROD_COLOR와 동기 (#A4D65E).
     # header_bg / cell_bg = 상징색을 흰색에 ~20% / ~6% 혼합 (다른 메트릭과 동일 톤 규칙).
     "color": "#A4D65E", "header_bg": "#EDF6DE", "cell_bg": "#FAFCF5",
-    "usage_col": "mix_prod_kg", "unit_col": "production_ton", "target_key": None,
+    "usage_col": "mix_prod_kg", "unit_col": "production_ton",
     "decimals": 0, "invert": True,
 }
 
-# 사업장별 표(섹션 1) 컬럼 정의 — 생산량을 맨 왼쪽에 배치해 원단위 해석의 기준값
-# (고정부하 분담의 분모)이 먼저 눈에 들어오도록 하고, 폐수/용수 비를 맨 오른쪽에 둔다.
+# 주간·월간 메일의 사업장별 원단위 표 컬럼 정의.
 FACTORY_TABLE_METRICS = [PRODUCTION_METRIC] + INTENSITY_METRICS + [WASTEWATER_RATIO_METRIC]
-
-# v5.2 정상범주 상한 초과 감지 — 기준일 1일치만, 5개 실공장 모두 확인
-# (이상 판정은 더 이상 MAPE 임계가 아니라 "실측 > P95" 정성적 기준)
-PHYSICAL_FACTORIES_FOR_EXCEEDANCE: List[str] = [
-    "남양주1", "남양주2", "김해", "광주", "논산", "경산",
+# 일일 메일은 원단위가 아니라 생산량과 원시 사용량을 비교한다.
+DAILY_DETAIL_METRICS = [
+    {"key": "production", "label": "생산량", "signal_label": "생산", "unit": "ton",
+     "value_col": "production_ton", "color": "#A4D65E", "header_bg": "#EDF6DE",
+     "cell_bg": "#FAFCF5", "decimals": 0, "invert": True},
+    {"key": "power", "label": "전력 사용량", "signal_label": "전력", "unit": "kWh",
+     "value_col": "total_power_kwh", "color": "#F6C90E", "header_bg": "#FDF4CF",
+     "cell_bg": "#FEFAEC", "decimals": 0, "invert": False},
+    {"key": "fuel", "label": "연료 사용량", "signal_label": "연료", "unit": "Nm³",
+     "value_col": "fuel_nm3", "color": "#E8450A", "header_bg": "#FADACE",
+     "cell_bg": "#FDF0EB", "decimals": 0, "invert": False},
+    {"key": "water", "label": "용수 사용량", "signal_label": "용수", "unit": "ton",
+     "value_col": "water_ton", "color": "#0EA5E9", "header_bg": "#CFEDFB",
+     "cell_bg": "#ECF7FD", "decimals": 1, "invert": False},
+    {"key": "wastewater", "label": "폐수 사용량", "signal_label": "폐수", "unit": "ton",
+     "value_col": "wastewater_ton", "color": "#6B7280", "header_bg": "#E1E3E6",
+     "cell_bg": "#F3F4F5", "decimals": 1, "invert": False},
 ]
+DAILY_USAGE_METRICS = DAILY_DETAIL_METRICS[1:]
+DAILY_FACTORY_DISPLAY_ORDER = FACTORY_DISPLAY_ORDER[1:]
 
-# v5.1(점추정) 폴백 임계 — pred_p95가 NULL인 행은 (legacy) 메일에서 표시 안 함.
-# v5.2 모델 활성 + 충분한 예측 이력이 쌓이면 자연스럽게 폴백 케이스가 사라짐.
 
 
 @dataclass
@@ -212,84 +213,6 @@ def _fetch_rows_range(
     return _apply_gwangju_correction_to_rows(rows, date_from, date_to)
 
 
-def _fetch_p95_exceedances(ref_date: date) -> List[dict]:
-    """기준일 1일치, 5개 실공장에서 실측이 v5.2 정상범주 상한(P95)을 넘은 항목 조회.
-
-    판정 기준 (v5.2 정성적):
-      - prediction_log.pred_p95 가 존재 (= v5.2 예측이 저장된 행)
-      - actual_value > pred_p95
-    심각도 순(band_position 내림차순) 정렬.
-
-    v5.1 legacy 행(pred_p95 NULL)은 본 메일에서 표시하지 않음 — 정상범주 개념이
-    없는 이력은 "P95 초과" 라는 정의 자체가 성립하지 않으므로 의미 없음.
-    """
-    placeholders = ", ".join(["%s"] * len(PHYSICAL_FACTORIES_FOR_EXCEEDANCE))
-    sql = f"""
-        SELECT factory, pred_date, target,
-               pred_value, pred_p05, pred_p95,
-               actual_value, band_position, mape
-        FROM prediction_log
-        WHERE pred_date = %s
-          AND factory IN ({placeholders})
-          AND actual_value IS NOT NULL
-          AND pred_p95 IS NOT NULL
-          AND actual_value > pred_p95
-        ORDER BY band_position DESC, factory ASC, target ASC
-    """
-    params: tuple = (ref_date.strftime("%Y-%m-%d"), *PHYSICAL_FACTORIES_FOR_EXCEEDANCE)
-    conn = get_connection()
-    try:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(sql, params)
-        return list(cursor.fetchall())
-    finally:
-        cursor.close()
-        conn.close()
-
-
-def _fetch_p95_coverage_summary(ref_date: date) -> dict:
-    """기준일 5개 실공장의 P95 커버리지 요약 (얼마나 v5.2 예측이 있는지).
-
-    Returns:
-        {
-          "expected": 15,                 # 5공장 × 3타겟
-          "with_band": N,                 # pred_p95가 있는 행 수
-          "exceeded":  M,                 # P95 초과 행 수
-          "missing_factory_targets": [...]# v5.2 예측 없는 공장·타겟 페어
-        }
-    """
-    placeholders = ", ".join(["%s"] * len(PHYSICAL_FACTORIES_FOR_EXCEEDANCE))
-    sql = f"""
-        SELECT factory, target,
-               pred_p95 IS NOT NULL AS has_band,
-               (actual_value IS NOT NULL AND pred_p95 IS NOT NULL
-                AND actual_value > pred_p95) AS exceeded
-        FROM prediction_log
-        WHERE pred_date = %s
-          AND factory IN ({placeholders})
-    """
-    params: tuple = (ref_date.strftime("%Y-%m-%d"), *PHYSICAL_FACTORIES_FOR_EXCEEDANCE)
-    conn = get_connection()
-    try:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(sql, params)
-        rows = list(cursor.fetchall())
-    finally:
-        cursor.close()
-        conn.close()
-
-    expected_pairs = {
-        (f, t) for f in PHYSICAL_FACTORIES_FOR_EXCEEDANCE for t in ("전력", "연료", "용수")
-    }
-    present_pairs = {(r["factory"], r["target"]) for r in rows if r.get("has_band")}
-    return {
-        "expected": len(expected_pairs),
-        "with_band": len(present_pairs),
-        "exceeded":  sum(1 for r in rows if r.get("exceeded")),
-        "missing_factory_targets": sorted(expected_pairs - present_pairs),
-    }
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 집계 / 포맷팅
 # ─────────────────────────────────────────────────────────────────────────────
@@ -359,172 +282,175 @@ def _pct_delta(
     return (f"{sign}{abs(pct):.1f}%", color, pct)
 
 
-def _yoy_window(ref_date: date) -> date:
-    """1년 전 동일 일자. 윤년 (2/29)은 2/28 로 안전 폴백."""
-    try:
-        return ref_date.replace(year=ref_date.year - 1)
-    except ValueError:
-        return ref_date - timedelta(days=365)
+def _normalize_row_date(value) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return datetime.strptime(str(value).split(" ")[0], "%Y-%m-%d").date()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 섹션 빌더
-# ─────────────────────────────────────────────────────────────────────────────
 def _filter_rows_by_factory(
     rows: List[dict], factory_codes: Optional[List[str]]
 ) -> List[dict]:
-    """factory_codes=None 이면 전체 행 그대로. 리스트면 해당 raw factory 코드만."""
+    """factory_codes=None이면 전체, 리스트이면 해당 원시 공장만 반환."""
     if factory_codes is None:
         return rows
     code_set = set(factory_codes)
     return [r for r in rows if r["factory"] in code_set]
 
 
-def _build_factory_rate_rows(
-    rows_mtd_curr: List[dict],
-    rows_mtd_prev: List[dict],
-    rows_ytd_curr: List[dict],
-    rows_ytd_prev: List[dict],
-) -> List[dict]:
-    """사업장별 원단위 표 행 데이터.
+def _aggregate_on_date(
+    rows: List[dict], target_date: date, factory_codes: Optional[List[str]]
+) -> Optional[dict]:
+    selected = [
+        r for r in _filter_rows_by_factory(rows, factory_codes)
+        if _normalize_row_date(r.get("date")) == target_date
+    ]
+    return _aggregate_weighted(selected)
 
-    행 = FACTORY_DISPLAY_ORDER (전사/남양주/김해/광주/논산)
-    각 행의 각 메트릭 셀 = {mtd_value, mtd_delta, mtd_color, ytd_value, ytd_delta, ytd_color}
-    """
-    table_rows = []
-    for label, codes in FACTORY_DISPLAY_ORDER:
-        m_curr = _aggregate_weighted(_filter_rows_by_factory(rows_mtd_curr, codes))
-        m_prev = _aggregate_weighted(_filter_rows_by_factory(rows_mtd_prev, codes))
-        y_curr = _aggregate_weighted(_filter_rows_by_factory(rows_ytd_curr, codes))
-        y_prev = _aggregate_weighted(_filter_rows_by_factory(rows_ytd_prev, codes))
 
-        cells = []
-        for m in FACTORY_TABLE_METRICS:
-            cm = m_curr.get(m["unit_col"]) if m_curr else None
-            pm = m_prev.get(m["unit_col"]) if m_prev else None
-            cy = y_curr.get(m["unit_col"]) if y_curr else None
-            py = y_prev.get(m["unit_col"]) if y_prev else None
-            invert = m.get("invert", False)
-            decimals = m.get("decimals", 2)
-            m_txt, m_color, _ = _pct_delta(cm, pm, invert=invert)
-            y_txt, y_color, _ = _pct_delta(cy, py, invert=invert)
-            cells.append({
-                "mtd_value": _fmt(cm, decimals),
-                "mtd_delta": m_txt,
-                "mtd_color": m_color,
-                "ytd_value": _fmt(cy, decimals),
-                "ytd_delta": y_txt,
-                "ytd_color": y_color,
+def _metric_value(agg: Optional[dict], column: str) -> Optional[float]:
+    if not agg:
+        return None
+    value = agg.get(column)
+    return float(value) if value is not None else None
+
+
+def _median_nonzero(values: List[Optional[float]]) -> Optional[float]:
+    nums = [float(v) for v in values if v is not None and abs(float(v)) > 1e-9]
+    return float(median(nums)) if nums else None
+
+
+def _daily_trend_direction(
+    curr: Optional[float], prev: Optional[float], base: Optional[float]
+) -> int:
+    """홈 대시보드와 동일한 방향 판정: 7일 중앙값의 1% 이하는 작은 흔들림."""
+    if curr is None or prev is None or base is None:
+        return 0
+    diff = float(curr) - float(prev)
+    threshold = max(abs(float(base)) * 0.01, 1e-9)
+    if diff > threshold:
+        return 1
+    if diff < -threshold:
+        return -1
+    return 0
+
+
+def _daily_direction_signal(
+    prod_curr: Optional[float],
+    prod_prev: Optional[float],
+    usage_curr: Optional[float],
+    usage_prev: Optional[float],
+    prod_base: Optional[float],
+    usage_base: Optional[float],
+) -> dict:
+    """생산량과 사용량 방향 조합을 대시보드와 동일한 라벨로 변환."""
+    if any(v is None for v in (prod_curr, prod_prev, usage_curr, usage_prev)):
+        return {
+            "label": "데이터 없음", "badge": "-", "tone": "missing",
+            "color": "#64748b", "bg": "#f1f5f9",
+        }
+
+    p_dir = _daily_trend_direction(prod_curr, prod_prev, prod_base)
+    u_dir = _daily_trend_direction(usage_curr, usage_prev, usage_base)
+    if p_dir > 0 and u_dir < 0:
+        label, badge, tone = "생산↑ 사용↓", "개선", "good"
+    elif p_dir < 0 and u_dir > 0:
+        label, badge, tone = "생산↓ 사용↑", "주의", "warn"
+    elif p_dir > 0 and u_dir > 0:
+        label, badge, tone = "동반 증가", "동행", "neutral"
+    elif p_dir < 0 and u_dir < 0:
+        label, badge, tone = "동반 감소", "동행", "neutral"
+    elif p_dir == 0 and u_dir == 0:
+        label, badge, tone = "변화 작음", "안정", "neutral"
+    elif p_dir == 0:
+        label, badge, tone = "생산 유지", "참고", "neutral"
+    else:
+        label, badge, tone = "사용 유지", "참고", "neutral"
+
+    style = {
+        "warn": ("#b91c1c", "#fef2f2"),
+        "good": ("#047857", "#ecfdf5"),
+        "neutral": ("#475569", "#f8fafc"),
+    }[tone]
+    return {"label": label, "badge": badge, "tone": tone, "color": style[0], "bg": style[1]}
+
+
+def _build_daily_factory_rows(
+    rows: List[dict], ref_date: date
+) -> Tuple[List[dict], List[dict], int]:
+    """5개 사업장의 방향 신호와 당일·전일 상세 실적을 생성."""
+    history_dates = [ref_date - timedelta(days=i) for i in range(6, -1, -1)]
+    prev_date = ref_date - timedelta(days=1)
+    factory_rows: List[dict] = []
+    warning_items: List[dict] = []
+    good_count = 0
+
+    for factory_label, codes in DAILY_FACTORY_DISPLAY_ORDER:
+        history = {d: _aggregate_on_date(rows, d, codes) for d in history_dates}
+        curr = history.get(ref_date)
+        prev = history.get(prev_date)
+        prod_col = "production_ton"
+        prod_curr = _metric_value(curr, prod_col)
+        prod_prev = _metric_value(prev, prod_col)
+        prod_base = _median_nonzero([_metric_value(history[d], prod_col) for d in history_dates])
+        prod_delta, prod_color, prod_pct = _pct_delta(prod_curr, prod_prev, invert=True)
+
+        signals = []
+        for metric in DAILY_USAGE_METRICS:
+            col = metric["value_col"]
+            usage_curr = _metric_value(curr, col)
+            usage_prev = _metric_value(prev, col)
+            usage_base = _median_nonzero([_metric_value(history[d], col) for d in history_dates])
+            signal = _daily_direction_signal(
+                prod_curr, prod_prev, usage_curr, usage_prev, prod_base, usage_base,
+            )
+            usage_delta, usage_color, usage_pct = _pct_delta(usage_curr, usage_prev)
+            signal.update({
+                "energy": metric["signal_label"],
+                "usage_delta": usage_delta,
+                "usage_delta_color": usage_color,
+                "production_delta": prod_delta,
             })
-        table_rows.append({
-            "factory": label,
-            "is_total": codes is None,   # 전사 행은 별도 강조 가능
-            "cells":   cells,
+            signals.append(signal)
+            if signal["tone"] == "warn":
+                warning_items.append({
+                    "date": ref_date.strftime("%Y-%m-%d"),
+                    "factory": factory_label,
+                    "energy": metric["signal_label"],
+                    "production_delta": prod_delta,
+                    "usage_delta": usage_delta,
+                })
+            elif signal["tone"] == "good":
+                good_count += 1
+
+        detail_cells = []
+        for metric in DAILY_DETAIL_METRICS:
+            col = metric["value_col"]
+            curr_v = _metric_value(curr, col)
+            prev_v = _metric_value(prev, col)
+            delta, delta_color, _ = _pct_delta(
+                curr_v, prev_v, invert=metric.get("invert", False),
+            )
+            detail_cells.append({
+                "current": _fmt(curr_v, metric["decimals"]),
+                "previous": _fmt(prev_v, metric["decimals"]),
+                "delta": delta,
+                "delta_color": delta_color,
+            })
+
+        factory_rows.append({
+            "factory": factory_label,
+            "has_current": curr is not None,
+            "has_previous": prev is not None,
+            "production_delta": prod_delta,
+            "production_delta_color": prod_color,
+            "signals": signals,
+            "detail_cells": detail_cells,
         })
-    return table_rows
 
-
-# 연간 절감 목표 — 전사 기준 4대 원단위 모두 '전년 전체 누계 대비 5% 절감'.
-# 2026년 목표값 = 2025년 전체 누계(1/1~12/31) × YTD_TARGET_FACTOR.
-# 분모로 "전년 동기간 YTD" 가 아닌 "전년 전체 누계" 를 쓰는 이유: 연간 목표는
-# 그 해 1년 전체 운영 결과를 기준으로 세우는 것이 회계·관리 컨벤션과 맞고,
-# 동기간 YTD 를 쓰면 연중 시점에 따라 목표값이 흔들리는 부작용이 있다.
-YTD_TARGET_FACTOR = 0.95
-
-
-def _build_target_progress(
-    ref_date: date,
-    ytd_curr: Optional[dict],
-    prev_year_full: Optional[dict],
-) -> List[dict]:
-    """전사(ALL) 기준 4대 원단위 연간 목표 달성률 (YTD 누계 기준).
-
-    목표값  = 전년 전체 누계 × 0.95     (전년 대비 5% 절감)
-    달성률  = 현재 YTD ÷ 목표값 × 100
-      · ≤ 100% : 목표 달성 (원단위는 낮을수록 좋음)
-      · > 100% : 목표 미달 — 절감 부족
-    """
-    if not ytd_curr or not prev_year_full:
-        return []
-
-    out = []
-    for m in INTENSITY_METRICS:
-        curr_v = ytd_curr.get(m["unit_col"])
-        prev_v = prev_year_full.get(m["unit_col"])
-        if curr_v is None or prev_v in (None, 0):
-            continue
-
-        target_value = float(prev_v) * YTD_TARGET_FACTOR
-        if target_value == 0:
-            continue
-        ratio = float(curr_v) / target_value * 100.0   # YTD / 목표
-
-        # 색상 (원단위는 낮을수록 좋음 → ratio가 작을수록 좋음)
-        if ratio <= 100.0:
-            color = "#10b981"   # 녹색: 목표 달성
-        elif ratio <= 105.0:
-            color = "#d97706"   # 앰버: 5% 이내 초과 — 진행 중
-        else:
-            color = "#dc2626"   # 빨강: 5% 초과 — 절감 미흡
-
-        out.append({
-            "label":        m["label"],
-            "unit":         m["unit"],
-            "prev_value":   float(prev_v),
-            "target_value": target_value,
-            "actual_value": float(curr_v),
-            "achievement":  ratio,                              # YTD ÷ 목표 × 100
-            "color":        color,
-            "bar_width":    max(0.0, min(100.0, ratio)),        # 100% = 목표선
-        })
-    return out
-
-
-def _build_p95_exceedance_items(rows: List[dict]) -> List[dict]:
-    """AI 예상 사용 범위의 윗선을 실측이 초과한 항목을 메일 표 행으로 변환.
-
-    각 행:
-      - 공장 / 항목
-      - AI 예상 정상 범위 (예측 하한~상한)
-      - 실측값
-      - 초과량 / 상한 대비 초과율
-      - 이탈 등급(경미/주의/심각) — band_position 기반
-    """
-    out = []
-    for r in rows:
-        p05_raw = r.get("pred_p05")
-        p05 = float(p05_raw) if p05_raw is not None else None
-        p95 = float(r["pred_p95"])
-        actual_v = float(r["actual_value"])
-
-        over_amount = actual_v - p95
-        over_pct = over_amount / max(p95, 1.0) * 100.0  # 상한 대비 초과 비율
-        bp_raw = r.get("band_position")
-        bp = float(bp_raw) if bp_raw is not None else None
-
-        # 이탈 등급 (비전공자 친화 라벨): |bp| 기반 3단계
-        if bp is None:
-            level_label, color = "—", "#ea580c"
-        elif abs(bp) >= 2.0:
-            level_label, color = "심각", "#dc2626"   # 빨강
-        elif abs(bp) >= 1.5:
-            level_label, color = "주의", "#ea580c"   # 주황
-        else:
-            level_label, color = "경미", "#d97706"   # 앰버
-
-        out.append({
-            "factory":   r["factory"],
-            "target":    r["target"],
-            "band":      f"{p05:,.0f} ~ {p95:,.0f}" if p05 is not None else f"≤ {p95:,.0f}",
-            "p95":       _fmt(p95, 0),
-            "actual":    _fmt(actual_v, 0),
-            "over":      f"+{over_amount:,.0f}",
-            "over_pct":  f"+{over_pct:.1f}%",
-            "level":     level_label,
-            "color":     color,
-        })
-    return out
-
+    return factory_rows, warning_items, good_count
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 메인 엔트리
@@ -538,94 +464,51 @@ def build_daily_report(
         ref_date = date.today() - timedelta(days=cfg.reference_offset_days)
 
     factories_filter = cfg.factories_filter or None
-
-    # 비교 기간 계산
-    weekly_from   = ref_date - timedelta(days=6)
-    weekly_to     = ref_date
-    mtd_from      = date(ref_date.year, ref_date.month, 1)
-    mtd_to        = ref_date
-    mtd_y_from    = _yoy_window(mtd_from)
-    mtd_y_to      = _yoy_window(mtd_to)
-    ytd_from      = date(ref_date.year, 1, 1)
-    ytd_to        = ref_date
-    ytd_y_from    = _yoy_window(ytd_from)
-    ytd_y_to      = _yoy_window(ytd_to)
-    # 연간 목표(섹션 2) 계산용 — 전년 전체 누계(1/1 ~ 12/31).
-    # 사업장별 표(섹션 1)의 YTD 전년비는 여전히 "전년 동기간 YTD"(ytd_y_*)를 사용.
-    prev_year_from = date(ref_date.year - 1, 1, 1)
-    prev_year_to   = date(ref_date.year - 1, 12, 31)
-
+    trend_from = ref_date - timedelta(days=6)
+    prev_date = ref_date - timedelta(days=1)
     log.info(
-        f"리포트 빌더 v4 시작 - 기준일: {ref_date} "
-        f"(MTD: {mtd_from}~{mtd_to}, YTD: {ytd_from}~{ytd_to}, "
-        f"전년 전체: {prev_year_from}~{prev_year_to})"
+        f"일일 이상 리포트 시작 - 기준일: {ref_date}, "
+        f"판정 이력: {trend_from}~{ref_date}"
     )
 
-    # 데이터 페치
-    rows_mtd           = _fetch_rows_range(mtd_from, mtd_to, factories_filter)
-    rows_mtd_y         = _fetch_rows_range(mtd_y_from, mtd_y_to, factories_filter)
-    rows_ytd           = _fetch_rows_range(ytd_from, ytd_to, factories_filter)
-    rows_ytd_y         = _fetch_rows_range(ytd_y_from, ytd_y_to, factories_filter)
-    rows_prev_year_full = _fetch_rows_range(prev_year_from, prev_year_to, factories_filter)
-    p95_exceed_rows    = _fetch_p95_exceedances(ref_date)
-    p95_summary        = _fetch_p95_coverage_summary(ref_date)
+    rows = _fetch_rows_range(trend_from, ref_date, factories_filter)
+    factory_rows, warning_items, good_count = _build_daily_factory_rows(rows, ref_date)
+    n_current_factories = sum(1 for row in factory_rows if row["has_current"])
+    warning_factory_count = len({item["factory"] for item in warning_items})
 
-    # 섹션 데이터
-    mtd_curr       = _aggregate_weighted(rows_mtd)
-    ytd_curr       = _aggregate_weighted(rows_ytd)
-    prev_year_full = _aggregate_weighted(rows_prev_year_full)
-
-    factory_rate_rows = _build_factory_rate_rows(
-        rows_mtd, rows_mtd_y, rows_ytd, rows_ytd_y,
+    subject = (
+        f"[생산기술팀] 일일 에너지 이상 alert {ref_date} "
+        f"({WEEKDAY_KR[ref_date.weekday()]})"
     )
-    target_progress = _build_target_progress(ref_date, ytd_curr, prev_year_full)
-    p95_items       = _build_p95_exceedance_items(p95_exceed_rows)
-
-    # 제목 (verdict 제거 — 가벼운 알림 톤)
-    n_curr_factories = mtd_curr.get("n_factories", 0) if mtd_curr else 0
-    subject = f"[생산기술팀] 일일 에너지 원단위 alert {ref_date} ({WEEKDAY_KR[ref_date.weekday()]})"
-
-    # 템플릿 렌더
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATE_DIR)),
         autoescape=select_autoescape(["html", "xml"]),
     )
-    template = env.get_template("daily_energy_report.html")
-    html = template.render(
-        subject            = subject,
-        ref_date           = ref_date.strftime("%Y-%m-%d"),
-        ref_year_short     = ref_date.strftime("%y"),   # 사업장별 표 서브헤더("'YY년 누계")
-        ref_weekday        = WEEKDAY_KR[ref_date.weekday()],
-        generated_at       = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        weekly_from_str    = weekly_from.strftime("%m/%d"),
-        weekly_to_str      = weekly_to.strftime("%m/%d"),
-        mtd_from_str       = mtd_from.strftime("%m/%d"),
-        mtd_to_str         = mtd_to.strftime("%m/%d"),
-        ytd_from_str       = ytd_from.strftime("%m/%d"),
-        ytd_to_str         = ytd_to.strftime("%m/%d"),
-        n_factories        = n_curr_factories,
-        factory_rate_rows  = factory_rate_rows,
-        factory_table_metrics = FACTORY_TABLE_METRICS,
-        target_progress    = target_progress,
-        # v5.2 정상범주 상한 초과 섹션
-        p95_items          = p95_items,
-        n_p95_exceed       = p95_summary["exceeded"],
-        n_with_band        = p95_summary["with_band"],
-        n_expected_band    = p95_summary["expected"],
-        missing_band_pairs = p95_summary["missing_factory_targets"],
+    html = env.get_template("daily_energy_report.html").render(
+        subject=subject,
+        ref_date=ref_date.strftime("%Y-%m-%d"),
+        prev_date=prev_date.strftime("%Y-%m-%d"),
+        ref_weekday=WEEKDAY_KR[ref_date.weekday()],
+        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        trend_from=trend_from.strftime("%Y-%m-%d"),
+        n_factories=n_current_factories,
+        warning_count=len(warning_items),
+        warning_factory_count=warning_factory_count,
+        good_count=good_count,
+        warning_items=warning_items,
+        factory_rows=factory_rows,
+        signal_metrics=DAILY_USAGE_METRICS,
+        detail_metrics=DAILY_DETAIL_METRICS,
     )
 
     log.info(
-        f"리포트 생성 완료 - 표 {len(factory_rate_rows)}행, "
-        f"P95 초과 {p95_summary['exceeded']}건 "
-        f"(밴드 보유 {p95_summary['with_band']}/{p95_summary['expected']} — 섹션 비활성), "
-        f"목표 {len(target_progress)}건"
+        f"일일 이상 리포트 생성 완료 - 사업장 {n_current_factories}/5, "
+        f"즉시 점검 {len(warning_items)}건, 개선 신호 {good_count}건"
     )
-
     return BuiltReport(
         subject=subject,
         html=html,
         inline_images=[],
         ref_date=ref_date,
-        record_count=n_curr_factories,
+        record_count=n_current_factories,
     )

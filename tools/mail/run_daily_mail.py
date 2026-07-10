@@ -74,7 +74,7 @@ def _parse_date(s: str) -> date:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="일일 에너지 원단위 메일 자동 송부")
+    parser = argparse.ArgumentParser(description="일일 생산량·에너지 이상 Alert 자동 송부")
     parser.add_argument("ref_date", nargs="?", default=None,
                         help="기준 일자 YYYY-MM-DD (기본: today - DAILY_REPORT_REFERENCE_OFFSET_DAYS)")
     parser.add_argument("--to", default=None, help="수신자 override (콤마 구분)")
@@ -84,7 +84,7 @@ def main() -> int:
 
     log = get_logger("daily_mail")
     log.info("=" * 60)
-    log.info("일일 에너지 원단위 메일 자동화 시작")
+    log.info("일일 생산량·에너지 이상 Alert 자동화 시작")
 
     # 1) 기준일 결정
     ref = _parse_date(args.ref_date) if args.ref_date else None

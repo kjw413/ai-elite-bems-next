@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  AI-Elite Energy Dashboard - 일일 에너지 원단위 메일 자동 송부
+REM  AI-Elite Energy Dashboard - 일일 생산량·에너지 이상 Alert 자동 송부
 REM  사용:
 REM    run_daily_mail.bat                 (기본: D-2 자동)
 REM    run_daily_mail.bat 2026-05-09      (특정 일자)

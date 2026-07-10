@@ -3011,9 +3011,9 @@ def _send_dashboard_report_mail(ref_date: date, period: str = "일간") -> None:
     """대시보드의 '📧 메일 송부' 핸들러 (관리자 전용 — 호출부에서 is_admin 게이트).
 
     CLI(`tools/mail/run_mail.py`)와 동일한 빌더/발송 파이프라인을 재사용하여,
-    선택한 주기의 에너지 원단위 리포트를 .env의 `MAIL_RECIPIENTS` 로 즉시 발송한다.
+    선택한 주기의 에너지 리포트를 .env의 `MAIL_RECIPIENTS` 로 즉시 발송한다.
     · 일간: 현재 기준일(ref_date)
-    · 주간: ref_date 가 속한 주 (월~일)
+    · 주간: 직전 완결 주 (월~일)
     · 월간: 직전 완결 월
     """
     # 무거운 의존성(jinja2, smtplib)은 사용 시점에만 로드.
@@ -3044,7 +3044,7 @@ def _send_dashboard_report_mail(ref_date: date, period: str = "일간") -> None:
     try:
         with st.spinner(f"{period} 리포트 생성 및 발송 중..."):
             if period == "주간":
-                report = build_weekly_report(ref_date=ref_date)
+                report = build_weekly_report()
             elif period == "월간":
                 report = build_monthly_report()
             else:
@@ -3142,9 +3142,9 @@ def render_main_dashboard():
                     key="dashboard_mail_period",
                 )
                 _period_help = {
-                    "일간": f"기준일 {base_date} 실적 (MTD/YTD 전년비)",
-                    "주간": f"{base_date} 가 속한 주 (월~일, 전주비·전년동주비)",
-                    "월간": "직전 완결 월 (전년 동월비·YTD·목표 진척)",
+                    "일간": f"기준일 {base_date} 전일비 이상 신호·상세 실적",
+                    "주간": "직전 완결 주 (월~일, 전주비·전년동주비)",
+                    "월간": "직전 완결 월 (전년 동월비·YTD)",
                 }
                 st.caption(_period_help[mail_period])
                 if st.button(

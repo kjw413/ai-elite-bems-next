@@ -4,224 +4,149 @@
 <meta charset="utf-8">
 <title>{{ subject }}</title>
 </head>
-<body style="margin:0; padding:0; background-color:#f4f6fb; font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif; color:#1f2937;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6fb; padding:24px 0;">
+<body style="margin:0; padding:0; background-color:#f6f3f3; font-family:'Malgun Gothic','Apple SD Gothic Neo',Arial,sans-serif; color:#1f2937;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f6f3f3; padding:24px 0;">
   <tr>
     <td align="center">
-      <table role="presentation" width="780" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 4px 14px rgba(0,0,0,0.06);">
+      <table role="presentation" width="820" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 4px 14px rgba(0,0,0,0.07);">
 
-        <!-- 헤더 -->
+        <!-- 일일 Alert 헤더 -->
         <tr>
-          <td style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #00d4ff 100%); padding:20px 28px; color:#ffffff;">
-            <div style="font-size:12px; opacity:0.85; letter-spacing:1px;">생산담당 생산기술팀</div>
-            <div style="font-size:20px; font-weight:700; margin-top:4px;">일일 에너지 원단위 Alert</div>
-            <div style="font-size:13px; margin-top:6px; opacity:0.95;">
-              기준일 <b>{{ ref_date }}</b> ({{ ref_weekday }}) ・ 생성 {{ generated_at }}
+          <td style="background:#7f1d1d; background:linear-gradient(135deg,#7f1d1d 0%,#b91c1c 58%,#ea580c 100%); padding:20px 28px; color:#ffffff;">
+            <div style="font-size:11px; font-weight:700; letter-spacing:1.4px; opacity:0.9;">DAILY OPERATIONS ALERT · 즉시 확인</div>
+            <div style="font-size:21px; font-weight:700; margin-top:5px;">일일 생산량 · 에너지 이상 신호</div>
+            <div style="font-size:13px; margin-top:7px; opacity:0.95;">
+              기준일 <b>{{ ref_date }}</b> ({{ ref_weekday }}) · 전일 {{ prev_date }} · 생성 {{ generated_at }}
             </div>
           </td>
         </tr>
 
-        <!-- ── 섹션 1: 사업장별 원단위 표 ── -->
+        <!-- 섹션 1: 방향 이상 요약 -->
         <tr>
-          <td style="padding:18px 28px 4px 28px;">
-            <div style="font-size:15px; font-weight:700; color:#1f2937; margin-bottom:4px;">
-              <span style="display:inline-block; width:5px; height:16px; background:#2563eb; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
-              사업장별 원단위
+          <td style="padding:20px 28px 5px 28px;">
+            <div style="font-size:16px; font-weight:700; color:#111827; margin-bottom:5px;">
+              <span style="display:inline-block; width:5px; height:17px; background:#dc2626; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
+              1. 전일 대비 방향 이상 요약
             </div>
-            <div style="font-size:11px; color:#6b7280; margin-bottom:10px; padding-left:13px;">
-              MTD: 월 누계({{ mtd_from_str }}~{{ mtd_to_str }}), YTD: 연 누계({{ ytd_from_str }}~{{ ytd_to_str }})
+            <div style="font-size:11px; color:#64748b; margin:0 0 12px 13px;">
+              {{ trend_from }}~{{ ref_date }} 중앙값의 1%를 넘는 변화를 판정합니다. 생산량↓·사용량↑ 조합은 즉시 점검 대상입니다.
             </div>
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-                   style="border-collapse:collapse; font-size:12px;">
-              <thead>
-                <tr style="background:#f1f5f9; color:#475569;">
-                  <th align="center" rowspan="2" style="padding:10px 4px; border:1px solid #e5e7eb; width:44px;">사업장</th>
-                  <th align="center" rowspan="2" style="padding:10px 4px; border:1px solid #e5e7eb; width:36px;">구분</th>
-                  {% for m in factory_table_metrics %}
-                  <th align="center" colspan="2"
-                      style="padding:8px 6px; border:1px solid #e5e7eb;
-                             background:{{ m.header_bg }}; border-top:2px solid {{ m.color }};">
-                    <div style="font-weight:700; color:#1f2937;">{{ m.label }}</div>
-                    <div style="font-weight:400; color:#64748b; font-size:10.5px; margin-top:2px;">{{ m.unit }}</div>
-                  </th>
-                  {% endfor %}
-                </tr>
-                <tr style="color:#64748b; font-size:10.5px;">
-                  {% for m in factory_table_metrics %}
-                  <th align="center" style="padding:6px 4px; border:1px solid #e5e7eb;
-                                            font-weight:600; background:{{ m.cell_bg }};">
-                    '{{ ref_year_short }}년
-                  </th>
-                  <th align="center" style="padding:6px 4px; border:1px solid #e5e7eb;
-                                            font-weight:600; background:{{ m.cell_bg }};">
-                    전년비
-                  </th>
-                  {% endfor %}
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in factory_rate_rows %}
-                <tr {% if row.is_total %}style="background:#f8fafc; font-weight:700;"{% endif %}>
-                  <td align="center" rowspan="2" style="padding:10px 4px; border:1px solid #e5e7eb;
-                                            {% if row.is_total %}color:#1e40af;{% else %}color:#374151;{% endif %}">
-                    {{ row.factory }}
-                  </td>
-                  <td align="center" style="padding:8px 4px; border:1px solid #e5e7eb; font-size:11px; color:#475569; font-weight:600;">
-                    MTD
-                  </td>
-                  {% for cell in row.cells %}
-                  {% set m = factory_table_metrics[loop.index0] %}
-                  <td align="right" style="padding:8px 8px; border:1px solid #e5e7eb; font-variant-numeric:tabular-nums;
-                                           font-size:13px; color:#0f172a; font-weight:700;
-                                           background:{{ m.cell_bg }};">
-                    {{ cell.mtd_value }}
-                  </td>
-                  <td align="right" style="padding:8px 8px; border:1px solid #e5e7eb; font-variant-numeric:tabular-nums;
-                                           color:{{ cell.mtd_color }}; font-weight:600; font-size:12px;
-                                           background:{{ m.cell_bg }};">
-                    {{ cell.mtd_delta }}
-                  </td>
-                  {% endfor %}
-                </tr>
-                <tr {% if row.is_total %}style="background:#f8fafc; font-weight:700;"{% endif %}>
-                  <td align="center" style="padding:8px 4px; border:1px solid #e5e7eb; font-size:11px; color:#475569; font-weight:600;">
-                    YTD
-                  </td>
-                  {% for cell in row.cells %}
-                  {% set m = factory_table_metrics[loop.index0] %}
-                  <td align="right" style="padding:8px 8px; border:1px solid #e5e7eb; font-variant-numeric:tabular-nums;
-                                           font-size:13px; color:#0f172a; font-weight:700;
-                                           background:{{ m.cell_bg }};">
-                    {{ cell.ytd_value }}
-                  </td>
-                  <td align="right" style="padding:8px 8px; border:1px solid #e5e7eb; font-variant-numeric:tabular-nums;
-                                           color:{{ cell.ytd_color }}; font-weight:600; font-size:12px;
-                                           background:{{ m.cell_bg }};">
-                    {{ cell.ytd_delta }}
-                  </td>
-                  {% endfor %}
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            <div style="font-size:10.5px; color:#94a3b8; padding-left:13px; margin-top:6px;">
-              색상: <b style="color:#dc2626;">적색(악화)</b> = 원단위↑ · 생산량↓,
-              <b style="color:#2563eb;">청색(개선)</b> = 원단위↓ · 생산량↑.
-            </div>
-          </td>
-        </tr>
 
-        <!-- ── 섹션 2: 연간 목표 대비 사용률 (전사 기준 YTD ÷ '26년 목표) ── -->
-        {% if target_progress %}
-        <tr>
-          <td style="padding:18px 28px 8px 28px;">
-            <div style="font-size:15px; font-weight:700; color:#1f2937; margin-bottom:4px;">
-              <span style="display:inline-block; width:5px; height:16px; background:#2563eb; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
-              전사 원단위 목표 대비 사용률
-            </div>
-            <div style="font-size:11px; color:#6b7280; margin-bottom:10px; padding-left:13px;">
-              사용률 = 누적 YTD/'26년 목표, '26년 목표 = '25년 전체 누계 * 0.95 (전년비 5% 절감)
-            </div>
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-              {% for t in target_progress %}
-              <tr>
-                <td width="38%" style="padding:6px 8px 6px 13px; font-size:12px; color:#374151;">
-                  <div><b>{{ t.label }}</b></div>
-                  <div style="font-size:10.5px; color:#94a3b8; margin-top:2px; font-variant-numeric:tabular-nums;">
-                    YTD <b style="color:#475569;">{{ '%.2f' % t.actual_value }}</b>
-                    / 목표 <b style="color:#475569;">{{ '%.2f' % t.target_value }}</b>
-                    <span style="color:#cbd5e1;">({{ t.unit }})</span>
-                  </div>
-                </td>
-                <td style="padding:6px 8px;">
-                  <div style="background:#e5e7eb; border-radius:6px; height:10px; position:relative; overflow:hidden;">
-                    <div style="background:{{ t.color }}; width:{{ '%.0f' % t.bar_width }}%; height:100%; border-radius:6px;"></div>
-                  </div>
-                </td>
-                <td width="22%" style="padding:6px 13px 6px 8px; font-size:13px; color:{{ t.color }}; font-weight:700; text-align:right; font-variant-numeric:tabular-nums;">
-                  {% if t.achievement <= 100 %}✓ {{ '%.1f' % t.achievement }}%{% else %}{{ '%.1f' % t.achievement }}%{% endif %}
-                </td>
-              </tr>
-              {% endfor %}
-            </table>
-            <div style="font-size:10.5px; color:#94a3b8; padding-left:13px; margin-top:6px;">
-              원단위는 낮을수록 좋으므로 100% 이하면 목표 범위입니다.
-            </div>
-          </td>
-        </tr>
-        {% endif %}
-
-        {# ── 섹션 3: AI 예상치 초과 사용 (정상가동일 오탐 검증 전까지 비활성화) ──
-        <tr>
-          <td style="padding:18px 28px 8px 28px;">
-            {% if p95_items %}
-            <div style="font-size:15px; font-weight:700; color:#1f2937; margin-bottom:6px;">
-              <span style="display:inline-block; width:5px; height:16px; background:#ef4444; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
-              AI 예상치 초과 사용 — {{ ref_date }} 기준 ({{ n_p95_exceed }}건)
-            </div>
-            <div style="font-size:11px; color:#6b7280; margin-bottom:8px; padding-left:13px;">
-              AI가 예측한 정상 사용 범위를 실제 사용량이 넘어선 항목입니다.
-              이탈 등급이 <b>심각</b>일수록 평소 패턴에서 크게 벗어났음을 의미합니다.
-            </div>
-            <table role="presentation" width="100%" cellpadding="6" cellspacing="0" border="0"
-                   style="border-collapse:collapse; font-size:12px;">
-              <thead>
-                <tr style="background:#f8fafc; color:#6b7280; font-weight:600;">
-                  <th align="center" style="padding:8px; border-bottom:1px solid #e5e7eb;">공장</th>
-                  <th align="center" style="padding:8px; border-bottom:1px solid #e5e7eb;">항목</th>
-                  <th align="center" style="padding:8px; border-bottom:1px solid #e5e7eb;">AI 예상 정상 범위</th>
-                  <th align="right"  style="padding:8px; border-bottom:1px solid #e5e7eb;">실측</th>
-                  <th align="right"  style="padding:8px; border-bottom:1px solid #e5e7eb;">초과량</th>
-                  <th align="right"  style="padding:8px; border-bottom:1px solid #e5e7eb;">초과율</th>
-                  <th align="center" style="padding:8px; border-bottom:1px solid #e5e7eb;">이탈 등급</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for a in p95_items %}
-                <tr>
-                  <td align="center" style="padding:8px; border-bottom:1px solid #f1f5f9; font-weight:600;">{{ a.factory }}</td>
-                  <td align="center" style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ a.target }}</td>
-                  <td align="center" style="padding:8px; border-bottom:1px solid #f1f5f9; font-variant-numeric:tabular-nums; color:#475569;">{{ a.band }}</td>
-                  <td align="right"  style="padding:8px; border-bottom:1px solid #f1f5f9; font-variant-numeric:tabular-nums; font-weight:700;">{{ a.actual }}</td>
-                  <td align="right"  style="padding:8px; border-bottom:1px solid #f1f5f9; font-variant-numeric:tabular-nums; color:{{ a.color }}; font-weight:700;">{{ a.over }}</td>
-                  <td align="right"  style="padding:8px; border-bottom:1px solid #f1f5f9; font-variant-numeric:tabular-nums; color:{{ a.color }};">{{ a.over_pct }}</td>
-                  <td align="center" style="padding:8px; border-bottom:1px solid #f1f5f9; color:{{ a.color }}; font-weight:700;">{{ a.level }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            <div style="font-size:10.5px; color:#94a3b8; padding-left:13px; margin-top:6px;">
-              이탈 등급 기준: 경미 / 주의 / 심각 (평소 패턴 대비 벗어난 정도 — 클수록 비정상).
+            {% if warning_count > 0 %}
+            <div style="background:#fef2f2; border:1px solid #fecaca; border-left:5px solid #dc2626; border-radius:8px; padding:12px 15px; margin-bottom:13px;">
+              <div style="font-size:14px; font-weight:700; color:#991b1b;">즉시 점검 {{ warning_count }}건 · {{ warning_factory_count }}개 사업장</div>
+              <div style="font-size:11px; color:#b91c1c; margin-top:3px;">생산량은 줄었지만 에너지 사용량이 증가한 조합입니다.</div>
             </div>
             {% else %}
-            <div style="font-size:15px; font-weight:700; color:#065f46; margin-bottom:6px;">
-              <span style="display:inline-block; width:5px; height:16px; background:#10b981; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
-              AI 예상치 초과 사용 — {{ ref_date }} 기준 (0건)
-            </div>
-            <div style="background:#ecfdf5; border:1px solid #10b981; border-radius:8px; padding:10px 14px; font-size:12px; color:#065f46; margin-top:4px;">
-              ✓ 5개 공장(남양주1·남양주2·김해·광주·논산)의 전력·연료·용수 모두 AI 예상 사용 범위 안에서 운영되었습니다.
+            <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-left:5px solid #059669; border-radius:8px; padding:12px 15px; margin-bottom:13px;">
+              <div style="font-size:14px; font-weight:700; color:#065f46;">즉시 점검 신호 없음</div>
+              <div style="font-size:11px; color:#047857; margin-top:3px;">5개 사업장의 생산량·사용량 방향에서 역행 신호가 발견되지 않았습니다.</div>
             </div>
             {% endif %}
 
-            {% if missing_band_pairs %}
-            <div style="font-size:10.5px; color:#94a3b8; margin-top:8px; padding-left:13px;">
-              ※ AI 예측이 아직 실행되지 않은 항목 {{ missing_band_pairs|length }}건
-              (예측 완료 {{ n_with_band }}/{{ n_expected_band }}):
-              {% for pair in missing_band_pairs %}{{ pair[0] }}·{{ pair[1] }}{% if not loop.last %}, {% endif %}{% endfor %}
-              — 해당 항목은 본 표에서 제외됩니다.
-            </div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:11px; table-layout:fixed;">
+              <thead>
+                <tr style="background:#f8fafc; color:#475569;">
+                  <th align="center" style="width:68px; padding:8px 4px; border:1px solid #e5e7eb;">사업장</th>
+                  <th align="center" style="width:75px; padding:8px 4px; border:1px solid #e5e7eb; background:#f0f7e7;">생산량<br><span style="font-size:9px; font-weight:400;">전일비</span></th>
+                  {% for m in signal_metrics %}
+                  <th align="center" style="padding:8px 4px; border:1px solid #e5e7eb; background:{{ m.header_bg }}; border-top:2px solid {{ m.color }};">
+                    {{ m.signal_label }}<br><span style="font-size:9px; font-weight:400;">방향 신호</span>
+                  </th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in factory_rows %}
+                <tr>
+                  <td align="center" style="padding:9px 4px; border:1px solid #e5e7eb; font-weight:700; color:#374151;">{{ row.factory }}</td>
+                  <td align="center" style="padding:9px 4px; border:1px solid #e5e7eb; color:{{ row.production_delta_color }}; font-weight:700; background:#fafcf5;">{{ row.production_delta }}</td>
+                  {% for signal in row.signals %}
+                  <td align="center" style="padding:7px 3px; border:1px solid #e5e7eb; background:{{ signal.bg }}; color:{{ signal.color }};">
+                    <div style="font-size:11px; font-weight:700;">{{ signal.badge }}</div>
+                    <div style="font-size:9px; margin-top:2px; white-space:nowrap;">{{ signal.label }}</div>
+                    <div style="font-size:9px; margin-top:2px; color:{{ signal.usage_delta_color }};">사용 {{ signal.usage_delta }}</div>
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+
+            {% if warning_items %}
+            <div style="font-size:12px; font-weight:700; color:#991b1b; margin:14px 0 6px 0;">점검 대상 상세</div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:11px;">
+              <thead>
+                <tr style="background:#fff7ed; color:#9a3412;">
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">일자</th>
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">사업장</th>
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">에너지원</th>
+                  <th align="right" style="padding:7px; border:1px solid #fed7aa;">생산량 전일비</th>
+                  <th align="right" style="padding:7px; border:1px solid #fed7aa;">사용량 전일비</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in warning_items %}
+                <tr>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.date }}</td>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5; font-weight:700;">{{ item.factory }}</td>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.energy }}</td>
+                  <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.production_delta }}</td>
+                  <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.usage_delta }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
             {% endif %}
           </td>
         </tr>
-        #}
 
-        <!-- 푸터 -->
+        <!-- 섹션 2: 당일/전일 상세 -->
         <tr>
-          <td style="background:#f9fafb; padding:14px 28px; border-top:1px solid #e5e7eb; font-size:11px; color:#64748b;">
-            본 메일은 AI 자동화 모듈에 의해 발송되었습니다.
+          <td style="padding:20px 28px 20px 28px;">
+            <div style="font-size:16px; font-weight:700; color:#111827; margin-bottom:5px;">
+              <span style="display:inline-block; width:5px; height:17px; background:#f59e0b; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
+              2. 당일 · 전일 상세 실적
+            </div>
+            <div style="font-size:11px; color:#64748b; margin:0 0 11px 13px;">
+              각 셀은 <b>당일 실적</b>을 크게 표시하고, 아래에 전일 실적과 전일비를 함께 표시합니다.
+            </div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:11px; table-layout:fixed;">
+              <thead>
+                <tr style="background:#f8fafc; color:#475569;">
+                  <th align="center" style="width:68px; padding:9px 4px; border:1px solid #e5e7eb;">사업장</th>
+                  {% for m in detail_metrics %}
+                  <th align="center" style="padding:8px 3px; border:1px solid #e5e7eb; background:{{ m.header_bg }}; border-top:2px solid {{ m.color }};">
+                    <div style="font-weight:700;">{{ m.label }}</div>
+                    <div style="font-size:9px; font-weight:400; margin-top:2px;">{{ m.unit }}</div>
+                  </th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in factory_rows %}
+                <tr>
+                  <td align="center" style="padding:10px 4px; border:1px solid #e5e7eb; font-weight:700; color:#374151;">{{ row.factory }}</td>
+                  {% for cell in row.detail_cells %}
+                  {% set m = detail_metrics[loop.index0] %}
+                  <td align="right" style="padding:8px 7px; border:1px solid #e5e7eb; background:{{ m.cell_bg }}; font-variant-numeric:tabular-nums;">
+                    <div style="font-size:13px; color:#0f172a; font-weight:700;">{{ cell.current }}</div>
+                    <div style="font-size:9.5px; color:#64748b; margin-top:3px;">전일 {{ cell.previous }}</div>
+                    <div style="font-size:10px; color:{{ cell.delta_color }}; font-weight:700; margin-top:1px;">{{ cell.delta }}</div>
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </td>
         </tr>
 
+        <tr>
+          <td style="background:#fff7ed; padding:13px 28px; border-top:1px solid #fed7aa; font-size:11px; color:#9a3412;">
+            본 메일은 당일 조치 판단용입니다. ‘주의’ 신호는 해당 사업장의 조업 변화와 설비 상태를 우선 확인해 주세요.
+          </td>
+        </tr>
       </table>
     </td>
   </tr>
