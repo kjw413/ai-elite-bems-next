@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.domain.factories import (
+    DASHBOARD_FACTORY_ORDER,
     FACTORY_CODE_TO_KR,
     NAMYANGJU_PARENT_CODE,
     expand_factory_members,
@@ -234,7 +235,7 @@ def _render_trend(mode: str, df: pd.DataFrame, theme: dict) -> None:
 
 
 def _render_breakdown(date_from: str, date_to: str, sel_factories: list[str]) -> None:
-    sel_display = [_factory_display(f) for f in sel_factories] if sel_factories else ["남양주", "김해", "광주", "논산"]
+    sel_display = [_factory_display(f) for f in sel_factories] if sel_factories else list(DASHBOARD_FACTORY_ORDER)
     targets: list[str] = []
     for factory in sel_display:
         targets.extend(expand_factory_members(factory))

@@ -22,7 +22,7 @@
 ## 4. DB 스키마
 
 ### `energy_daily` — 일별 에너지/생산 통합 실적
-- `factory`: 공장 (남양주1, 남양주2, 김해, 광주, 논산)
+- `factory`: 공장 (남양주1, 남양주2, 김해, 광주, 논산, 경산)
 - `date`: 일자 (YYYY-MM-DD)
 - `mix_prod_kg`: 총 생산량 (kg)
 - `total_power_kwh`, `fuel_nm3`, `water_ton`: 총 사용량

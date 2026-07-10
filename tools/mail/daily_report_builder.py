@@ -45,9 +45,10 @@ log = get_logger("daily_report")
 FACTORY_LABELS = {
     "F10A": "남양주1",
     "F10B": "남양주2",
-    "F20":  "2공장",
-    "F30":  "3공장",
-    "F40":  "4공장",
+    "F20":  "김해공장",
+    "F30":  "광주공장",
+    "F40":  "논산공장",
+    "F50":  "경산",
 }
 
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
@@ -60,6 +61,7 @@ FACTORY_DISPLAY_ORDER: List[Tuple[str, Optional[List[str]]]] = [
     ("김해",   ["김해"]),
     ("광주",   ["광주"]),
     ("논산",   ["논산"]),
+    ("경산",   ["경산"]),
 ]
 
 # 원단위 메트릭 정의. target_service 의 metric 키와 동기.
@@ -117,7 +119,7 @@ FACTORY_TABLE_METRICS = [PRODUCTION_METRIC] + INTENSITY_METRICS + [WASTEWATER_RA
 # v5.2 정상범주 상한 초과 감지 — 기준일 1일치만, 5개 실공장 모두 확인
 # (이상 판정은 더 이상 MAPE 임계가 아니라 "실측 > P95" 정성적 기준)
 PHYSICAL_FACTORIES_FOR_EXCEEDANCE: List[str] = [
-    "남양주1", "남양주2", "김해", "광주", "논산",
+    "남양주1", "남양주2", "김해", "광주", "논산", "경산",
 ]
 
 # v5.1(점추정) 폴백 임계 — pred_p95가 NULL인 행은 (legacy) 메일에서 표시 안 함.

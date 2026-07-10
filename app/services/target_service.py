@@ -32,7 +32,7 @@ TARGET_METRICS: list[str] = [
 ]
 
 # 모달 입력에서 노출할 공장 목록(전사 = ALL).
-TARGET_FACTORIES: list[str] = ["ALL", "남양주", "김해", "광주", "논산"]
+TARGET_FACTORIES: list[str] = ["ALL", "남양주", "김해", "광주", "논산", "경산"]
 
 # UI 라벨 (한국어).
 METRIC_LABELS: dict[str, str] = {
@@ -48,6 +48,7 @@ FACTORY_LABELS: dict[str, str] = {
     "김해":   "김해",
     "광주":   "광주",
     "논산":   "논산",
+    "경산":   "경산",
 }
 
 # 생산량(증가 목표) vs 원단위(절감 목표) 구분

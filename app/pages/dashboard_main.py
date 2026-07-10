@@ -1855,7 +1855,7 @@ def render_yoy_chart(base_date: date):
         sel_factories = st.multiselect(
             "공장 필터",
             options=_ALL_YOY_FACTORIES,
-            default=["남양주", "김해", "광주", "논산"],
+            default=list(DASHBOARD_FACTORY_ORDER),
             key="yoy_factory_sel",
             placeholder="공장 선택...",
         )

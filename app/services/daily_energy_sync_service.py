@@ -401,7 +401,7 @@ def sync_daily_energy_from_source(
         return {**base, "success": False, "errors": [msg], "message": msg}
 
     if not parsed:
-        msg = "유효한 공장 시트가 없습니다 (남양주1/남양주2/김해/광주/논산 시트 필요)"
+        msg = "유효한 공장 시트가 없습니다 (남양주1/남양주2/김해/광주/논산/경산 시트 필요)"
         logger.warning(f"[daily_energy_sync] {msg}")
         return {**base, "success": False, "errors": [msg], "message": msg}
 

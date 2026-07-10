@@ -30,6 +30,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.domain.factories import (
+    DASHBOARD_FACTORY_ORDER,
     FACTORY_CODE_TO_KR,
     FACTORY_DISPLAY_ORDER,
     FACTORY_KR_TO_CODE,
@@ -864,9 +865,9 @@ def render_production_performance():
             "수분 제거 후 무게로 기록되는 품목은 **믹스 환산계수**(260014 탈지분유 × 10.91954, 260042 유크림믹스 × 4)를 적용합니다."
         )
 
-        # sel_factories 는 F-코드(F10/F20/F30/F40)이므로 한글명으로 변환 후 분해
+        # sel_factories 는 F-코드(F10/F20/.../F50)이므로 한글명으로 변환 후 분해
         sel_factories_display = [_factory_display(f) for f in sel_factories] if sel_factories else \
-            ["남양주", "김해", "광주", "논산"]
+            list(DASHBOARD_FACTORY_ORDER)
         breakdown_targets: list[str] = []
         for f in sel_factories_display:
             breakdown_targets.extend(expand_factory_members(f))

@@ -128,7 +128,7 @@ def render_upload_page():
         </div>
         <ul style="color:var(--text-secondary); line-height:1.8; margin:0; padding-left:18px;">
             <li>지원 형식: <code style="{_code_style}">.xlsx</code>, <code style="{_code_style}">.xls</code></li>
-            <li>시트명: 공장 코드 (<code style="{_code_style}">남양주1</code>, <code style="{_code_style}">남양주2</code>, <code style="{_code_style}">김해</code>, <code style="{_code_style}">광주</code>, <code style="{_code_style}">논산</code>)</li>
+            <li>시트명: 공장 코드 (<code style="{_code_style}">남양주1</code>, <code style="{_code_style}">남양주2</code>, <code style="{_code_style}">김해</code>, <code style="{_code_style}">광주</code>, <code style="{_code_style}">논산</code>, <code style="{_code_style}">경산</code>)</li>
             <li>동일 (공장+날짜) 데이터가 이미 존재하면 <strong style="color:#fbbf24;">덮어쓰기(UPSERT)</strong> 됩니다.</li>
             <li>변경 항목은 자동으로 변경 이력에 기록됩니다.</li>
         </ul>

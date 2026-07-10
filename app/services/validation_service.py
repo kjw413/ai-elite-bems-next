@@ -65,7 +65,7 @@ def validate_sheets(parsed_data: dict[str, pd.DataFrame]) -> list[ValidationErro
     if not parsed_data:
         errors.append(ValidationError(
             sheet="", row=None, column=None,
-            reason="공장 코드에 해당하는 시트가 없습니다. (남양주1, 남양주2, 김해, 광주, 논산)"
+            reason="공장 코드에 해당하는 시트가 없습니다. (남양주1, 남양주2, 김해, 광주, 논산, 경산)"
         ))
     return errors
 
