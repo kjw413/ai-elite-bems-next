@@ -8,105 +8,24 @@
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f6f3f3; padding:24px 0;">
   <tr>
     <td align="center">
-      <table role="presentation" width="820" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 4px 14px rgba(0,0,0,0.07);">
+      <table role="presentation" width="820" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 4px 14px rgba(0, 0, 0, 0.07);">
 
-        <!-- 일일 Alert 헤더 -->
         <tr>
           <td style="background:#7f1d1d; background:linear-gradient(135deg,#7f1d1d 0%,#b91c1c 58%,#ea580c 100%); padding:20px 28px; color:#ffffff;">
-            <div style="font-size:11px; font-weight:700; letter-spacing:1.4px; opacity:0.9;">DAILY OPERATIONS ALERT · 즉시 확인</div>
-            <div style="font-size:21px; font-weight:700; margin-top:5px;">일일 생산량 · 에너지 이상 신호</div>
+            <div style="font-size:11px; font-weight:700; letter-spacing:1.4px; opacity:0.9;">생산담당 생산기술팀</div>
+            <div style="font-size:21px; font-weight:700; margin-top:5px;">일일 에너지 원단위 Alert</div>
             <div style="font-size:13px; margin-top:7px; opacity:0.95;">
               기준일 <b>{{ ref_date }}</b> ({{ ref_weekday }}) · 전일 {{ prev_date }} · 생성 {{ generated_at }}
             </div>
           </td>
         </tr>
 
-        <!-- 섹션 1: 방향 이상 요약 -->
+        <!-- 섹션 1: 원단위 상세 -->
         <tr>
-          <td style="padding:20px 28px 5px 28px;">
-            <div style="font-size:16px; font-weight:700; color:#111827; margin-bottom:5px;">
-              <span style="display:inline-block; width:5px; height:17px; background:#dc2626; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
-              1. 전일 대비 방향 이상 요약
-            </div>
-            <div style="font-size:11px; color:#64748b; margin:0 0 12px 13px;">
-              {{ trend_from }}~{{ ref_date }} 중앙값의 1%를 넘는 변화를 판정합니다. 생산량↓·사용량↑ 조합은 즉시 점검 대상입니다.
-            </div>
-
-            {% if warning_count > 0 %}
-            <div style="background:#fef2f2; border:1px solid #fecaca; border-left:5px solid #dc2626; border-radius:8px; padding:12px 15px; margin-bottom:13px;">
-              <div style="font-size:14px; font-weight:700; color:#991b1b;">즉시 점검 {{ warning_count }}건 · {{ warning_factory_count }}개 사업장</div>
-              <div style="font-size:11px; color:#b91c1c; margin-top:3px;">생산량은 줄었지만 에너지 사용량이 증가한 조합입니다.</div>
-            </div>
-            {% else %}
-            <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-left:5px solid #059669; border-radius:8px; padding:12px 15px; margin-bottom:13px;">
-              <div style="font-size:14px; font-weight:700; color:#065f46;">즉시 점검 신호 없음</div>
-              <div style="font-size:11px; color:#047857; margin-top:3px;">5개 사업장의 생산량·사용량 방향에서 역행 신호가 발견되지 않았습니다.</div>
-            </div>
-            {% endif %}
-
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:11px; table-layout:fixed;">
-              <thead>
-                <tr style="background:#f8fafc; color:#475569;">
-                  <th align="center" style="width:68px; padding:8px 4px; border:1px solid #e5e7eb;">사업장</th>
-                  <th align="center" style="width:75px; padding:8px 4px; border:1px solid #e5e7eb; background:#f0f7e7;">생산량<br><span style="font-size:9px; font-weight:400;">전일비</span></th>
-                  {% for m in signal_metrics %}
-                  <th align="center" style="padding:8px 4px; border:1px solid #e5e7eb; background:{{ m.header_bg }}; border-top:2px solid {{ m.color }};">
-                    {{ m.signal_label }}<br><span style="font-size:9px; font-weight:400;">방향 신호</span>
-                  </th>
-                  {% endfor %}
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in factory_rows %}
-                <tr>
-                  <td align="center" style="padding:9px 4px; border:1px solid #e5e7eb; font-weight:700; color:#374151;">{{ row.factory }}</td>
-                  <td align="center" style="padding:9px 4px; border:1px solid #e5e7eb; color:{{ row.production_delta_color }}; font-weight:700; background:#fafcf5;">{{ row.production_delta }}</td>
-                  {% for signal in row.signals %}
-                  <td align="center" style="padding:7px 3px; border:1px solid #e5e7eb; background:{{ signal.bg }}; color:{{ signal.color }};">
-                    <div style="font-size:11px; font-weight:700;">{{ signal.badge }}</div>
-                    <div style="font-size:9px; margin-top:2px; white-space:nowrap;">{{ signal.label }}</div>
-                    <div style="font-size:9px; margin-top:2px; color:{{ signal.usage_delta_color }};">사용 {{ signal.usage_delta }}</div>
-                  </td>
-                  {% endfor %}
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-
-            {% if warning_items %}
-            <div style="font-size:12px; font-weight:700; color:#991b1b; margin:14px 0 6px 0;">점검 대상 상세</div>
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:11px;">
-              <thead>
-                <tr style="background:#fff7ed; color:#9a3412;">
-                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">일자</th>
-                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">사업장</th>
-                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">에너지원</th>
-                  <th align="right" style="padding:7px; border:1px solid #fed7aa;">생산량 전일비</th>
-                  <th align="right" style="padding:7px; border:1px solid #fed7aa;">사용량 전일비</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in warning_items %}
-                <tr>
-                  <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.date }}</td>
-                  <td align="center" style="padding:7px; border:1px solid #ffedd5; font-weight:700;">{{ item.factory }}</td>
-                  <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.energy }}</td>
-                  <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.production_delta }}</td>
-                  <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.usage_delta }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            {% endif %}
-          </td>
-        </tr>
-
-        <!-- 섹션 2: 당일/전일 상세 -->
-        <tr>
-          <td style="padding:20px 28px 20px 28px;">
+          <td style="padding:20px 28px 7px 28px;">
             <div style="font-size:16px; font-weight:700; color:#111827; margin-bottom:5px;">
               <span style="display:inline-block; width:5px; height:17px; background:#f59e0b; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
-              2. 당일 · 전일 상세 실적
+              1. 당일 · 전일 원단위 상세 실적
             </div>
             <div style="font-size:11px; color:#64748b; margin:0 0 11px 13px;">
               각 셀은 <b>당일 실적</b>을 크게 표시하고, 아래에 전일 실적과 전일비를 함께 표시합니다.
@@ -139,12 +58,64 @@
                 {% endfor %}
               </tbody>
             </table>
+            <div style="font-size:9.5px; color:#94a3b8; margin-top:6px; text-align:right;">
+              원단위 = 사용량 ÷ 생산량(ton), 폐수/용수 = 폐수량 ÷ 용수량
+            </div>
+          </td>
+        </tr>
+
+        <!-- 섹션 2: 즉시 점검 대상만 표시 -->
+        <tr>
+          <td style="padding:20px 28px 20px 28px;">
+            <div style="font-size:16px; font-weight:700; color:#111827; margin-bottom:5px;">
+              <span style="display:inline-block; width:5px; height:17px; background:#dc2626; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
+              2. 즉시 점검 대상
+            </div>
+            <div style="font-size:11px; color:#64748b; margin:0 0 12px 13px;">
+              {{ trend_from }}~{{ ref_date }} 중앙값의 1%를 넘는 변화를 판정하며, 생산량↓·사용량↑ 조합만 표시합니다.
+            </div>
+
+            {% if warning_items %}
+            <div style="background:#fef2f2; border:1px solid #fecaca; border-left:5px solid #dc2626; border-radius:8px; padding:12px 15px; margin-bottom:12px;">
+              <div style="font-size:14px; font-weight:700; color:#991b1b;">즉시 점검 {{ warning_count }}건 · {{ warning_factory_count }}개 사업장</div>
+              <div style="font-size:11px; color:#b91c1c; margin-top:3px;">생산량은 줄었지만 에너지 사용량이 증가한 조합입니다.</div>
+            </div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:11px;">
+              <thead>
+                <tr style="background:#fff7ed; color:#9a3412;">
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">일자</th>
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">사업장</th>
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">에너지원</th>
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">판정</th>
+                  <th align="right" style="padding:7px; border:1px solid #fed7aa;">생산량 전일비</th>
+                  <th align="right" style="padding:7px; border:1px solid #fed7aa;">사용량 전일비</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in warning_items %}
+                <tr>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.date }}</td>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5; font-weight:700;">{{ item.factory }}</td>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.energy }}</td>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5; color:#b91c1c; font-weight:700;">생산↓ 사용↑</td>
+                  <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.production_delta }}</td>
+                  <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.usage_delta }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% else %}
+            <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-left:5px solid #059669; border-radius:8px; padding:12px 15px;">
+              <div style="font-size:14px; font-weight:700; color:#065f46;">즉시 점검 대상 없음</div>
+              <div style="font-size:11px; color:#047857; margin-top:3px;">5개 사업장의 생산량·사용량 방향에서 역행 신호가 발견되지 않았습니다.</div>
+            </div>
+            {% endif %}
           </td>
         </tr>
 
         <tr>
           <td style="background:#fff7ed; padding:13px 28px; border-top:1px solid #fed7aa; font-size:11px; color:#9a3412;">
-            본 메일은 당일 조치 판단용입니다. ‘주의’ 신호는 해당 사업장의 조업 변화와 설비 상태를 우선 확인해 주세요.
+            본 메일은 당일 조치 판단용입니다. 즉시 점검 대상은 해당 사업장의 조업 변화와 설비 상태를 우선 확인해 주세요.
           </td>
         </tr>
       </table>

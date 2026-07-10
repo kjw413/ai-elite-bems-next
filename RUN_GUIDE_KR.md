@@ -258,7 +258,7 @@ PRODUCTION_RAW_DIR=E:\Sampled DB\Raw_생산실적
 
 ### 9-1. 일일 에너지 이상 Alert 자동 송부 — `run_daily_mail.bat`
 
-`.env`의 `MAIL_RECIPIENTS`로 D-2 기준일의 5개 사업장 생산량·사용량 방향 이상 요약과 당일/전일 상세 실적 HTML 메일을 Gmail SMTP로 발송합니다. 메일 생성 직전에 `RawDB_에너지.xlsx` 변경분을 `energy_daily` DB에 먼저 자동 반영합니다.
+`.env`의 `MAIL_RECIPIENTS`로 D-2 기준일의 5개 사업장 당일/전일 원단위 상세 실적과 생산량·사용량 방향 기반 즉시 점검 대상을 HTML 메일로 발송합니다. 메일 생성 직전에 `RawDB_에너지.xlsx` 변경분을 `energy_daily` DB에 먼저 자동 반영합니다.
 
 ```bat
 :: 기본 (D-2, .env 설정)

@@ -7,7 +7,6 @@ from tools.mail import period_report_builder as period_builder
 from tools.mail.config import DailyReportConfig, TEMPLATE_DIR
 from tools.mail.daily_report_builder import (
     DAILY_DETAIL_METRICS,
-    DAILY_USAGE_METRICS,
     FACTORY_TABLE_METRICS,
     _build_daily_factory_rows,
     _daily_direction_signal,
@@ -103,13 +102,10 @@ def test_all_three_mail_templates_render_with_strict_context():
         ref_weekday="수",
         generated_at="2026-07-10 12:00:00",
         trend_from="2026-07-02",
-        n_factories=5,
         warning_count=len(warning_items),
         warning_factory_count=len({item["factory"] for item in warning_items}),
-        good_count=good_count,
         warning_items=warning_items,
         factory_rows=daily_rows,
-        signal_metrics=DAILY_USAGE_METRICS,
         detail_metrics=DAILY_DETAIL_METRICS,
     )
     weekly = env.get_template("period_energy_report.html").render(
@@ -140,7 +136,8 @@ def test_all_three_mail_templates_render_with_strict_context():
         ytd_previous_label="2025.01~06",
     )
 
-    assert "일일 생산량 · 에너지 이상 신호" in daily
+    assert "1. 당일 · 전일 원단위 상세 실적" in daily
+    assert "2. 즉시 점검 대상" in daily
     assert "최근 4주" in weekly
     assert "당월 실적 비교 (MTD)" in monthly
     assert "연 누계 실적 비교 (YTD)" in monthly
@@ -167,10 +164,24 @@ def test_daily_builder_renders_new_two_section_report(monkeypatch):
     report = daily_builder.build_daily_report(ref_date=ref_date, config=config)
 
     assert "일일 에너지 이상 alert" in report.subject
-    assert "1. 전일 대비 방향 이상 요약" in report.html
-    assert "2. 당일 · 전일 상세 실적" in report.html
+    assert "1. 당일 · 전일 원단위 상세 실적" in report.html
+    assert "2. 즉시 점검 대상" in report.html
     assert "생산↓ 사용↑" in report.html
-    assert "사업장별 원단위" not in report.html
+    assert "전력 원단위" in report.html
+    assert "연료 원단위" in report.html
+    assert "용수 원단위" in report.html
+    assert "폐수/용수" in report.html
+    assert "방향 신호" not in report.html
+    assert ">판정<" in report.html
+    calm_rows = []
+    for offset in range(7):
+        row = _energy_row("남양주1", 1000.0, 100.0)
+        row["date"] = ref_date - timedelta(days=6 - offset)
+        calm_rows.append(row)
+    monkeypatch.setattr(daily_builder, "_fetch_rows_range", lambda *_args, **_kwargs: calm_rows)
+    calm_report = daily_builder.build_daily_report(ref_date=ref_date, config=config)
+    assert "즉시 점검 대상 없음" in calm_report.html
+    assert ">판정<" not in calm_report.html
 
 
 def test_monthly_builder_renders_mtd_and_ytd_only(monkeypatch):

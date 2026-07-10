@@ -3142,7 +3142,7 @@ def render_main_dashboard():
                     key="dashboard_mail_period",
                 )
                 _period_help = {
-                    "일간": f"기준일 {base_date} 전일비 이상 신호·상세 실적",
+                    "일간": f"기준일 {base_date} 원단위 상세·즉시 점검 대상",
                     "주간": "직전 완결 주 (월~일, 전주비·전년동주비)",
                     "월간": "직전 완결 월 (전년 동월비·YTD)",
                 }

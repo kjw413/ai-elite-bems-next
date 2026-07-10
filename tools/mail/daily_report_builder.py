@@ -3,11 +3,11 @@ Daily Energy Alert Report Builder
 =================================
 기준일(D-N)의 당일 운영 이상을 빠르게 확인하는 일일 메일.
 
-  1) 5개 사업장 생산량·사용량 방향 신호
-     - 홈 대시보드와 동일하게 최근 7일 중앙값의 1%를 유효 변화 기준으로 사용
-     - 생산량 감소 + 에너지 사용량 증가 조합을 즉시 점검 대상으로 요약
-  2) 당일·전일·전일비 상세 실적
-     - 생산량과 전력·연료·용수·폐수 원시 사용량을 사업장별로 표시
+  1) 당일·전일·전일비 원단위 상세 실적
+     - 생산량, 전력·연료·용수 원단위, 폐수/용수를 5개 사업장별로 표시
+  2) 즉시 점검 대상
+     - 최근 7일 중앙값의 1%를 유효 변화 기준으로 사용
+     - 생산량 감소 + 에너지 사용량 증가 조합만 경고 테이블로 요약
 
 주간/월간 메일은 period_report_builder.py가 본 모듈의 공용 집계 함수를 재사용한다.
 광주 생산량은 대시보드와 동일하게 판매용 재공품 환산량을 보정한다.
@@ -106,11 +106,16 @@ PRODUCTION_METRIC = {
 
 # 주간·월간 메일의 사업장별 원단위 표 컬럼 정의.
 FACTORY_TABLE_METRICS = [PRODUCTION_METRIC] + INTENSITY_METRICS + [WASTEWATER_RATIO_METRIC]
-# 일일 메일은 원단위가 아니라 생산량과 원시 사용량을 비교한다.
+# 일일 상세표는 원단위를 표시하고, 이상 판정은 원시 사용량 방향을 사용한다.
 DAILY_DETAIL_METRICS = [
-    {"key": "production", "label": "생산량", "signal_label": "생산", "unit": "ton",
-     "value_col": "production_ton", "color": "#A4D65E", "header_bg": "#EDF6DE",
-     "cell_bg": "#FAFCF5", "decimals": 0, "invert": True},
+    {**PRODUCTION_METRIC, "value_col": PRODUCTION_METRIC["unit_col"]},
+    *[
+        {**metric, "value_col": metric["unit_col"]}
+        for metric in INTENSITY_METRICS
+    ],
+    {**WASTEWATER_RATIO_METRIC, "value_col": WASTEWATER_RATIO_METRIC["unit_col"]},
+]
+DAILY_USAGE_METRICS = [
     {"key": "power", "label": "전력 사용량", "signal_label": "전력", "unit": "kWh",
      "value_col": "total_power_kwh", "color": "#F6C90E", "header_bg": "#FDF4CF",
      "cell_bg": "#FEFAEC", "decimals": 0, "invert": False},
@@ -124,7 +129,6 @@ DAILY_DETAIL_METRICS = [
      "value_col": "wastewater_ton", "color": "#6B7280", "header_bg": "#E1E3E6",
      "cell_bg": "#F3F4F5", "decimals": 1, "invert": False},
 ]
-DAILY_USAGE_METRICS = DAILY_DETAIL_METRICS[1:]
 DAILY_FACTORY_DISPLAY_ORDER = FACTORY_DISPLAY_ORDER[1:]
 
 
@@ -380,7 +384,7 @@ def _daily_direction_signal(
 def _build_daily_factory_rows(
     rows: List[dict], ref_date: date
 ) -> Tuple[List[dict], List[dict], int]:
-    """5개 사업장의 방향 신호와 당일·전일 상세 실적을 생성."""
+    """5개 사업장의 원단위 상세 실적과 원시 사용량 방향 경고를 생성."""
     history_dates = [ref_date - timedelta(days=i) for i in range(6, -1, -1)]
     prev_date = ref_date - timedelta(days=1)
     factory_rows: List[dict] = []
@@ -491,13 +495,10 @@ def build_daily_report(
         ref_weekday=WEEKDAY_KR[ref_date.weekday()],
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         trend_from=trend_from.strftime("%Y-%m-%d"),
-        n_factories=n_current_factories,
         warning_count=len(warning_items),
         warning_factory_count=warning_factory_count,
-        good_count=good_count,
         warning_items=warning_items,
         factory_rows=factory_rows,
-        signal_metrics=DAILY_USAGE_METRICS,
         detail_metrics=DAILY_DETAIL_METRICS,
     )
 
