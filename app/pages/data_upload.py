@@ -5,20 +5,49 @@ Data Upload Page
 """
 # 이 파일은 데이터 업로드 화면을 보여줍니다.
 
-import streamlit as st
-import pandas as pd
+import io
 import sys
+from datetime import date, timedelta
 from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from app.database.db_connection import is_admin
-from app.services.upload_service import upload_excel, get_upload_history
+from app.services.upload_service import upload_excel, preview_excel, get_upload_history
 from app.services.daily_energy_sync_service import (
     force_resync,
     get_daily_energy_sync_status,
 )
 from app.utils.df_format import numeric_column_config
+from app.utils.excel_parser import FACTORY_CODES
+
+
+# 업로드 템플릿의 한글 컬럼 헤더 — excel_parser.kor_to_eng 매핑과 1:1 대응.
+_TEMPLATE_COLUMNS = [
+    "날짜", "냉동전력량", "공압기", "전력량", "연료량",
+    "용수량", "폐수량", "믹스생산량", "전력원단위", "연료원단위", "용수원단위",
+]
+
+
+@st.cache_data(show_spinner=False)
+def _build_upload_template() -> bytes:
+    """공장별 시트 + 필수 컬럼 헤더 + 예시 1행이 들어간 업로드 템플릿 xlsx.
+
+    컬럼 하나만 틀려도 업로드가 실패하는 구조라, 사용자가 형식을 문서에서
+    찾아 헤매지 않도록 그대로 채워 쓸 수 있는 파일을 제공한다.
+    """
+    sample_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    sample_row = [sample_date] + [0] * (len(_TEMPLATE_COLUMNS) - 1)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        for factory in FACTORY_CODES:
+            pd.DataFrame([sample_row], columns=_TEMPLATE_COLUMNS).to_excel(
+                writer, sheet_name=factory, index=False
+            )
+    return buf.getvalue()
 
 
 # 자동 동기화 상태 패널을 렌더링합니다.
@@ -134,13 +163,23 @@ def render_upload_page():
         </ul>
     </div>
     """, unsafe_allow_html=True)
-    
+
+    # ── 업로드 템플릿 다운로드 ──
+    st.download_button(
+        label="📥 업로드 템플릿 다운로드 (.xlsx)",
+        data=_build_upload_template(),
+        file_name="BEMS_업로드_템플릿.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_upload_template",
+        help="공장별 시트와 필수 컬럼 11개가 채워진 템플릿입니다. 예시 행을 지우고 데이터를 입력하세요.",
+    )
+
     uploaded_file = st.file_uploader(
         "Excel 파일 선택",
         type=["xlsx", "xls"],
         key="file_uploader",
     )
-    
+
     if uploaded_file is not None:
         st.markdown(f"""
         <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:10px;
@@ -151,21 +190,57 @@ def render_upload_page():
             <span style="color:#64748b;">({uploaded_file.size:,} bytes)</span>
         </div>
         """, unsafe_allow_html=True)
-        
-        if st.button("🚀 업로드 실행", type="primary", use_container_width=True):
-            with st.spinner("데이터를 처리 중입니다..."):
-                result = upload_excel(uploaded_file, uploaded_file.name, save_original=False)
-                
-                if result["success"]:
-                    st.success(f"✅ {result['message']}")
-                    st.balloons()
-                else:
-                    st.error(f"❌ {result['message']}")
-                    if result["errors"]:
-                        st.subheader("오류 상세")
-                        error_df = pd.DataFrame(result["errors"])
-                        st.dataframe(error_df, use_container_width=True,
-                                     column_config=numeric_column_config(error_df))
+
+        # ── 업로드 미리보기 (dry-run) ──
+        # 기존에는 실행 버튼을 눌러야만 결과를 알 수 있었고, UPSERT라 기존
+        # 데이터가 경고 없이 덮어써졌음. 먼저 영향 범위(신규/덮어쓰기)를 보여
+        # 주고 확인 후 실행하는 흐름으로 변경.
+        uploaded_file.seek(0)
+        with st.spinner("파일을 검증하는 중..."):
+            preview = preview_excel(uploaded_file, uploaded_file.name)
+
+        if not preview["success"]:
+            # 검증 실패 — 실행 버튼을 노출하지 않고 오류만 안내 (이력 표시는 계속)
+            st.error(f"❌ {preview['message']}")
+            if preview["errors"]:
+                st.subheader("오류 상세")
+                error_df = pd.DataFrame(preview["errors"])
+                st.dataframe(error_df, use_container_width=True,
+                             column_config=numeric_column_config(error_df))
+        else:
+            st.markdown(
+                '<div style="font-size:0.92rem;font-weight:600;color:var(--text-primary);margin:6px 0;">'
+                '🔍 업로드 미리보기</div>',
+                unsafe_allow_html=True,
+            )
+            summary_df = pd.DataFrame(preview["summary"])
+            st.dataframe(summary_df, use_container_width=True, hide_index=True,
+                         column_config=numeric_column_config(summary_df))
+            if preview["total_overwrite"] > 0:
+                st.warning(
+                    f"기존 데이터 **{preview['total_overwrite']}건(공장×일자)** 이 덮어써집니다 "
+                    f"(신규 {preview['total_new']}건). 변경 내역은 변경 이력에 기록되지만 "
+                    "이전 값 자체는 복원되지 않으니 확인 후 실행하세요.",
+                    icon="⚠️",
+                )
+            else:
+                st.info(f"모두 신규 데이터입니다 — {preview['total_new']}건(공장×일자)이 추가됩니다.")
+
+            if st.button("🚀 업로드 실행", type="primary", use_container_width=True):
+                uploaded_file.seek(0)
+                with st.spinner("데이터를 처리 중입니다..."):
+                    result = upload_excel(uploaded_file, uploaded_file.name, save_original=False)
+
+                    if result["success"]:
+                        st.success(f"✅ {result['message']}")
+                        st.balloons()
+                    else:
+                        st.error(f"❌ {result['message']}")
+                        if result["errors"]:
+                            st.subheader("오류 상세")
+                            error_df = pd.DataFrame(result["errors"])
+                            st.dataframe(error_df, use_container_width=True,
+                                         column_config=numeric_column_config(error_df))
     
     # Upload history
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)

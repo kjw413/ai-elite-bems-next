@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from app.services.audit_service import get_audit_history
 from app.services.query_service import get_factories
 from app.utils.excel_parser import COLUMN_DISPLAY_NAMES
-from app.utils.page_common import section_tone
+from app.utils.page_common import csv_download, section_tone
 from app.utils.page_state import persist_many
 
 
@@ -197,11 +197,30 @@ def _render_audit_history_tab():
             st.markdown(_kpi_card("변경자 수", f"{n_users:,}", "고유 사용자"), unsafe_allow_html=True)
 
     # ── 상세 테이블 ────────────────────────────────────────
-    st.markdown(
-        f'<div style="font-size:0.95rem;font-weight:600;color:var(--text-primary);margin-bottom:8px;">'
-        f'📋 상세 이력 ({total_n:,}건)</div>',
-        unsafe_allow_html=True,
-    )
+    tbl_head_l, tbl_head_r = st.columns([4, 1])
+    with tbl_head_l:
+        st.markdown(
+            f'<div style="font-size:0.95rem;font-weight:600;color:var(--text-primary);margin-bottom:8px;">'
+            f'📋 상세 이력 ({total_n:,}건)</div>',
+            unsafe_allow_html=True,
+        )
+    with tbl_head_r:
+        # 감사 목적 CSV 내보내기 — HTML 배지 없이 원시 값 그대로 내려받는다.
+        _export = audit_df[[
+            "changed_at", "change_type", "factory", "date",
+            "column_name", "old_value", "new_value", "changed_by",
+        ]].copy()
+        _export["column_name"] = _export["column_name"].map(
+            lambda x: COLUMN_DISPLAY_NAMES.get(x, x)
+        )
+        _export.columns = ["변경 시간", "변경 유형", "공장", "날짜",
+                           "변경 컬럼", "이전 값", "변경 값", "변경자"]
+        csv_download(
+            _export,
+            filename=f"audit_history_{audit_from}_{audit_to}.csv",
+            key="dl_audit_history",
+            use_container_width=True,
+        )
 
     # 표시용 정렬 + 컬럼 변환
     audit_df = audit_df.sort_values("changed_at", ascending=False).reset_index(drop=True)

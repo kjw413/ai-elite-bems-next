@@ -7,6 +7,7 @@ AI Energy Report Page
 
 import streamlit as st
 from datetime import datetime
+from app.database.db_connection import is_admin
 from app.services.query_service import get_factories
 from app.services.ai_report_service import get_saved_report, save_report
 from app.services.ai_db_service import run_agent_report
@@ -77,10 +78,19 @@ def render_ai_report():
             # 기존 보고서 존재 여부 확인
             saved_report = get_saved_report(selected_factory, selected_year, selected_month)
 
-            btn_label = "보고서 재생성 (덮어쓰기)" if saved_report else "보고서 생성"
-            btn_type = "secondary" if saved_report else "primary"
-
-            generate_btn = st.button(btn_label, use_container_width=True, type=btn_type)
+            # 보고서 생성은 LLM(OpenAI) 비용이 발생하는 유일한 사용자 트리거 —
+            # 관리자(host PC) 전용으로 게이트하고, viewer는 저장본 열람만 허용한다.
+            # (viewer DB 계정은 SELECT 전용이라 저장 단계에서도 실패했음)
+            if is_admin():
+                btn_label = "보고서 재생성 (덮어쓰기)" if saved_report else "보고서 생성"
+                btn_type = "secondary" if saved_report else "primary"
+                generate_btn = st.button(btn_label, use_container_width=True, type=btn_type)
+            else:
+                generate_btn = False
+                st.caption(
+                    "🔒 보고서 생성/재생성은 관리자(host PC) 전용입니다. "
+                    "이미 생성된 보고서는 아래에서 열람할 수 있습니다."
+                )
     
     # 보고서 생성 액션
     if generate_btn:
@@ -120,14 +130,20 @@ def render_ai_report():
             updated_at = saved_report["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
             st.caption(f"🕘 최초 생성일: {created_at}  |  🔄 최종 수정일: {updated_at}")
     elif not saved_report and not generate_btn:
+        # 빈 상태 안내 — viewer에게는 없는 버튼을 가리키지 않도록 문구 분기
+        empty_hint = (
+            "우측 상단의 <b>[보고서 생성]</b> 버튼을 눌러 AI 인사이트를 도출해 보세요."
+            if is_admin()
+            else "관리자가 보고서를 생성하면 이 화면에서 열람할 수 있습니다."
+        )
         with st.container(border=True):
             section_tone("violet")
-            st.markdown("""
+            st.markdown(f"""
             <div style="text-align:center; padding:60px 20px;">
                 <div style="font-size:3rem; margin-bottom:10px;">📄</div>
                 <div style="color:var(--text-secondary); font-size:1.1rem;">
                     저장된 보고서가 없습니다.<br/>
-                    우측 상단의 <b>[보고서 생성]</b> 버튼을 눌러 AI 인사이트를 도출해 보세요.
+                    {empty_hint}
                 </div>
             </div>
             """, unsafe_allow_html=True)

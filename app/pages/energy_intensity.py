@@ -8,7 +8,7 @@ Energy Intensity Analysis Page
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import timedelta
 from calendar import monthrange
 import sys
 from pathlib import Path
@@ -22,7 +22,7 @@ from app.services.query_service import (
 from app.utils.excel_parser import rename_columns_to_korean
 from app.utils.df_format import numeric_column_config
 from app.utils.page_state import persist_many
-from app.utils.page_common import get_theme_vars, get_ref_date, month_list, section_tone
+from app.utils.page_common import csv_download, get_theme_vars, get_ref_date, month_list, section_tone
 
 
 # 원단위 = SUM(사용량)/SUM(생산톤) 구조의 지표만 노출.
@@ -167,6 +167,8 @@ def render_energy_intensity():
                     _d = rename_columns_to_korean(tbl_df)
                     st.dataframe(_d, use_container_width=True, hide_index=True,
                                  column_config=numeric_column_config(_d))
+                    csv_download(_d, filename=f"intensity_daily_{selected_month}.csv",
+                                 key="dl_ei_daily")
 
         with col_c2:
             st.markdown(f'<div class="chart-title" style="font-size:1.05rem; margin-top:8px;"><div class="chart-title-dot"></div>📅 기간별 {short_name} 추이</div>', unsafe_allow_html=True)
@@ -243,16 +245,27 @@ def render_energy_intensity():
                     _p = rename_columns_to_korean(p_tbl)
                     st.dataframe(_p, use_container_width=True, hide_index=True,
                                  column_config=numeric_column_config(_p))
+                    csv_download(_p, filename=f"intensity_period_{start_date}_{end_date}.csv",
+                                 key="dl_ei_period")
 
     with st.container(border=True):
         # ── 섹션 3: 전년대비 사용 분석 ─────────────────────────────────────
         section_tone("violet")
         st.markdown('<div class="chart-title" style="font-size:1.05rem;"><div class="chart-title-dot"></div>📈 전년대비 원단위 분석</div>', unsafe_allow_html=True)
 
+        # 기준연도는 DB에 실제 데이터가 있는 범위만 노출 (기존에는 2000년까지
+        # 무의미한 옵션 25개가 나열되어 사용량 페이지와도 불일치했음)
+        _yoy_min_year = pd.to_datetime(db_min).year
+        _yoy_max_year = pd.to_datetime(db_max).year
+        _yoy_year_options = list(range(_yoy_max_year, _yoy_min_year, -1)) or [_yoy_max_year]
+        # 이전 세션에 저장된 연도가 새 옵션 범위 밖이면 최신 연도로 리셋
+        if st.session_state.get("ei_yoy_year") not in _yoy_year_options:
+            st.session_state["ei_yoy_year"] = _yoy_year_options[0]
+
         col_y1, col_y2 = st.columns([1, 3])
         with col_y1:
             yoy_factory = st.selectbox("공장", options=["전사"] + db_factories, key="ei_yoy_factory")
-            yoy_year = st.selectbox("기준연도", options=list(range(datetime.now().year, 1999, -1)), key="ei_yoy_year")
+            yoy_year = st.selectbox("기준연도", options=_yoy_year_options, key="ei_yoy_year")
             show_val = st.checkbox("데이터 값 표시", value=False, key="ei_yoy_show_val")
             show_yoy_cum = st.checkbox(
                 "누계 추이 보기",
@@ -382,6 +395,11 @@ def render_energy_intensity():
                         "증감량": st.column_config.NumberColumn("증감량", format="%,.2f"),
                         "증감률(%)": st.column_config.NumberColumn("증감률(%)", format="%.1f%%")
                     }
+                )
+                csv_download(
+                    yoy_table.reset_index(),
+                    filename=f"intensity_yoy_{short_name}_{yoy_year}.csv",
+                    key="dl_ei_yoy",
                 )
 
             else:

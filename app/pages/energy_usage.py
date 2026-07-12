@@ -10,8 +10,7 @@ import streamlit as st
 from app.components.energy_usage import (
     USAGE_METRICS,
     default_period_bounds,
-    render_daily_usage_panel,
-    render_period_usage_panel,
+    render_usage_trend_panel,
     render_wastewater_ratio_section,
     render_yoy_usage_section,
 )
@@ -24,9 +23,10 @@ def render_energy_usage():
     """전력·연료·용수·폐수 사용량을 단일 페이지에서 조회합니다."""
     persist_many({
         "eu_source": None,
-        "eu_daily_factory": None,
-        "eu_daily_month": None,
-        "eu_period_factory": None,
+        "eu_view_mode": None,
+        "eu_factory": None,
+        "eu_month": None,
+        "eu_compare": None,
         "eu_start_date": None,
         "eu_end_date": None,
         "eu_yoy_factory": None,
@@ -82,11 +82,12 @@ def render_energy_usage():
 
     with st.container(border=True):
         section_tone("cyan")
-        col_daily, col_period = st.columns(2)
-        with col_daily:
-            render_daily_usage_panel(spec, db_factories, months, default_month, theme)
-        with col_period:
-            render_period_usage_panel(spec, db_factories, db_min_date, db_max_date, default_start, default_end, theme)
+        # 일별/기간별 두 패널을 하나로 통합 — 조회 방식(월 단위/기간 지정) 토글 +
+        # 공장별 비교 체크박스. 같은 차트가 두 번 그려지던 중복 제거.
+        render_usage_trend_panel(
+            spec, db_factories, months, default_month,
+            db_min_date, db_max_date, default_start, default_end, theme,
+        )
 
     with st.container(border=True):
         section_tone("violet")

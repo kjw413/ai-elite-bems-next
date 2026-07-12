@@ -1404,11 +1404,8 @@ _PAGE_DISPLAY_NAMES: dict[tuple[str, str | None], str] = {
     ("dashboard", None):       "대시보드",
     ("production", None):      "생산 실적",
     ("energy", "usage"):       "에너지 모니터링 / 사용량 통합",
-    ("energy", "power"):       "에너지 모니터링 / 사용량 통합",
-    ("energy", "fuel_water"):  "에너지 모니터링 / 사용량 통합",
     ("energy", "intensity"):   "에너지 모니터링 / 원단위",
     ("energy", None):          "에너지 모니터링",
-    ("savings", None):         "에너지 절감관리",
     ("ai", "prediction"):      "AI 에너지 분석 / 에너지 사용 예측",
     ("ai", "report"):          "AI 에너지 분석 / 에너지 실적 보고서",
     ("ai", None):              "AI 에너지 분석",
@@ -1451,21 +1448,8 @@ elif page == "energy":
         from app.pages.energy_intensity import render_energy_intensity
         render_energy_intensity()
     else:
-        if sub == "power":
-            st.session_state["eu_source"] = "전력"
-        elif sub == "fuel_water":
-            st.session_state["eu_source"] = "연료"
         from app.pages.energy_usage import render_energy_usage
         render_energy_usage()
-
-elif page == "savings":
-    t1, t2 = st.tabs(["절감 계획 관리", "절감 실적 현황"])
-    with t1:
-        from app.pages.savings_plan import render_savings_plan
-        render_savings_plan()
-    with t2:
-        from app.pages.savings_results import render_savings_results
-        render_savings_results()
 
 elif page == "ai":
     if sub == "report":
@@ -1490,14 +1474,36 @@ else:
 
 
 # ────────────────────────────────────────────────────────────────
-# FOOTER
+# FOOTER — 실제 동기화 상태 반영
 # ────────────────────────────────────────────────────────────────
+# 이전에는 항상 초록 점 + 페이지 렌더 시각을 "최근 동기화"로 표시해
+# 동기화가 실패해도 정상으로 보이는 가짜 상태였음. 실제 동기화 서비스
+# 상태(daily_energy_sync_service)를 읽어 색/문구/시각을 결정한다.
+def _footer_sync_status() -> tuple[str, str, str]:
+    """(점 색상, 상태 문구, 최근 동기화 표기) 반환. 확인 실패 시 중립 표기."""
+    try:
+        from app.services.daily_energy_sync_service import get_daily_energy_sync_status
+        s = get_daily_energy_sync_status()
+    except Exception:
+        return "#94a3b8", "동기화 상태 확인 불가", "-"
+
+    last_sync = s.get("last_sync_at") or "기록 없음"
+    if isinstance(last_sync, str) and "T" in last_sync:
+        last_sync = last_sync.replace("T", " ")[:16]
+    if not s.get("file_exists"):
+        return "#94a3b8", "수집 소스 파일 없음", str(last_sync)
+    if s.get("is_up_to_date"):
+        return "#22c55e", "데이터 동기화 정상", str(last_sync)
+    return "#f59e0b", "원본 파일 변경 감지 — 동기화 대기", str(last_sync)
+
+
+_dot_color, _status_text, _last_sync_str = _footer_sync_status()
 st.markdown(f"""
 <div class="fems-footer-v2">
   <div class="footer-status-bar">
-    <div class="status-dot"></div>
-    <div class="status-text">데이터 수집 엔진 정상 작동 중</div>
-    <div class="sync-time">최근 동기화: {now.strftime('%H:%M:%S')}</div>
+    <div class="status-dot" style="background:{_dot_color}; box-shadow:0 0 8px {_dot_color}66;"></div>
+    <div class="status-text">{_status_text}</div>
+    <div class="sync-time">최근 동기화: {_last_sync_str}</div>
   </div>
   <div class="footer-attribution">
     BEMS — 데이터 출처: <b>종합정보시스템 / 기상청 API Hub</b>

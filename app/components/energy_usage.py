@@ -12,6 +12,7 @@ import streamlit as st
 from app.services.query_service import get_daily_data, get_yoy_data
 from app.utils.df_format import numeric_column_config
 from app.utils.excel_parser import rename_columns_to_korean
+from app.utils.page_common import csv_download
 
 
 @dataclass(frozen=True)
@@ -142,13 +143,16 @@ def _render_usage_line(
     traces = _trace_specs_for(spec)
     fig = go.Figure()
 
-    if group_by_factory and spec.key not in ("power", "water", "wastewater"):
+    # 공장별 비교 모드 — 에너지원 종류와 무관하게 대표 지표(metric_col)를
+    # 공장별 라인으로 분리해 그린다. (기존에는 전력/용수/폐수가 제외되어
+    # 공장 간 비교가 불가능했음)
+    if group_by_factory:
         agg = (
             df.groupby(["factory", x_col], as_index=False)[spec.metric_col]
             .sum()
             .sort_values([x_col, "factory"])
         )
-        colors = ["#E8450A", "#ecc94b", "#6B7280", "#48bb78", "#0EA5E9", "#a78bfa"]
+        colors = ["#00d4ff", "#f97316", "#7b2ff7", "#48bb78", "#ecc94b", "#f56565", "#a78bfa"]
         for i, factory in enumerate(sorted(agg["factory"].unique())):
             part = agg[agg["factory"] == factory]
             fig.add_trace(go.Scatter(
@@ -234,142 +238,144 @@ def render_usage_kpis(df: pd.DataFrame, spec: UsageMetricSpec, *, prefix: str = 
         st.metric("생산량", _format_number(prod_ton, "ton"))
 
 
-def render_daily_usage_panel(
+def render_usage_trend_panel(
     spec: UsageMetricSpec,
     db_factories: list[str],
     months: list[str],
     default_month: str,
-    theme: dict,
-) -> None:
-    st.markdown(
-        f'<div class="chart-title" style="font-size:1.05rem; margin-top:8px;">'
-        f'<div class="chart-title-dot"></div>📅 일별 {spec.label} 사용량</div>',
-        unsafe_allow_html=True,
-    )
-    col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        daily_factory = st.selectbox(
-            "공장 선택 (일별)",
-            options=["전사"] + db_factories,
-            index=0,
-            key="eu_daily_factory",
-        )
-    with col_m2:
-        selected_month = st.selectbox(
-            "조회 월 (일별)",
-            options=months,
-            index=months.index(default_month) if default_month in months else len(months) - 1,
-            key="eu_daily_month",
-        )
-
-    year_m, month_m = int(selected_month[:4]), int(selected_month[5:7])
-    last_day = monthrange(year_m, month_m)[1]
-    date_from = f"{selected_month}-01"
-    date_to = f"{selected_month}-{last_day:02d}"
-    daily_df = get_daily_data(factories=[daily_factory], date_from=date_from, date_to=date_to)
-
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    if daily_df.empty:
-        st.warning("일별 데이터가 없습니다.")
-        return
-
-    render_usage_kpis(daily_df, spec)
-    _render_usage_line(
-        daily_df,
-        spec,
-        theme,
-        x_col="date",
-        key=f"eu_daily_{spec.key}",
-        x_tickformat="%-d일",
-        x_range=[date_from, date_to],
-        x_dtick=86400000 * 3,
-    )
-    with st.expander("📄 일별 상세 데이터 보기"):
-        cols = ["factory", "date", spec.metric_col]
-        if spec.key == "power":
-            cols = ["factory", "date", "total_power_kwh", "freezing_power_kwh", "air_compressor_kwh", "other_power_kwh"]
-            daily_df = _with_power_other(daily_df)
-        elif spec.key in ("water", "wastewater"):
-            cols = ["factory", "date", "water_ton", "wastewater_ton"]
-        tbl = daily_df[[c for c in cols if c in daily_df.columns]].copy()
-        tbl["date"] = pd.to_datetime(tbl["date"]).dt.strftime("%Y-%m-%d")
-        tbl = tbl.sort_values(["date", "factory"])
-        disp = rename_columns_to_korean(tbl)
-        st.dataframe(disp, use_container_width=True, hide_index=True, column_config=numeric_column_config(disp))
-
-
-def render_period_usage_panel(
-    spec: UsageMetricSpec,
-    db_factories: list[str],
     db_min_date,
     db_max_date,
     default_start,
     default_end,
     theme: dict,
 ) -> None:
+    """사용량 추이 통합 패널 — 월 단위/기간 지정 + 공장별 비교.
+
+    기존에는 '일별(월 선택)'과 '기간별(시작~종료)' 두 패널이 좌우로 나란히 있어
+    사실상 같은 차트가 범위만 달리 두 번 그려졌음. 하나의 패널에 조회 방식
+    토글을 두어 화면을 절반으로 줄이고, '공장별 비교' 체크로 공장 간 라인
+    비교(기존 불가)를 지원한다.
+    """
     st.markdown(
         f'<div class="chart-title" style="font-size:1.05rem; margin-top:8px;">'
-        f'<div class="chart-title-dot"></div>📆 기간별 {spec.label} 사용량</div>',
+        f'<div class="chart-title-dot"></div>📅 {spec.label} 사용량 추이</div>',
         unsafe_allow_html=True,
     )
-    col_p1, col_p2, col_p3 = st.columns([1, 1, 1])
-    with col_p1:
-        period_factory = st.selectbox(
-            "공장 선택 (기간별)",
+
+    ctl1, ctl2, ctl3 = st.columns([1.3, 1.2, 1.3])
+    with ctl1:
+        view_mode = st.radio(
+            "조회 방식",
+            options=["월 단위", "기간 지정"],
+            horizontal=True,
+            key="eu_view_mode",
+        )
+    with ctl2:
+        factory = st.selectbox(
+            "공장",
             options=["전사"] + db_factories,
             index=0,
-            key="eu_period_factory",
+            key="eu_factory",
         )
-    with col_p2:
-        start_date = st.date_input(
-            "시작일",
-            value=default_start,
-            min_value=db_min_date,
-            max_value=db_max_date,
-            key="eu_start_date",
-        )
-    with col_p3:
-        end_date = st.date_input(
-            "종료일",
-            value=default_end,
-            min_value=db_min_date,
-            max_value=db_max_date,
-            key="eu_end_date",
+    with ctl3:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        compare_factories = st.checkbox(
+            "공장별 비교 (라인 분리)",
+            key="eu_compare",
+            help=(
+                "체크하면 공장 선택과 무관하게 5개 실공장의 라인을 분리해 "
+                f"{spec.label} 사용량을 공장 간 비교합니다."
+            ),
         )
 
-    period_df = get_daily_data(
-        factories=[period_factory],
-        date_from=start_date.strftime("%Y-%m-%d"),
-        date_to=end_date.strftime("%Y-%m-%d"),
-    )
+    if view_mode == "월 단위":
+        selected_month = st.selectbox(
+            "조회 월",
+            options=months,
+            index=months.index(default_month) if default_month in months else len(months) - 1,
+            key="eu_month",
+        )
+        year_m, month_m = int(selected_month[:4]), int(selected_month[5:7])
+        last_day = monthrange(year_m, month_m)[1]
+        date_from = f"{selected_month}-01"
+        date_to = f"{selected_month}-{last_day:02d}"
+        x_tickformat = "%-d일"
+        x_range: list[str] | None = [date_from, date_to]
+        x_dtick: int | None = 86400000 * 3
+    else:
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            start_date = st.date_input(
+                "시작일",
+                value=default_start,
+                min_value=db_min_date,
+                max_value=db_max_date,
+                key="eu_start_date",
+            )
+        with col_p2:
+            end_date = st.date_input(
+                "종료일",
+                value=default_end,
+                min_value=db_min_date,
+                max_value=db_max_date,
+                key="eu_end_date",
+            )
+        if start_date > end_date:
+            st.warning("시작일이 종료일보다 늦어 종료일과 맞췄습니다.")
+            start_date = end_date
+        date_from = start_date.strftime("%Y-%m-%d")
+        date_to = end_date.strftime("%Y-%m-%d")
+        x_tickformat = "%m/%d"
+        x_range = None
+        x_dtick = None
+
+    if compare_factories:
+        # 실공장 전체를 각자 라인으로 — factories=None 은 DB 원본(실공장) 행 반환
+        df = get_daily_data(factories=None, date_from=date_from, date_to=date_to)
+    else:
+        df = get_daily_data(factories=[factory], date_from=date_from, date_to=date_to)
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    if period_df.empty:
-        st.warning("기간별 데이터가 없습니다.")
+    if df.empty:
+        st.warning("선택한 조건의 데이터가 없습니다.")
         return
 
-    render_usage_kpis(period_df, spec, prefix="기간 ")
+    if compare_factories:
+        st.caption(
+            f"공장별 {spec.label} 사용량 비교 — KPI 카드는 공장 단일 선택 시 표시됩니다."
+        )
+    else:
+        render_usage_kpis(df, spec)
+
     _render_usage_line(
-        period_df,
+        df,
         spec,
         theme,
         x_col="date",
-        key=f"eu_period_{spec.key}",
-        x_tickformat="%m/%d",
-        group_by_factory=False,
+        key=f"eu_trend_{spec.key}",
+        x_tickformat=x_tickformat,
+        x_range=x_range,
+        x_dtick=x_dtick,
+        group_by_factory=compare_factories,
     )
-    with st.expander("📄 기간별 상세 데이터 보기"):
+
+    with st.expander("📄 상세 데이터 보기"):
         cols = ["factory", "date", spec.metric_col]
         if spec.key == "power":
             cols = ["factory", "date", "total_power_kwh", "freezing_power_kwh", "air_compressor_kwh", "other_power_kwh"]
-            period_df = _with_power_other(period_df)
+            df = _with_power_other(df)
         elif spec.key in ("water", "wastewater"):
             cols = ["factory", "date", "water_ton", "wastewater_ton"]
-        tbl = period_df[[c for c in cols if c in period_df.columns]].copy()
+        tbl = df[[c for c in cols if c in df.columns]].copy()
         tbl["date"] = pd.to_datetime(tbl["date"]).dt.strftime("%Y-%m-%d")
         tbl = tbl.sort_values(["date", "factory"])
         disp = rename_columns_to_korean(tbl)
         st.dataframe(disp, use_container_width=True, hide_index=True, column_config=numeric_column_config(disp))
+        csv_download(
+            disp,
+            filename=f"usage_{spec.key}_{date_from}_{date_to}.csv",
+            key=f"dl_usage_{spec.key}",
+        )
 
 
 def render_yoy_usage_section(
@@ -445,24 +451,16 @@ def render_yoy_usage_section(
         yoy_table.loc["누계"] = [sum_prev, sum_curr, diff_sum, diff_pct]
         yoy_table["증감률(%)"] = yoy_table["증감률(%)"].round(1)
 
-        def color_rate(val):
-            if isinstance(val, str) or pd.isna(val):
-                return ""
-            if val < 0:
-                return "color: #4da6ff"
-            if val > 0:
-                return "color: #ff4d4d"
-            return ""
-
         st.markdown(
             f'<div class="chart-subtitle"><div class="chart-subtitle-bar"></div>'
             f'전년대비 월별 데이터 테이블 ({spec.label})</div>',
             unsafe_allow_html=True,
         )
+        # 증감률에 좋음/나쁨 색을 입히지 않는다 — 사용량 증감은 생산량 변동의
+        # 영향을 함께 받으므로 "감소=파랑(개선)" 표시가 오독을 유발했음.
         styled = (
             yoy_table.reset_index()
             .style.set_properties(**{"font-size": "15px"})
-            .map(color_rate, subset=["증감률(%)"])
             .format({
                 "전년 실적": "{:,.0f}",
                 "금년 실적": "{:,.0f}",
@@ -481,6 +479,15 @@ def render_yoy_usage_section(
                 "증감량": st.column_config.NumberColumn("증감량", format="%,.0f"),
                 "증감률(%)": st.column_config.NumberColumn("증감률(%)", format="%.1f%%"),
             },
+        )
+        st.caption(
+            "※ 사용량 증감은 생산량 변동의 영향을 함께 받아 증감만으로 개선/악화를 "
+            "판단할 수 없습니다 — 효율 판단은 '원단위' 페이지를 이용하세요."
+        )
+        csv_download(
+            yoy_table.reset_index(),
+            filename=f"yoy_usage_{spec.key}_{yoy_year}.csv",
+            key=f"dl_yoy_usage_{spec.key}",
         )
 
 
@@ -577,6 +584,7 @@ def render_wastewater_ratio_section(
             "폐수량 (ton)": st.column_config.NumberColumn(format="%,.0f"),
         },
     )
+    csv_download(display, filename=f"wastewater_ratio_{ratio_month}.csv", key="dl_ww_ratio")
 
 
 def default_period_bounds(db_min: str, db_max: str):

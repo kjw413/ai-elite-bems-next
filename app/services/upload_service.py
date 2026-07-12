@@ -42,6 +42,80 @@ def _date_key(value) -> str:
     return pd.to_datetime(value).strftime("%Y-%m-%d")
 
 
+# 업로드 미리보기 관련 처리를 담당합니다.
+def preview_excel(file_path_or_buffer, filename: str) -> dict:
+    """업로드 미리보기(dry-run) — 파싱·검증 후 신규/덮어쓰기 건수만 계산.
+
+    DB에 아무것도 쓰지 않는다. UPSERT 정책상 기존 (공장, 날짜) 데이터가 확인
+    없이 덮어써지는 사고를 막기 위해, 실행 전에 영향 범위를 보여 주는 용도.
+
+    Returns
+    -------
+    dict with keys:
+        success: bool
+        message: str
+        errors: list[dict]
+        summary: list[dict]   공장별 {공장, 기간, 일자 수, 신규, 덮어쓰기}
+        total_new / total_overwrite: int
+    """
+    ext_errors = validate_file_extension(filename)
+    if ext_errors:
+        return {"success": False, "message": "파일 형식 오류",
+                "errors": [e.to_dict() for e in ext_errors],
+                "summary": [], "total_new": 0, "total_overwrite": 0}
+
+    try:
+        parsed_data = parse_excel(file_path_or_buffer, filename)
+    except ValueError as e:
+        return {"success": False, "message": str(e), "errors": [],
+                "summary": [], "total_new": 0, "total_overwrite": 0}
+
+    if not parsed_data:
+        return {"success": False,
+                "message": "인식된 공장 시트가 없습니다. 시트명을 확인하세요.",
+                "errors": [], "summary": [], "total_new": 0, "total_overwrite": 0}
+
+    cleaned_data, validation_errors = validate_all(parsed_data)
+    if validation_errors:
+        return {"success": False,
+                "message": f"데이터 검증 실패: {len(validation_errors)}건의 오류가 발견되었습니다.",
+                "errors": [e.to_dict() for e in validation_errors],
+                "summary": [], "total_new": 0, "total_overwrite": 0}
+
+    summary: list[dict] = []
+    total_new = 0
+    total_overwrite = 0
+    with managed_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            for factory, df in cleaned_data.items():
+                dates = sorted({_date_key(v) for v in df["date"].tolist()})
+                if not dates:
+                    continue
+                placeholders = ", ".join(["%s"] * len(dates))
+                cursor.execute(
+                    f"SELECT date FROM energy_daily WHERE factory = %s AND date IN ({placeholders})",
+                    (factory, *dates),
+                )
+                existing_dates = {_date_key(row[0]) for row in cursor.fetchall()}
+                n_over = sum(1 for d in dates if d in existing_dates)
+                n_new = len(dates) - n_over
+                total_new += n_new
+                total_overwrite += n_over
+                summary.append({
+                    "공장": factory,
+                    "기간": f"{dates[0]} ~ {dates[-1]}",
+                    "일자 수": len(dates),
+                    "신규": n_new,
+                    "덮어쓰기": n_over,
+                })
+        finally:
+            cursor.close()
+
+    return {"success": True, "message": "", "errors": [], "summary": summary,
+            "total_new": total_new, "total_overwrite": total_overwrite}
+
+
 # 업로드 엑셀 관련 처리를 담당합니다.
 def upload_excel(
     file_path_or_buffer,

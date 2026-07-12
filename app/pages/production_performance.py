@@ -50,7 +50,7 @@ from app.services.production_correction_service import (
     WIP_TRUSTED_FACTORIES,
 )
 from app.utils.df_format import numeric_column_config
-from app.utils.page_common import section_tone
+from app.utils.page_common import csv_download, section_tone
 from app.utils.page_state import persist_many
 from app.components.production_modes import render_range_production_view
 
@@ -615,9 +615,11 @@ def render_production_performance():
                 hovertemplate="%{x}일<br>누적 실적 %{y:,.0f}<extra></extra>",
             ))
             if int(year) == today.year and int(month) == today.month:
+                # 다크 배경에서 보이도록 밝은 색 사용 (기존 #0f172a는 배경색과 겹쳐 안 보였음)
                 fig.add_vline(
-                    x=today.day, line_width=1, line_dash="dot", line_color="#0f172a",
+                    x=today.day, line_width=1.5, line_dash="dot", line_color="#e9f0fb",
                     annotation_text="오늘", annotation_position="top",
+                    annotation_font_color="#e9f0fb",
                 )
             fig.update_layout(
                 height=380, margin=dict(l=20, r=20, t=10, b=40),
@@ -750,6 +752,11 @@ def render_production_performance():
                 daily_detail, use_container_width=True, hide_index=True,
                 column_config=numeric_column_config(daily_detail),
             )
+            csv_download(
+                daily_detail,
+                filename=f"production_daily_{year}{int(month):02d}.csv",
+                key="dl_prod_daily_detail",
+            )
 
     # ── 5) 계획 미달/초과 품목 ─────────────────────
     with st.container(border=True):
@@ -831,6 +838,7 @@ def render_production_performance():
                     detail, use_container_width=True, hide_index=True,
                     column_config=numeric_column_config(detail),
                 )
+                csv_download(detail, filename=f"item_ranking_{key}.csv", key=f"dl_{key}")
 
         under_tab, over_tab = st.tabs(["계획 미달 Top", "계획 초과 Top"])
         with under_tab:
@@ -969,6 +977,15 @@ def render_production_performance():
         # 카테고리 필터는 생산실적에만 적용 (energy_daily 는 카테고리 구분 없음)
         if sel_ep_cat != "전체":
             df_ep = df_ep[df_ep["category2"] == sel_ep_cat]
+            # 사용자 오독 방지 — 에너지 라인은 공장 전체 값이므로 "카테고리별 원단위"로
+            # 읽으면 안 된다는 사실을 화면에 명시 (기존에는 코드 주석에만 존재).
+            st.warning(
+                f"카테고리 필터({_CAT2_DISPLAY.get(sel_ep_cat, sel_ep_cat)})는 "
+                "**생산량 막대에만** 적용됩니다. 에너지 사용량 라인은 공장 전체 값입니다 "
+                "(에너지는 카테고리별로 계측되지 않음) — 이 화면만으로 카테고리별 원단위를 "
+                "판단하지 마세요.",
+                icon="⚠️",
+            )
 
         try:
             ec = _energy_cross(df_ep, int(year), int(month), ep_fac_codes)

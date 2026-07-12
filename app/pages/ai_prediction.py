@@ -36,6 +36,7 @@ from app.services.prediction_monitoring_service import (
     get_monitoring_overall_status,
 )
 from app.services.v5_retrain_service import trigger_v5_retrain
+from app.components.anomaly_monitor import render_anomaly_monitor
 from app.utils.df_format import numeric_column_config
 from app.utils.page_common import section_tone
 from app.utils.page_state import persist_many
@@ -776,16 +777,22 @@ def _render_batch_chart(df: pd.DataFrame, targets: list[str]):
 
         xaxis_cfg = _build_date_xaxis_config(df_t["날짜"])
 
+        # 다크 테마 정합 — 앱 전체가 다크인데 이 차트만 plotly_white(흰 배경)로
+        # 렌더되어 이질적이었음. 투명 배경 + 밝은 폰트/그리드로 통일.
         fig.update_layout(
             title=f"{tgt} 정상범주 + 실측 ({unit})" if has_band else f"{tgt} 예측 vs 실측 ({unit})",
             xaxis_title="날짜",
             yaxis_title=unit,
-            template="plotly_white",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#e9f0fb", family="Inter, Segoe UI, sans-serif"),
             height=340 if has_band else 320,
             margin=dict(l=40, r=20, t=60, b=40),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             xaxis=xaxis_cfg,
         )
+        fig.update_xaxes(gridcolor="rgba(120,160,220,0.14)", tickfont=dict(color="#e9f0fb"))
+        fig.update_yaxes(gridcolor="rgba(120,160,220,0.14)", tickfont=dict(color="#e9f0fb"))
         st.plotly_chart(fig, use_container_width=True)
 
 
@@ -1054,6 +1061,16 @@ def _render_history_tab():
         "date_to": hist_to.isoformat(),
     }
 
+    # 필터 변경 시 자동 재조회 — 이전에는 조회 후 필터를 바꾸면 저장된 결과와
+    # 조건 불일치로 화면이 통째로 사라져 버그처럼 보였음. 한 번이라도 조회한
+    # 상태에서 조건이 바뀌면 버튼 재클릭 없이 새 조건으로 다시 조회한다.
+    if not do_query:
+        _stored_prev = st.session_state.get("prediction_history_filters")
+        if (st.session_state.get("prediction_history_df") is not None
+                and _stored_prev is not None
+                and _stored_prev != current_filters):
+            do_query = True
+
     if do_generate_missing:
         factory_filter = hist_factory if hist_factory != "전체" else None
         try:
@@ -1204,13 +1221,47 @@ def _render_history_tab():
 
         st.dataframe(df_display, use_container_width=True, hide_index=True,
                      column_config=numeric_column_config(df_display))
+        from app.utils.page_common import csv_download  # 지연 import
+        csv_download(
+            df_display,
+            filename=f"prediction_history_{hist_from}_{hist_to}.csv",
+            key="dl_pred_history",
+        )
+
+
+# 이상감지 현황 탭 (홈 대시보드에서 이동 — 2026-07)
+def _render_anomaly_tab():
+    """탭 3: 이상감지 현황 — 알림 배너 + 공장×에너지원 그리드 + 관리도 + LLM 진단."""
+    with st.container(border=True):
+        section_tone("rose")
+        st.markdown(
+            '<div class="section-title">'
+            '<span class="section-title-icon">🚨</span>이상감지 기준일'
+            '<span class="section-title-sub">기준일 포함 최근 7일 이탈 · 최근 30일 지속편향 판정</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        c1, c2 = st.columns([1, 2.2])
+        with c1:
+            anomaly_base = st.date_input(
+                "기준일",
+                value=date.today() - timedelta(days=1),
+                key="anomaly_base_date",
+                label_visibility="collapsed",
+            )
+        with c2:
+            st.caption(
+                "예측은 매일 자동 실행됩니다. 실측이 AI 정상범주(P05~P95)를 벗어나면 "
+                "이상으로 판정하며, 반복 이탈·지속편향만 '경보'로 승격해 알람 피로를 줄입니다."
+            )
+    render_anomaly_monitor(anomaly_base)
 
 
 # AI 예측 화면을 구성합니다.
 def render_ai_prediction():
     """AI 에너지 사용 예측 페이지.
 
-    실무 사용자(viewer)에게는 "예측 실행", "예측 이력" 두 탭만 노출합니다.
+    실무 사용자(viewer)에게는 "예측 실행", "예측 이력", "이상감지 현황" 탭을 노출합니다.
     모델 메타데이터/재학습/날씨 동기화 같은 시스템 운영 기능은 관리자(host PC)
     전용 ⚙️ 모델 관리 탭으로 분리해 일반 사용자 화면을 단순하게 유지합니다.
     """
@@ -1222,6 +1273,7 @@ def render_ai_prediction():
         "hist_factory":    None,
         "hist_from":       None,
         "hist_to":         None,
+        "anomaly_base_date": None,
     })
 
     admin_mode = is_admin()
@@ -1237,9 +1289,10 @@ def render_ai_prediction():
     """, unsafe_allow_html=True)
 
     if admin_mode:
-        tab1, tab2, tab3 = st.tabs(["📈 예측 실행", "📋 예측 이력", "⚙️ 모델 관리"])
+        tab1, tab2, tab_anom, tab3 = st.tabs(
+            ["📈 예측 실행", "📋 예측 이력", "🚨 이상감지 현황", "⚙️ 모델 관리"])
     else:
-        tab1, tab2 = st.tabs(["📈 예측 실행", "📋 예측 이력"])
+        tab1, tab2, tab_anom = st.tabs(["📈 예측 실행", "📋 예측 이력", "🚨 이상감지 현황"])
         tab3 = None
 
     with tab1:
@@ -1247,6 +1300,9 @@ def render_ai_prediction():
 
     with tab2:
         _render_history_tab()
+
+    with tab_anom:
+        _render_anomaly_tab()
 
     if tab3 is not None:
         with tab3:
