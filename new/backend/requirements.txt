@@ -1,0 +1,8 @@
+# FastAPI 브리지 전용 추가 의존성.
+# 반드시 legacy(기존 AI-Elite-BEMS) .venv 위에 설치하세요 —
+# app.services.* 가 streamlit/pandas/lightgbm 등 기존 requirements 전체를 요구합니다.
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pymysql>=1.1.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.9

@@ -1,5 +1,38 @@
 # AI Elite BEMS Next 작업 정리 및 향후 계획
 
+> **2026-07-15 갱신 (Claude 세션):** ChatGPT 산출물 중 `new/` 폴더에 실제로 존재하는 것은
+> `server.py`와 문서뿐이며, 아래 5장에 기재된 프런트엔드(app/, components/, lib/)와
+> 배치파일·requirements는 **저장소에 포함되어 있지 않았다.** 이번 세션에서 다음을 완료했다.
+>
+> - `backend/server.py`: `new/server.py`를 이동·보완. legacy 실코드 검증 후 수정
+>   (CORE_ROOT 기본값을 `../legacy`로 자동 탐색, DB_NAME 기본값 `fems_db`,
+>   모델 레지스트리 키 `active_model_key`/`active_artifact` 사용, YoY 0-생산량 division 가드,
+>   집계 공장(전사/남양주) 예측은 `predict_v5_batch(save_to_db=False)` 경로 사용)
+> - **신규 API 연결(기존 미연결 기능):** 절감 목표 조회/저장(`GET/PUT /api/v1/targets` →
+>   `target_service`), 이벤트 CRUD(`/api/v1/events` → `event_annotation_service`),
+>   예측 누락이력 일괄 생성(`POST /api/v1/predictions/generate-missing`),
+>   실측값 역채움(`POST /api/v1/predictions/backfill-actuals`),
+>   원단위 분석(`GET /api/v1/intensity`: 월별 금년/전년/목표 + MTD/YTD + 공장 매트릭스),
+>   보고서 보유월 목록(`GET /api/v1/reports/available`)
+> - `backend/requirements.txt`(fastapi/uvicorn/pymysql/python-dotenv/python-multipart —
+>   **legacy `.venv` 위에 설치**해야 함: `app.services.*`가 streamlit 등을 import),
+>   `SETUP_LOCAL.bat` / `RUN_BEMS_NEXT.bat` / `CONFIGURE_FIREWALL.bat`(legacy venv 재사용),
+>   `package.json`·`tsconfig.json`·`next.config.mjs`·`.env.local.example`·`.gitignore`
+> - 확인된 legacy 사실: 스키마는 `legacy/app/database/schema.sql`(9개 테이블),
+>   공장 마스터는 `legacy/app/domain/factories.py`(경산 F50 신규 포함),
+>   `savings_target.factory`는 전사가 `ALL`, metric 키는 `power_per_ton` 등,
+>   `is_admin()`은 비-Streamlit 실행 시 항상 True → FastAPI의 IP 검사(`require_admin`)가 실질 통제
+>
+> **다음 세션에서 해야 할 일(우선순위 순):**
+> 1. 프런트엔드 코드 작성: `app/layout.tsx`·`app/page.tsx`·`app/globals.css`,
+>    `components/bems-app.tsx`(셸: 사이드바·공장/기준일 필터·역할 표시),
+>    `components/screens/`(dashboard, energy, intensity, production, prediction, report, admin),
+>    `lib/bems-api.ts`(fetch + 예시 데이터 fallback), `lib/bems-data.ts`(타입+예시 데이터)
+>    — 백엔드 응답 스키마는 `backend/server.py`의 각 엔드포인트 return 구조를 그대로 따를 것
+> 2. `npm install && npm run build`로 빌드 검증
+> 3. 서버 PC에서 `SETUP_LOCAL.bat` → `RUN_BEMS_NEXT.bat` 실기동, 수치 동등성 검증(아래 8.1-A)
+> 4. README의 실행 구조 설명을 실제 폴더(`AI-Elite-BEMS/{legacy,new}`)에 맞게 정리
+
 > 작성일: 2026-07-15  
 > 원본 프로젝트: `kjw413/AI-Elite-BEMS`  
 > 신규 프로젝트: `ai-elite-bems-next`  
