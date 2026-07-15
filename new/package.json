@@ -6,7 +6,7 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",
-    "lint": "next lint"
+    "typecheck": "tsc --noEmit --incremental false"
   },
   "dependencies": {
     "lucide-react": "^0.525.0",

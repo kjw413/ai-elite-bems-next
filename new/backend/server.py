@@ -6,12 +6,15 @@ parameterized SQL.  Model, report and upload actions delegate to the existing
 Python services under BEMS_CORE_ROOT instead of reimplementing their logic.
 
 레거시 서비스(app.services.*)는 streamlit 등 기존 requirements 전체에 의존하므로
-이 프로세스는 반드시 legacy `.venv`(기존 requirements 설치 환경)에서 실행해야 한다.
+`SETUP_LOCAL.bat`가 해당 요구사항을 독립 `new/.venv`에 설치한다. legacy 소스는
+읽기 전용으로 import하며 bytecode도 그 경로에 생성하지 않는다.
 """
 
 from __future__ import annotations
 
+import calendar
 import importlib
+import logging
 import math
 import os
 import socket
@@ -19,6 +22,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pymysql
 from dotenv import load_dotenv
@@ -28,6 +32,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+logger = logging.getLogger(__name__)
+# Strict legacy read-only policy: imported core modules must not create __pycache__.
+sys.dont_write_bytecode = True
 
 
 def _resolve_core_root() -> Path:
@@ -51,14 +58,99 @@ def _resolve_core_root() -> Path:
 CORE_ROOT = _resolve_core_root()
 load_dotenv(CORE_ROOT / ".env")
 
-app = FastAPI(title="AI Elite BEMS API", version="1.1.0", docs_url="/api/docs", redoc_url=None)
+def _discover_local_addresses() -> set[str]:
+    addresses = {"127.0.0.1", "::1"}
+    try:
+        _, _, found = socket.gethostbyname_ex(socket.gethostname())
+        addresses.update(found)
+    except OSError:
+        logger.warning("Unable to discover local server addresses.", exc_info=True)
+    return addresses
+
+
+LOCAL_ADDRESSES = _discover_local_addresses()
+
+
+def _canonical_origin(value: str) -> str | None:
+    """Return a normalized HTTP Origin suitable for exact allowlist checks."""
+    try:
+        parsed = urlsplit(value.strip())
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in ("", "/")
+        ):
+            return None
+        port = parsed.port
+    except (TypeError, ValueError):
+        return None
+    host = parsed.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    default_port = 80 if parsed.scheme.lower() == "http" else 443
+    port_text = "" if port in (None, default_port) else f":{port}"
+    return f"{parsed.scheme.lower()}://{host}{port_text}"
+
+
+def _default_allowed_origins() -> set[str]:
+    hosts = {"localhost", socket.gethostname().lower(), *LOCAL_ADDRESSES}
+    origins: set[str] = set()
+    for host in hosts:
+        url_host = f"[{host}]" if ":" in host else host
+        for scheme in ("http", "https"):
+            origin = _canonical_origin(f"{scheme}://{url_host}:3000")
+            if origin:
+                origins.add(origin)
+    return origins
+
+
+def _configured_allowed_origins() -> set[str]:
+    configured = os.getenv("BEMS_ALLOWED_ORIGINS", "").strip()
+    origins = _default_allowed_origins()
+    if not configured:
+        return origins
+    candidates = configured.split(",")
+    configured_origins = {
+        normalized
+        for candidate in candidates
+        if (normalized := _canonical_origin(str(candidate))) is not None
+    }
+    configured_count = len([item for item in candidates if str(item).strip()])
+    if len(configured_origins) < configured_count:
+        logger.warning("Ignored invalid BEMS_ALLOWED_ORIGINS entries.")
+    return origins | configured_origins
+
+
+ALLOWED_ORIGINS = _configured_allowed_origins()
+
+
+app = FastAPI(title="AI Elite BEMS API", version="1.2.0", docs_url="/api/docs", redoc_url=None)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|[A-Za-z0-9._-]+):3000$",
+    allow_origins=sorted(ALLOWED_ORIGINS),
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Accept"],
 )
+
+
+@app.middleware("http")
+async def reject_untrusted_unsafe_origins(request: Request, call_next):
+    """Reject cross-origin state changes before they reach an API handler."""
+    method = request.method.upper()
+    preflight_method = request.headers.get("access-control-request-method", "").upper()
+    unsafe_methods = {"POST", "PUT", "PATCH", "DELETE"}
+    is_unsafe = method in unsafe_methods
+    is_unsafe_preflight = method == "OPTIONS" and preflight_method in unsafe_methods
+    origin = request.headers.get("origin")
+    if (is_unsafe or is_unsafe_preflight) and origin:
+        if _canonical_origin(origin) not in ALLOWED_ORIGINS:
+            return JSONResponse(status_code=403, content={"detail": "허용되지 않은 Origin입니다."})
+    return await call_next(request)
 
 
 FACTORY_MEMBERS = {
@@ -66,7 +158,32 @@ FACTORY_MEMBERS = {
     "전체": [],
     "남양주": ["남양주1", "남양주2"],
 }
+PHYSICAL_FACTORIES = ["남양주1", "남양주2", "김해", "광주", "논산", "경산"]
 DISPLAY_FACTORIES = ["남양주", "김해", "광주", "논산", "경산"]
+
+PRODUCTION_FACTORY_CODES: dict[str, tuple[str, ...]] = {
+    "전사": ("F10", "F10A", "F10B", "F20", "F30", "F40", "F50"),
+    "전체": ("F10", "F10A", "F10B", "F20", "F30", "F40", "F50"),
+    "남양주": ("F10", "F10A", "F10B"),
+    "남양주1": ("F10A", "F10"),
+    "남양주2": ("F10B", "F10"),
+    "김해": ("F20",),
+    "광주": ("F30",),
+    "논산": ("F40",),
+    "경산": ("F50",),
+}
+
+# Historical F10 rows predate the split into F10A/F10B. Assign the parent row
+# once so company/Namyangju totals remain correct without double counting.
+OPERATIONAL_PRODUCTION_FACTORY_BY_CODE = {
+    "F10": "남양주1",
+    "F10A": "남양주1",
+    "F10B": "남양주2",
+    "F20": "김해",
+    "F30": "광주",
+    "F40": "논산",
+    "F50": "경산",
+}
 
 # 원단위 지표 → energy_daily 사용량 컬럼 / savings_target.metric 키
 INTENSITY_METRICS: dict[str, dict[str, str]] = {
@@ -76,13 +193,25 @@ INTENSITY_METRICS: dict[str, dict[str, str]] = {
 }
 
 
+def viewer_credentials() -> tuple[str, str]:
+    user = os.getenv("DB_VIEWER_USER", "").strip()
+    password = os.getenv("DB_VIEWER_PASSWORD", "")
+    if not user or not password.strip():
+        logger.error("DB viewer credentials are not configured.")
+        raise HTTPException(status_code=503, detail="데이터베이스에 연결할 수 없습니다.")
+    return user, password
+
+
 def db_connect() -> pymysql.Connection:
+    user, password = viewer_credentials()
     try:
         return pymysql.connect(
             host=os.getenv("DB_HOST", "127.0.0.1"),
             port=int(os.getenv("DB_PORT", "3306")),
-            user=os.getenv("DB_ADMIN_USER") or os.getenv("DB_USER", "root"),
-            password=os.getenv("DB_ADMIN_PASSWORD") or os.getenv("DB_PASSWORD", ""),
+            # Direct bridge queries are read-only. Privileged writes remain delegated
+            # to legacy services after require_admin() authorization.
+            user=user,
+            password=password,
             database=os.getenv("DB_NAME", "fems_db"),
             charset="utf8mb4",
             cursorclass=pymysql.cursors.DictCursor,
@@ -91,7 +220,8 @@ def db_connect() -> pymysql.Connection:
             read_timeout=30,
         )
     except Exception as exc:  # pragma: no cover - depends on local MySQL
-        raise HTTPException(status_code=503, detail=f"MySQL 연결 실패: {exc}") from exc
+        logger.error("MySQL connection failed.", exc_info=(type(exc), exc, exc.__traceback__))
+        raise HTTPException(status_code=503, detail="데이터베이스에 연결할 수 없습니다.") from exc
 
 
 def fetch_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -115,6 +245,49 @@ def scalar(value: Any, default: float = 0.0) -> float:
         return number if math.isfinite(number) else default
     except (TypeError, ValueError):
         return default
+
+
+def optional_scalar(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_date(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def bounded_base_date(requested: date | None, maximum: Any) -> date:
+    max_date = normalize_date(maximum)
+    if max_date is None:
+        return requested or date.today()
+    return min(requested or max_date, max_date)
+
+
+def previous_year_date(value: date) -> date:
+    """Return the same prior-year date, clamping Feb 29 to Feb 28."""
+    last_day = calendar.monthrange(value.year - 1, value.month)[1]
+    return date(value.year - 1, value.month, min(value.day, last_day))
+
+
+def physical_factory_members(factory: str) -> tuple[str, ...]:
+    if factory in ("전사", "전체"):
+        return tuple(PHYSICAL_FACTORIES)
+    members = FACTORY_MEMBERS.get(factory)
+    return tuple(members) if members else (factory,)
 
 
 def json_safe(value: Any) -> Any:
@@ -148,13 +321,7 @@ def factory_clause(factory: str, column: str = "factory") -> tuple[str, list[Any
 
 
 def local_addresses() -> set[str]:
-    addresses = {"127.0.0.1", "::1"}
-    try:
-        _, _, found = socket.gethostbyname_ex(socket.gethostname())
-        addresses.update(found)
-    except OSError:
-        pass
-    return addresses
+    return set(LOCAL_ADDRESSES)
 
 
 def client_is_admin(request: Request) -> bool:
@@ -170,25 +337,149 @@ def require_admin(request: Request) -> None:
 
 def import_core(module: str):
     if not CORE_ROOT.exists():
-        raise HTTPException(status_code=503, detail=f"기존 BEMS 경로를 찾을 수 없습니다: {CORE_ROOT}")
+        logger.error("Configured BEMS core root does not exist.")
+        raise HTTPException(status_code=503, detail="기존 BEMS 서비스를 사용할 수 없습니다.")
     root_text = str(CORE_ROOT)
     if root_text not in sys.path:
         sys.path.insert(0, root_text)
     try:
         return importlib.import_module(module)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"기존 BEMS 서비스 로드 실패: {exc}") from exc
+        logger.error("Failed to load BEMS core module %s.", module, exc_info=(type(exc), exc, exc.__traceback__))
+        raise HTTPException(status_code=503, detail="기존 BEMS 서비스를 사용할 수 없습니다.") from exc
+
+
+def _table_records(frame: Any) -> list[dict[str, Any]]:
+    if frame is None:
+        return []
+    if hasattr(frame, "to_dict"):
+        try:
+            raw_rows = frame.to_dict(orient="records")
+        except TypeError:
+            raw_rows = frame.to_dict()
+    else:
+        raw_rows = frame
+    if isinstance(raw_rows, dict):
+        raw_rows = [raw_rows]
+    return [row for row in (raw_rows or []) if isinstance(row, dict)]
+
+
+def fetch_actual_production_frame(date_from: date, date_to: date) -> list[dict[str, Any]]:
+    """Load operational production through the viewer DB account plus legacy WIP rules."""
+    service = import_core("app.services.production_actual_service")
+    try:
+        gwangju_conversion = getattr(service, "WIP_MIX_CONVERSION", {}).get("광주", {})
+        wip_codes = tuple(str(code) for code in gwangju_conversion)
+        factory_codes = tuple(OPERATIONAL_PRODUCTION_FACTORY_BY_CODE)
+        factory_placeholders = ",".join(["%s"] * len(factory_codes))
+        if wip_codes:
+            wip_placeholders = ",".join(["%s"] * len(wip_codes))
+            quantity_expression = (
+                f"CASE WHEN factory = %s AND item_code IN ({wip_placeholders}) "
+                "THEN 0 ELSE actual_qty END"
+            )
+            leading_params: tuple[Any, ...] = ("F30", *wip_codes)
+        else:
+            quantity_expression = "actual_qty"
+            leading_params = ()
+        rows = fetch_all(
+            f"""
+            SELECT date, factory, SUM({quantity_expression}) actual_prod_kg
+            FROM production_daily
+            WHERE date BETWEEN %s AND %s
+              AND factory IN ({factory_placeholders})
+            GROUP BY date, factory
+            ORDER BY date, factory
+            """,
+            (*leading_params, date_from, date_to, *factory_codes),
+        )
+
+        split_dates = {
+            row_date
+            for row in rows
+            if str(row.get("factory")) in {"F10A", "F10B"}
+            and (row_date := normalize_date(row.get("date"))) is not None
+        }
+        records: list[dict[str, Any]] = []
+        for row in rows:
+            row_date = normalize_date(row.get("date"))
+            code = str(row.get("factory"))
+            production = optional_scalar(row.get("actual_prod_kg"))
+            if row_date is None or production is None:
+                continue
+            if code == "F10" and row_date in split_dates:
+                continue
+            factory = OPERATIONAL_PRODUCTION_FACTORY_BY_CODE.get(code)
+            if factory:
+                records.append({"date": row_date, "factory": factory, "actual_prod_kg": production})
+
+        wip_frame = service.get_wip_daily("광주")
+        for row in _table_records(wip_frame):
+            row_date = normalize_date(row.get("date"))
+            production = optional_scalar(row.get("total_wip_kg"))
+            if row_date is None or production is None or not date_from <= row_date <= date_to:
+                continue
+            records.append({"date": row_date, "factory": "광주", "actual_prod_kg": production})
+        return records
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to load operational production.", exc_info=(type(exc), exc, exc.__traceback__))
+        raise HTTPException(status_code=503, detail="운영 생산실적을 불러올 수 없습니다.") from exc
+
+
+def actual_production_records(frame: Any) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for row in _table_records(frame):
+        row_date = normalize_date(row.get("date"))
+        factory = row.get("factory")
+        production = optional_scalar(row.get("actual_prod_kg"))
+        if row_date is None or factory is None or production is None:
+            continue
+        records.append({"date": row_date, "factory": str(factory), "actual_prod_kg": production})
+    return records
+
+
+def actual_production_kg(
+    records: list[dict[str, Any]],
+    factory: str,
+    date_from: date,
+    date_to: date,
+) -> float:
+    members = set(physical_factory_members(factory))
+    return sum(
+        scalar(row.get("actual_prod_kg"))
+        for row in records
+        if row.get("factory") in members and date_from <= row["date"] <= date_to
+    )
+
+
+def actual_production_daily_kg(
+    records: list[dict[str, Any]],
+    factory: str,
+    date_from: date,
+    date_to: date,
+) -> dict[date, float]:
+    members = set(physical_factory_members(factory))
+    daily: dict[date, float] = {}
+    for row in records:
+        row_date = row["date"]
+        if row.get("factory") not in members or not date_from <= row_date <= date_to:
+            continue
+        daily[row_date] = daily.get(row_date, 0.0) + scalar(row.get("actual_prod_kg"))
+    return daily
 
 
 @app.exception_handler(Exception)
 async def unhandled_error(_: Request, exc: Exception):
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+    logger.error("Unhandled API exception.", exc_info=(type(exc), exc, exc.__traceback__))
+    return JSONResponse(status_code=500, content={"detail": "내부 서버 오류가 발생했습니다."})
 
 
 @app.get("/api/v1/health")
 def health() -> dict[str, Any]:
     row = fetch_one("SELECT MAX(updated_at) AS updated_at, COUNT(*) AS records FROM energy_daily")
-    return {"status": "ok", "database": "mysql", "coreRoot": str(CORE_ROOT), **json_safe(row or {})}
+    return {"status": "ok", "database": "mysql", **json_safe(row or {})}
 
 
 @app.get("/api/v1/session")
@@ -201,19 +492,29 @@ def session(request: Request) -> dict[str, str]:
     }
 
 
-def aggregate_period(factory: str, date_from: date, date_to: date) -> dict[str, float]:
+def aggregate_period(
+    factory: str,
+    date_from: date,
+    date_to: date,
+    *,
+    actual_records: list[dict[str, Any]] | None = None,
+) -> dict[str, float]:
     clause, values = factory_clause(factory)
     row = fetch_one(
         """
         SELECT COALESCE(SUM(total_power_kwh),0) power,
                COALESCE(SUM(fuel_nm3),0) fuel,
-               COALESCE(SUM(water_ton),0) water,
-               COALESCE(SUM(mix_prod_kg),0) production
+               COALESCE(SUM(water_ton),0) water
         FROM energy_daily WHERE date BETWEEN %s AND %s
         """ + clause,
         (date_from, date_to, *values),
     ) or {}
-    return {key: scalar(row.get(key)) for key in ("power", "fuel", "water", "production")}
+    if actual_records is None:
+        frame = fetch_actual_production_frame(date_from, date_to)
+        actual_records = actual_production_records(frame)
+    totals = {key: scalar(row.get(key)) for key in ("power", "fuel", "water")}
+    totals["production"] = actual_production_kg(actual_records, factory, date_from, date_to)
+    return totals
 
 
 def rate_change(current: float, previous: float) -> float:
@@ -223,17 +524,20 @@ def rate_change(current: float, previous: float) -> float:
 @app.get("/api/v1/dashboard")
 def dashboard(factory: str = "전사", requested_date: date | None = Query(None, alias="date")) -> dict[str, Any]:
     max_row = fetch_one("SELECT MAX(date) max_date, MAX(updated_at) updated_at FROM energy_daily") or {}
-    base = min(requested_date or date.today(), max_row.get("max_date") or date.today())
+    max_date = normalize_date(max_row.get("max_date"))
+    base = min(requested_date or date.today(), max_date) if max_date else (requested_date or date.today())
     month_start = base.replace(day=1)
-    prev_base = base.replace(year=base.year - 1)
+    prev_base = previous_year_date(base)
     prev_start = prev_base.replace(day=1)
-    current = aggregate_period(factory, month_start, base)
-    previous = aggregate_period(factory, prev_start, prev_base)
+    actual_frame = fetch_actual_production_frame(date(base.year - 1, 1, 1), base)
+    actual_records = actual_production_records(actual_frame)
+    current = aggregate_period(factory, month_start, base, actual_records=actual_records)
+    previous = aggregate_period(factory, prev_start, prev_base, actual_records=actual_records)
     prod_ton = current["production"] / 1000
     prev_prod_ton = previous["production"] / 1000
 
-    def intensity(values: dict[str, float], key: str, tonnes: float) -> float:
-        return values[key] / tonnes if tonnes > 0 else 0.0
+    def intensity(values: dict[str, float], key: str, tonnes: float) -> float | None:
+        return values[key] / tonnes if tonnes > 0 else None
 
     metrics = []
     metric_specs = [
@@ -244,65 +548,98 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
     for key, label, unit, tone in metric_specs:
         value = intensity(current, key, prod_ton)
         prev_value = intensity(previous, key, prev_prod_ton)
-        metrics.append({"id": key, "label": label, "value": round(value, 2), "unit": unit, "change": rate_change(value, prev_value), "tone": tone})
+        metrics.append({
+            "id": key,
+            "label": label,
+            "value": round(value, 2) if value is not None else None,
+            "unit": unit,
+            "change": rate_change(value, prev_value) if value is not None and prev_value else None,
+            "tone": tone,
+        })
     metrics.append({"id": "production", "label": "누계 생산량", "value": round(prod_ton, 1), "unit": "ton", "change": rate_change(prod_ton, prev_prod_ton), "tone": "emerald"})
 
     clause, values = factory_clause(factory, "e.factory")
     trend_rows = fetch_all(
         """
-        SELECT e.date, SUM(e.total_power_kwh)/1000 actual, SUM(e.mix_prod_kg)/1000 production
+        SELECT e.date, SUM(e.total_power_kwh)/1000 actual
         FROM energy_daily e WHERE e.date BETWEEN %s AND %s
         """ + clause + " GROUP BY e.date ORDER BY e.date",
         (base - timedelta(days=6), base, *values),
     )
-    pred_clause, pred_values = factory_clause(factory, "factory")
-    pred_rows = fetch_all(
-        """
-        SELECT pred_date, SUM(pred_value)/1000 predicted, SUM(pred_p05)/1000 lower_band,
-               SUM(pred_p95)/1000 upper_band
-        FROM prediction_log WHERE target='전력' AND pred_date BETWEEN %s AND %s
-        """ + pred_clause + " GROUP BY pred_date",
-        (base - timedelta(days=6), base, *pred_values),
+    pred_rows = aggregate_prediction_rows(
+        factory,
+        base,
+        date_from=base - timedelta(days=6),
+        target="전력",
+        limit=7,
     )
-    pred_map = {row["pred_date"]: row for row in pred_rows}
+    pred_map = {normalize_date(row["pred_date"]): row for row in pred_rows}
+    trend_production = actual_production_daily_kg(
+        actual_records, factory, base - timedelta(days=6), base,
+    )
     trend = []
     for row in trend_rows:
-        pred = pred_map.get(row["date"], {})
+        row_date = normalize_date(row.get("date"))
+        if row_date is None:
+            continue
+        pred = pred_map.get(row_date, {})
         actual = scalar(row.get("actual"))
-        predicted = scalar(pred.get("predicted"), actual)
+        predicted = optional_scalar(pred.get("predicted"))
+        lower = optional_scalar(pred.get("lower_band"))
+        upper = optional_scalar(pred.get("upper_band"))
         trend.append({
-            "date": row["date"].strftime("%m.%d"),
+            "date": row_date.strftime("%m.%d"),
             "actual": round(actual, 2),
-            "predicted": round(predicted, 2),
-            "lower": round(scalar(pred.get("lower_band"), predicted * .93), 2),
-            "upper": round(scalar(pred.get("upper_band"), predicted * 1.07), 2),
-            "production": round(scalar(row.get("production")), 1),
+            "predicted": round(predicted, 2) if predicted is not None else None,
+            "lower": round(lower, 2) if lower is not None else None,
+            "upper": round(upper, 2) if upper is not None else None,
+            "production": round(trend_production.get(row_date, 0.0) / 1000, 1),
         })
 
+    yoy_clause, yoy_values = factory_clause(factory)
     yoy_rows = fetch_all(
         """
-        SELECT YEAR(date) y, MONTH(date) m, SUM(total_power_kwh) power, SUM(mix_prod_kg)/1000 production
-        FROM energy_daily WHERE YEAR(date) IN (%s,%s)
-        """ + factory_clause(factory)[0] + " GROUP BY y,m ORDER BY y,m",
-        (base.year - 1, base.year, *factory_clause(factory)[1]),
+        SELECT YEAR(date) y, MONTH(date) m, SUM(total_power_kwh) power
+        FROM energy_daily WHERE date BETWEEN %s AND %s
+        """ + yoy_clause + " GROUP BY y,m ORDER BY y,m",
+        (date(base.year - 1, 1, 1), base, *yoy_values),
     )
-    yoy_map = {
-        (int(row["y"]), int(row["m"])): scalar(row["power"]) / scalar(row["production"])
-        for row in yoy_rows
-        if scalar(row["production"]) > 0
-    }
-    yoy = [{"month": f"{month}월", "current": round(yoy_map.get((base.year, month), 0), 1), "previous": round(yoy_map.get((base.year - 1, month), 0), 1)} for month in range(max(1, base.month - 5), base.month + 1)]
+    monthly_production: dict[tuple[int, int], float] = {}
+    for production_date, production_kg in actual_production_daily_kg(
+        actual_records, factory, date(base.year - 1, 1, 1), base,
+    ).items():
+        key = (production_date.year, production_date.month)
+        monthly_production[key] = monthly_production.get(key, 0.0) + production_kg
+    yoy_map: dict[tuple[int, int], float] = {}
+    for row in yoy_rows:
+        key = (int(row["y"]), int(row["m"]))
+        prod_ton_month = monthly_production.get(key, 0.0) / 1000
+        if prod_ton_month > 0:
+            yoy_map[key] = scalar(row.get("power")) / prod_ton_month
+    yoy = []
+    for month in range(max(1, base.month - 5), base.month + 1):
+        current_yoy = yoy_map.get((base.year, month))
+        previous_yoy = yoy_map.get((base.year - 1, month))
+        yoy.append({
+            "month": f"{month}월",
+            "current": round(current_yoy, 1) if current_yoy is not None else None,
+            "previous": round(previous_yoy, 1) if previous_yoy is not None else None,
+        })
 
     comparisons = []
     for display_factory in DISPLAY_FACTORIES:
-        current_factory = aggregate_period(display_factory, month_start, base)
-        previous_factory = aggregate_period(display_factory, prev_start, prev_base)
+        current_factory = aggregate_period(display_factory, month_start, base, actual_records=actual_records)
+        previous_factory = aggregate_period(display_factory, prev_start, prev_base, actual_records=actual_records)
         cur_ton = current_factory["production"] / 1000
         prv_ton = previous_factory["production"] / 1000
         cur_value = intensity(current_factory, "power", cur_ton)
         prv_value = intensity(previous_factory, "power", prv_ton)
-        if cur_value:
-            comparisons.append({"factory": display_factory, "value": round(cur_value, 1), "change": rate_change(cur_value, prv_value)})
+        if cur_value is not None:
+            comparisons.append({
+                "factory": display_factory,
+                "value": round(cur_value, 1),
+                "change": rate_change(cur_value, prv_value) if prv_value else None,
+            })
 
     event_clause, event_values = factory_clause(factory)
     events = fetch_all(
@@ -334,9 +671,12 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
 
 
 @app.get("/api/v1/energy")
-def energy(factory: str = "전사") -> dict[str, Any]:
+def energy(
+    factory: str = "전사",
+    requested_date: date | None = Query(None, alias="date"),
+) -> dict[str, Any]:
     max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
-    base = max_row.get("max_date") or date.today()
+    base = bounded_base_date(requested_date, max_row.get("max_date"))
     clause, values = factory_clause(factory)
     rows = fetch_all(
         """
@@ -378,6 +718,7 @@ def energy(factory: str = "전사") -> dict[str, Any]:
         for key in ("power", "fuel", "water", "wastewater"):
             target[key] = scalar(target[key]) + scalar(row.get(key))
     return json_safe({
+        "baseDate": base,
         "daily": [{**row, "date": row["date"].strftime("%m.%d")} for row in rows],
         "equipment": equipment_rows,
         "factories": list(combined.values()),
@@ -385,7 +726,11 @@ def energy(factory: str = "전사") -> dict[str, Any]:
 
 
 @app.get("/api/v1/intensity")
-def intensity_analysis(factory: str = "전사", metric: str = "power") -> dict[str, Any]:
+def intensity_analysis(
+    factory: str = "전사",
+    metric: str = "power",
+    requested_date: date | None = Query(None, alias="date"),
+) -> dict[str, Any]:
     """원단위 분석: 월별 금년/전년/목표 추이 + MTD/YTD 요약 + 공장 매트릭스."""
     spec = INTENSITY_METRICS.get(metric)
     if spec is None:
@@ -393,29 +738,39 @@ def intensity_analysis(factory: str = "전사", metric: str = "power") -> dict[s
     usage_col = spec["column"]
 
     max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
-    base = max_row.get("max_date") or date.today()
+    base = bounded_base_date(requested_date, max_row.get("max_date"))
+    history_start = date(base.year - 1, 1, 1)
+    actual_frame = fetch_actual_production_frame(history_start, base)
+    actual_records = actual_production_records(actual_frame)
 
     clause, values = factory_clause(factory)
     monthly_rows = fetch_all(
         f"""
         SELECT YEAR(date) y, MONTH(date) m,
-               SUM({usage_col}) usage_sum, SUM(mix_prod_kg)/1000 prod_ton
-        FROM energy_daily WHERE YEAR(date) IN (%s,%s)
+               SUM({usage_col}) usage_sum
+        FROM energy_daily WHERE date BETWEEN %s AND %s
         """ + clause + " GROUP BY y,m ORDER BY y,m",
-        (base.year - 1, base.year, *values),
+        (history_start, base, *values),
     )
-    monthly_map = {
-        (int(row["y"]), int(row["m"])): scalar(row["usage_sum"]) / scalar(row["prod_ton"])
-        for row in monthly_rows
-        if scalar(row["prod_ton"]) > 0
-    }
+    monthly_production: dict[tuple[int, int], float] = {}
+    for production_date, production_kg in actual_production_daily_kg(
+        actual_records, factory, history_start, base,
+    ).items():
+        key = (production_date.year, production_date.month)
+        monthly_production[key] = monthly_production.get(key, 0.0) + production_kg
+    monthly_map: dict[tuple[int, int], float] = {}
+    for row in monthly_rows:
+        key = (int(row["y"]), int(row["m"]))
+        prod_ton = monthly_production.get(key, 0.0) / 1000
+        if prod_ton > 0:
+            monthly_map[key] = scalar(row.get("usage_sum")) / prod_ton
 
     target_factory = "ALL" if factory in ("전사", "전체") else factory
     target_row = fetch_one(
         "SELECT target_pct FROM savings_target WHERE factory=%s AND year=%s AND metric=%s",
         (target_factory, base.year, spec["target"]),
     )
-    target_pct = scalar(target_row.get("target_pct")) if target_row else None
+    target_pct = optional_scalar(target_row.get("target_pct")) if target_row else None
 
     monthly = []
     for month in range(1, 13):
@@ -430,12 +785,12 @@ def intensity_analysis(factory: str = "전사", metric: str = "power") -> dict[s
         })
 
     def period_intensity(f: str, date_from: date, date_to: date) -> float | None:
-        totals = aggregate_period(f, date_from, date_to)
+        totals = aggregate_period(f, date_from, date_to, actual_records=actual_records)
         prod_ton = totals["production"] / 1000
         key = {"total_power_kwh": "power", "fuel_nm3": "fuel", "water_ton": "water"}[usage_col]
         return totals[key] / prod_ton if prod_ton > 0 else None
 
-    prev_base = base.replace(year=base.year - 1)
+    prev_base = previous_year_date(base)
     summary = {}
     for label, date_from, prev_from in (
         ("mtd", base.replace(day=1), prev_base.replace(day=1)),
@@ -463,6 +818,7 @@ def intensity_analysis(factory: str = "전사", metric: str = "power") -> dict[s
         })
 
     return json_safe({
+        "baseDate": base,
         "metric": metric,
         "unit": spec["unit"],
         "year": base.year,
@@ -474,87 +830,207 @@ def intensity_analysis(factory: str = "전사", metric: str = "power") -> dict[s
 
 
 @app.get("/api/v1/production")
-def production(factory: str = "전사") -> dict[str, Any]:
+def production(
+    factory: str = "전사",
+    requested_date: date | None = Query(None, alias="date"),
+) -> dict[str, Any]:
     max_row = fetch_one("SELECT MAX(date) max_date FROM production_daily") or {}
-    base = max_row.get("max_date") or date.today()
-    prod_factory = "남양주" if factory in ("남양주1", "남양주2") else factory
-    clause, values = factory_clause(prod_factory)
-    if prod_factory == "남양주":
-        clause, values = " AND factory=%s", ["남양주"]
+    base = bounded_base_date(requested_date, max_row.get("max_date"))
+    month_start = base.replace(day=1)
+    codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
+    placeholders = ",".join(["%s"] * len(codes))
+    clause = f" AND factory IN ({placeholders})"
+    values = list(codes)
     summary = fetch_one(
         """
-        SELECT SUM(actual_qty) actual, COUNT(DISTINCT item_code) items
-        FROM production_daily WHERE YEAR(date)=%s AND MONTH(date)=%s
+        SELECT SUM(actual_qty)/1000 actual, COUNT(DISTINCT item_code) items
+        FROM production_daily WHERE date BETWEEN %s AND %s
         """ + clause,
-        (base.year, base.month, *values),
+        (month_start, base, *values),
     ) or {}
     plan_row = fetch_one(
         """
         SELECT SUM(planned_qty) plan FROM (
-          SELECT factory,item_code,MAX(planned_qty) planned_qty FROM production_daily
-          WHERE YEAR(date)=%s AND MONTH(date)=%s
+          SELECT factory,item_code,MAX(planned_qty)/1000 planned_qty FROM production_daily
+          WHERE date BETWEEN %s AND %s
         """ + clause + " GROUP BY factory,item_code) p",
-        (base.year, base.month, *values),
+        (month_start, base, *values),
     ) or {}
     actual = scalar(summary.get("actual"))
     plan = scalar(plan_row.get("plan"))
-    elapsed = base.day / 31
+    days_in_month = calendar.monthrange(base.year, base.month)[1]
+    elapsed = base.day / days_in_month
     forecast = actual / elapsed if elapsed else actual
     daily = fetch_all(
         """
         SELECT date,
-          SUM(CASE WHEN category2='IC' THEN actual_qty ELSE 0 END) IC,
-          SUM(CASE WHEN category2='MY' THEN actual_qty ELSE 0 END) MY,
-          SUM(CASE WHEN category2='FM' THEN actual_qty ELSE 0 END) FM,
-          SUM(CASE WHEN category2='SN' THEN actual_qty ELSE 0 END) SN
-        FROM production_daily WHERE YEAR(date)=%s AND MONTH(date)=%s
+          SUM(CASE WHEN category2='IC' THEN actual_qty ELSE 0 END)/1000 IC,
+          SUM(CASE WHEN category2='MY' THEN actual_qty ELSE 0 END)/1000 MY,
+          SUM(CASE WHEN category2='FM' THEN actual_qty ELSE 0 END)/1000 FM,
+          SUM(CASE WHEN category2='SN' THEN actual_qty ELSE 0 END)/1000 SN
+        FROM production_daily WHERE date BETWEEN %s AND %s
         """ + clause + " GROUP BY date ORDER BY date",
-        (base.year, base.month, *values),
+        (month_start, base, *values),
     )
     mix_rows = fetch_all(
         """
         SELECT COALESCE(category2,'기타') name, SUM(actual_qty) value FROM production_daily
-        WHERE YEAR(date)=%s AND MONTH(date)=%s
+        WHERE date BETWEEN %s AND %s
         """ + clause + " GROUP BY category2 ORDER BY value DESC",
-        (base.year, base.month, *values),
+        (month_start, base, *values),
     )
     mix_total = sum(scalar(row["value"]) for row in mix_rows) or 1
     top_rows = fetch_all(
         """
-        SELECT item_name name, MAX(planned_qty) plan, SUM(actual_qty) actual
-        FROM production_daily WHERE YEAR(date)=%s AND MONTH(date)=%s
-        """ + clause + " GROUP BY item_code,item_name ORDER BY actual DESC LIMIT 10",
-        (base.year, base.month, *values),
+        SELECT item_name name, SUM(plan) plan, SUM(actual) actual
+        FROM (
+          SELECT factory, item_code, MAX(item_name) item_name,
+                 MAX(planned_qty)/1000 plan, SUM(actual_qty)/1000 actual
+          FROM production_daily WHERE date BETWEEN %s AND %s
+        """ + clause + """
+          GROUP BY factory,item_code
+        ) item_totals
+        GROUP BY item_code,item_name ORDER BY actual DESC LIMIT 10
+        """,
+        (month_start, base, *values),
     )
+    daily_output = []
+    for row in daily[-14:]:
+        row_date = normalize_date(row.get("date"))
+        if row_date is None:
+            continue
+        daily_output.append({
+            "date": row_date.strftime("%m.%d"),
+            **{key: round(scalar(row.get(key)), 3) for key in ("IC", "MY", "FM", "SN")},
+        })
+    top_items = []
+    for row in top_rows:
+        item_plan = scalar(row.get("plan"))
+        item_actual = scalar(row.get("actual"))
+        top_items.append({
+            "name": row.get("name"),
+            "plan": round(item_plan, 3),
+            "actual": round(item_actual, 3),
+            "rate": round(item_actual / item_plan * 100, 1) if item_plan > 0 else None,
+        })
     return json_safe({
-        "summary": {"plan": round(plan), "actual": round(actual), "progress": round(actual / plan * 100, 1) if plan else 0, "pace": round((actual / plan / elapsed) * 100, 1) if plan and elapsed else 0, "forecast": round(forecast), "items": int(summary.get("items") or 0)},
-        "daily": [{**row, "date": row["date"].strftime("%m.%d")} for row in daily[-14:]],
+        "baseDate": base,
+        "summary": {
+            "plan": round(plan, 1),
+            "actual": round(actual, 1),
+            "progress": round(actual / plan * 100, 1) if plan > 0 else None,
+            "pace": round((actual / plan / elapsed) * 100, 1) if plan > 0 and elapsed > 0 else None,
+            "forecast": round(forecast, 1),
+            "items": int(summary.get("items") or 0),
+        },
+        "daily": daily_output,
         "mix": [{"name": row["name"], "value": round(scalar(row["value"]) / mix_total * 100, 1)} for row in mix_rows],
-        "topItems": [{**row, "rate": round(scalar(row["actual"]) / scalar(row["plan"], 1) * 100, 1)} for row in top_rows],
+        "topItems": top_items,
     })
 
 
-@app.get("/api/v1/predictions")
-def predictions(factory: str = "전사") -> dict[str, Any]:
-    clause, values = factory_clause(factory)
-    rows = fetch_all(
+def aggregate_prediction_rows(
+    factory: str,
+    date_to: date,
+    *,
+    date_from: date | None = None,
+    target: str | None = None,
+    limit: int = 60,
+) -> list[dict[str, Any]]:
+    members = physical_factory_members(factory)
+    placeholders = ",".join(["%s"] * len(members))
+    conditions = ["pred_date <= %s", f"factory IN ({placeholders})"]
+    params: list[Any] = [date_to, *members]
+    if date_from is not None:
+        conditions.append("pred_date >= %s")
+        params.append(date_from)
+    if target is not None:
+        conditions.append("target = %s")
+        params.append(target)
+    source_rows = fetch_all(
         """
-        SELECT pred_date, target, SUM(pred_value)/1000 predicted,
+        SELECT pred_date, target, factory, SUM(pred_value)/1000 predicted,
                SUM(pred_p05)/1000 lower_band, SUM(pred_p95)/1000 upper_band,
-               SUM(actual_value)/1000 actual,
-               CASE WHEN SUM(actual_value) > SUM(pred_p95) THEN 'over'
-                    WHEN SUM(actual_value) < SUM(pred_p05) THEN 'under' ELSE 'inside' END band_status
-        FROM prediction_log WHERE 1=1
-        """ + clause + " GROUP BY pred_date,target ORDER BY pred_date DESC LIMIT 60",
-        tuple(values),
+               SUM(actual_value)/1000 actual
+        FROM prediction_log WHERE
+        """ + " AND ".join(conditions) + " GROUP BY pred_date,target,factory ORDER BY pred_date DESC LIMIT 5000",
+        tuple(params),
     )
-    status = {"normal": 0, "warning": 0, "alert": 0, "label": "정상"}
+    grouped: dict[tuple[date, str], dict[str, dict[str, Any]]] = {}
+    for row in source_rows:
+        pred_date = normalize_date(row.get("pred_date"))
+        row_target = row.get("target")
+        row_factory = row.get("factory")
+        if pred_date is None or row_target is None or row_factory not in members:
+            continue
+        grouped.setdefault((pred_date, str(row_target)), {})[str(row_factory)] = row
+
+    output: list[dict[str, Any]] = []
+    for (pred_date, row_target), by_factory in grouped.items():
+        prediction_complete = all(
+            member in by_factory
+            and optional_scalar(by_factory[member].get("predicted")) is not None
+            for member in members
+        )
+        band_complete = all(
+            member in by_factory
+            and optional_scalar(by_factory[member].get("lower_band")) is not None
+            and optional_scalar(by_factory[member].get("upper_band")) is not None
+            for member in members
+        )
+        actual_complete = all(
+            member in by_factory and optional_scalar(by_factory[member].get("actual")) is not None
+            for member in members
+        )
+        predicted = (
+            sum(scalar(by_factory[member].get("predicted")) for member in members)
+            if prediction_complete else None
+        )
+        lower = (
+            sum(scalar(by_factory[member].get("lower_band")) for member in members)
+            if band_complete else None
+        )
+        upper = (
+            sum(scalar(by_factory[member].get("upper_band")) for member in members)
+            if band_complete else None
+        )
+        actual = (
+            sum(scalar(by_factory[member].get("actual")) for member in members)
+            if actual_complete else None
+        )
+        band_status = "unknown"
+        if band_complete and actual_complete and actual is not None and lower is not None and upper is not None:
+            band_status = "over" if actual > upper else "under" if actual < lower else "inside"
+        output.append({
+            "pred_date": pred_date,
+            "target": row_target,
+            "predicted": predicted,
+            "lower_band": lower,
+            "upper_band": upper,
+            "actual": actual,
+            "band_status": band_status,
+        })
+    output.sort(key=lambda row: (row["pred_date"], str(row["target"])), reverse=True)
+    return output[:limit]
+
+
+@app.get("/api/v1/predictions")
+def predictions(
+    factory: str = "전사",
+    requested_date: date | None = Query(None, alias="date"),
+) -> dict[str, Any]:
+    max_row = fetch_one("SELECT MAX(pred_date) max_date FROM prediction_log") or {}
+    base = bounded_base_date(requested_date, max_row.get("max_date"))
+    rows = aggregate_prediction_rows(factory, base)
+    status = {"normal": 0, "warning": 0, "alert": 0, "unknown": 0, "label": "정상"}
     for row in rows:
         if row["band_status"] == "inside":
             status["normal"] += 1
-        else:
+        elif row["band_status"] in ("over", "under"):
             status["alert"] += 1
-    status["label"] = "주의" if status["alert"] else "정상"
+        else:
+            status["unknown"] += 1
+    status["label"] = "주의" if status["alert"] else "미확정" if status["unknown"] else "정상"
     model = {"version": "v5.3", "trainedAt": "-", "mape": 0, "coverage": 0, "state": "운영 중"}
     try:
         service = import_core("app.services.usage_prediction_v5_service")
@@ -566,12 +1042,22 @@ def predictions(factory: str = "전사") -> dict[str, Any]:
         })
     except HTTPException:
         pass
-    latest = [{
-        "date": row["pred_date"], "target": row["target"], "predicted": round(scalar(row["predicted"]), 2),
-        "lower": round(scalar(row["lower_band"]), 2), "upper": round(scalar(row["upper_band"]), 2),
-        "actual": round(scalar(row["actual"]), 2) if row.get("actual") is not None else None, "status": row["band_status"],
-    } for row in rows[:12]]
-    return json_safe({"status": status, "latest": latest, "model": model})
+    latest = []
+    for row in rows[:12]:
+        predicted = optional_scalar(row.get("predicted"))
+        lower = optional_scalar(row.get("lower_band"))
+        upper = optional_scalar(row.get("upper_band"))
+        actual = optional_scalar(row.get("actual"))
+        latest.append({
+            "date": row["pred_date"],
+            "target": row["target"],
+            "predicted": round(predicted, 2) if predicted is not None else None,
+            "lower": round(lower, 2) if lower is not None else None,
+            "upper": round(upper, 2) if upper is not None else None,
+            "actual": round(actual, 2) if actual is not None else None,
+            "status": row["band_status"],
+        })
+    return json_safe({"baseDate": base, "status": status, "latest": latest, "model": model})
 
 
 class PredictionRequest(BaseModel):
@@ -583,24 +1069,39 @@ class PredictionRequest(BaseModel):
 def _format_prediction_results(pred_date: date, raw_results: dict[str, Any]) -> list[dict[str, Any]]:
     output = []
     for target, row in raw_results.items():
-        if not isinstance(row, dict) or row.get("error"):
-            output.append({"date": pred_date, "target": target, "error": (row or {}).get("error", "예측 실패")})
+        if not isinstance(row, dict):
+            output.append({"date": pred_date, "target": target, "error": "예측 결과 형식 오류"})
+            continue
+        if row.get("error"):
+            output.append({"date": pred_date, "target": target, "error": row.get("error") or "예측 실패"})
             continue
         scale = 1000 if target in ("전력", "연료", "용수") else 1
+        predicted = optional_scalar(row.get("pred_p50"))
+        if predicted is None:
+            predicted = optional_scalar(row.get("pred"))
+        lower = optional_scalar(row.get("pred_p05"))
+        upper = optional_scalar(row.get("pred_p95"))
+        actual = optional_scalar(row.get("actual"))
+        status = str(row.get("band_status") or "")
+        if lower is None or upper is None or actual is None:
+            status = "unknown"
+        elif status not in {"inside", "over", "under"}:
+            status = "over" if actual > upper else "under" if actual < lower else "inside"
         output.append({
             "date": pred_date,
             "target": target,
-            "predicted": scalar(row.get("pred_p50") or row.get("pred")) / scale,
-            "lower": scalar(row.get("pred_p05") or row.get("pred")) / scale,
-            "upper": scalar(row.get("pred_p95") or row.get("pred")) / scale,
-            "actual": scalar(row.get("actual")) / scale if row.get("actual") is not None else None,
-            "status": row.get("band_status") or "inside",
+            "predicted": predicted / scale if predicted is not None else None,
+            "lower": lower / scale if lower is not None else None,
+            "upper": upper / scale if upper is not None else None,
+            "actual": actual / scale if actual is not None else None,
+            "status": status,
         })
     return output
 
 
 @app.post("/api/v1/predictions/run")
-def run_prediction(payload: PredictionRequest) -> dict[str, Any]:
+def run_prediction(payload: PredictionRequest, request: Request) -> dict[str, Any]:
+    require_admin(request)
     service = import_core("app.services.usage_prediction_v5_service")
     if payload.factory in FACTORY_MEMBERS:  # 전사/전체/남양주 — 집계 공장은 배치 경로 사용
         batch = service.predict_v5_batch(payload.factory, payload.date, payload.date, save_to_db=False)
@@ -609,10 +1110,7 @@ def run_prediction(payload: PredictionRequest) -> dict[str, Any]:
         raw = batch[0]
     else:
         raw = service.predict_v5(payload.factory, payload.date, payload.mix_prod_kg)
-    return json_safe({
-        "results": _format_prediction_results(payload.date, raw.get("results", {})),
-        "modelPath": raw.get("model_path"),
-    })
+    return json_safe({"results": _format_prediction_results(payload.date, raw.get("results", {}))})
 
 
 class HistoryBackfillRequest(BaseModel):
@@ -668,7 +1166,10 @@ def save_targets(payload: TargetSaveRequest, request: Request) -> dict[str, Any]
     service = import_core("app.services.target_service")
     affected = service.upsert_targets(
         payload.year,
-        [item.model_dump() for item in payload.items],
+        [
+            item.model_dump() if hasattr(item, "model_dump") else item.dict()
+            for item in payload.items
+        ],
         note=payload.note,
     )
     return {"affected": int(affected)}
@@ -755,7 +1256,8 @@ def delete_event(event_id: int, request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/v1/audit")
-def audit() -> dict[str, Any]:
+def audit(request: Request) -> dict[str, Any]:
+    require_admin(request)
     changes = fetch_all(
         """
         SELECT id, DATE_FORMAT(changed_at,'%%m-%%d %%H:%%i') time, factory, date,

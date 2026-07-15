@@ -1,4 +1,4 @@
-export const factories = ["전사", "남양주", "김해", "광주", "대전", "경산"];
+export const factories = ["전사", "남양주", "남양주1", "남양주2", "김해", "광주", "논산", "경산"];
 
 export const demo = {
   session: { role: "viewer", clientIp: "demo", serverName: "BEMS-DEMO" },
@@ -18,19 +18,19 @@ export const demo = {
       { date: "07.15", actual: 198, predicted: 202, lower: 189, upper: 216 },
     ],
     yoy: [{ month: "2월", current: 432, previous: 448 }, { month: "3월", current: 426, previous: 441 }, { month: "4월", current: 421, previous: 436 }, { month: "5월", current: 417, previous: 429 }, { month: "6월", current: 414, previous: 425 }, { month: "7월", current: 413, previous: 426 }],
-    factoryComparison: [{ factory: "남양주", value: 398, change: -4.1 }, { factory: "김해", value: 424, change: -2.2 }, { factory: "광주", value: 437, change: 1.3 }, { factory: "대전", value: 409, change: -3.4 }],
+    factoryComparison: [{ factory: "남양주", value: 398, change: -4.1 }, { factory: "김해", value: 424, change: -2.2 }, { factory: "광주", value: 437, change: 1.3 }, { factory: "논산", value: 409, change: -3.4 }, { factory: "경산", value: 402, change: -2.7 }],
     events: [{ id: 1, date: "07.14", factory: "남양주", tag: "정비", note: "냉동기 정기점검 완료" }, { id: 2, date: "07.12", factory: "김해", tag: "생산", note: "주말 증산 대응" }],
   },
   energy: {
     daily: Array.from({ length: 14 }, (_, i) => ({ date: `07.${String(i + 2).padStart(2, "0")}`, power: 170 + ((i * 17) % 42), fuel: 18 + ((i * 3) % 9), water: 12 + ((i * 5) % 8), wastewater: 7 + ((i * 2) % 5) })),
     equipment: [{ name: "냉동", value: 38 }, { name: "공압", value: 17 }, { name: "생산설비·기타", value: 45 }],
-    factories: [{ factory: "남양주", power: 920, fuel: 132, water: 86 }, { factory: "김해", power: 710, fuel: 104, water: 64 }, { factory: "광주", power: 540, fuel: 82, water: 51 }, { factory: "대전", power: 610, fuel: 91, water: 57 }],
+    factories: [{ factory: "남양주", power: 920, fuel: 132, water: 86, wastewater: 48 }, { factory: "김해", power: 710, fuel: 104, water: 64, wastewater: 39 }, { factory: "광주", power: 540, fuel: 82, water: 51, wastewater: 31 }, { factory: "논산", power: 610, fuel: 91, water: 57, wastewater: 34 }, { factory: "경산", power: 430, fuel: 68, water: 43, wastewater: 26 }],
   },
   intensity: {
     metric: "power", unit: "kWh/ton", year: 2026, targetPct: 3,
     summary: { mtd: { current: 412.8, previous: 426.4, change: -3.2 }, ytd: { current: 419.6, previous: 433.1, change: -3.1 } },
     monthly: Array.from({ length: 12 }, (_, i) => ({ month: `${i + 1}월`, current: i < 7 ? 438 - i * 4 : null, previous: 451 - i * 4, target: 437 - i * 4 })),
-    matrix: [{ factory: "남양주", current: 398, previous: 415, change: -4.1 }, { factory: "김해", current: 424, previous: 434, change: -2.2 }, { factory: "광주", current: 437, previous: 431, change: 1.3 }, { factory: "대전", current: 409, previous: 424, change: -3.4 }],
+    matrix: [{ factory: "남양주", current: 398, previous: 415, change: -4.1 }, { factory: "김해", current: 424, previous: 434, change: -2.2 }, { factory: "광주", current: 437, previous: 431, change: 1.3 }, { factory: "논산", current: 409, previous: 424, change: -3.4 }, { factory: "경산", current: 402, previous: 413, change: -2.7 }],
   },
   production: {
     summary: { plan: 20500, actual: 18420, progress: 89.9, pace: 104.5, forecast: 21400, items: 82 },
