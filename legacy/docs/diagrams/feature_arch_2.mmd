@@ -1,0 +1,29 @@
+flowchart LR
+    subgraph G["피처 부분군"]
+        direction TB
+        PR["🏭 생산<br/>log_mix_ton<br/>+lag1 / +r7mean"]
+        AR["🔁 자기회귀·원단위<br/>lag1 · r7mean<br/>intensity_lag1"]
+        CAL["📅 캘린더<br/>dow · month<br/>is_holiday / pre / post<br/>is_post_long_weekend<br/>consecutive_nonwork_before<br/>dist_to_h / dist_from_h"]
+        TMP["🌡 기온<br/>평균기온<br/>+lag1/r7/r14/r30"]
+        DD["❄ 냉난방 도일<br/>HDD<br/>CDD · CDD16 · CDD10<br/>CDD16_r14mean"]
+        THI["💧 체감·습도<br/>THI · 상대습도"]
+        WIP["📦 재공품·공정<br/>wip_품목코드<br/>wip_bottling_ea_log<br/>wip_n_active_skus"]
+    end
+
+    M1["M1<br/>생산·캘린더·자기회귀"]
+    M3["M3<br/>기상+생산"]
+    M4["M4<br/>체감(THI)+도일+생산"]
+
+    PR --> M1 & M3 & M4
+    WIP --> M1 & M3 & M4
+    AR --> M1
+    CAL --> M1
+    TMP --> M3
+    TMP -. lag/r7 .-> M1
+    DD --> M4
+    THI --> M3 & M4
+
+    classDef feat fill:#fff7ed,stroke:#fb923c,color:#7c2d12;
+    classDef mdl fill:#eef2ff,stroke:#6366f1,color:#1e1b4b;
+    class PR,AR,CAL,TMP,DD,THI,WIP feat;
+    class M1,M3,M4 mdl;

@@ -1,0 +1,302 @@
+{
+  "active_model_key": "v5.3",
+  "active_model_path": "app\\predictive model\\energy usage\\v5.3_20260625_130733.pkl",
+  "training_profile": "quantile_wip",
+  "available_models": {
+    "v5": {
+      "label": "기본 v5 모델 (점추정)",
+      "path": "app\\predictive model\\energy usage\\v5.pkl",
+      "training_profile": "baseline"
+    },
+    "v5.1": {
+      "label": "재공품 반영 v5 모델 (점추정)",
+      "path": "app\\predictive model\\energy usage\\v5.1.pkl",
+      "training_profile": "wip_shortlist"
+    },
+    "v5.2": {
+      "label": "분위수 회귀 + CQR (정상범주 밴드)",
+      "path": "app\\predictive model\\energy usage\\v5.2.pkl",
+      "training_profile": "quantile_wip"
+    },
+    "v5.3": {
+      "label": "v5.2 + 보틀링/활성SKU 피처 + 2026-Q1 VAL split",
+      "path": "app\\predictive model\\energy usage\\v5.3.pkl",
+      "training_profile": "quantile_wip"
+    }
+  },
+  "weights_updated_at": "2026-06-25T13:11:30.008539",
+  "full_trained_at": "2026-06-25T13:11:30.008539",
+  "data_end_date_global": "2026-06-24",
+  "train_end_date_global": "2026-02-09",
+  "missing_model_keys": [
+    "v5",
+    "v5.1",
+    "v5.2"
+  ],
+  "artifacts": {
+    "app\\predictive model\\energy usage\\v5.3_20260623_115529.pkl": {
+      "schema_version": 2,
+      "path": "app\\predictive model\\energy usage\\v5.3_20260623_115529.pkl",
+      "filename": "v5.3_20260623_115529.pkl",
+      "model_key": "v5.3",
+      "training_profile": "quantile_wip",
+      "sha256": "057cc472eef8a25341862a02b327ddd3f2dc12e3a3ebc334ec5eb2576f9753d9",
+      "size_bytes": 628812217,
+      "mtime_ns": 1782183515626628000,
+      "created_at": "2026-06-23T02:59:43.373063+00:00",
+      "data_end_date": "2026-06-22",
+      "train_end_date": "2026-02-05",
+      "metrics": {
+        "mode": "full_quantile",
+        "trained_factories": [
+          "남양주1",
+          "남양주2",
+          "김해",
+          "광주",
+          "논산"
+        ],
+        "target_count": 15,
+        "n_estimators": 3000,
+        "per_target": {
+          "rows": 15,
+          "MAPE_p50": {
+            "mean": 13440.632509853074,
+            "median": 6.527960239275335,
+            "min": 3.573728329489277,
+            "max": 201512.98152695812
+          },
+          "Pinball_p05": {
+            "mean": 309.5235657390457,
+            "median": 39.59017795302663,
+            "min": 4.0340515990459185,
+            "max": 2069.51985642084
+          },
+          "Pinball_p50": {
+            "mean": 591.8150150195365,
+            "median": 134.8652209211211,
+            "min": 25.402729746548108,
+            "max": 2342.4332969610114
+          },
+          "Pinball_p95": {
+            "mean": 181.79753418475119,
+            "median": 43.17542275078108,
+            "min": 7.198152106017277,
+            "max": 959.6913287046839
+          },
+          "PICP_90": {
+            "mean": 0.8066666666666666,
+            "median": 0.8666666666666667,
+            "min": 0.6,
+            "max": 1.0
+          },
+          "MPIW_90": {
+            "mean": 4269.939126650001,
+            "median": 1434.3012813444143,
+            "min": 150.57120196422053,
+            "max": 18859.869614150542
+          },
+          "Val_PICP_90": {
+            "mean": 0.9000000000000001,
+            "median": 0.9,
+            "min": 0.9,
+            "max": 0.9
+          }
+        }
+      },
+      "split": {
+        "split_mode": "rolling_bdays",
+        "test_bdays": 30,
+        "valid_bdays": 60,
+        "train_start": "2023-01-02",
+        "train_end": "2026-02-05",
+        "valid_start": "2026-02-06",
+        "valid_end": "2026-05-08",
+        "test_start": "2026-05-11",
+        "test_end": "2026-06-22"
+      },
+      "post_processing": {
+        "holiday_adjacent_correction": false,
+        "drift_correction": true
+      }
+    },
+    "app\\predictive model\\energy usage\\v5.3_20260625_130733.pkl": {
+      "schema_version": 2,
+      "path": "app\\predictive model\\energy usage\\v5.3_20260625_130733.pkl",
+      "filename": "v5.3_20260625_130733.pkl",
+      "model_key": "v5.3",
+      "training_profile": "quantile_wip",
+      "sha256": "a9fb03ed8cca1d131ad3b722e6a209af17a421b6da721fe8e602a270e5f4f622",
+      "size_bytes": 628172027,
+      "mtime_ns": 1782360622986910100,
+      "created_at": "2026-06-25T04:11:29.995488+00:00",
+      "data_end_date": "2026-06-24",
+      "train_end_date": "2026-02-09",
+      "metrics": {
+        "mode": "full_quantile",
+        "trained_factories": [
+          "남양주1",
+          "남양주2",
+          "김해",
+          "광주",
+          "논산"
+        ],
+        "target_count": 15,
+        "n_estimators": 3000,
+        "per_target": {
+          "rows": 15,
+          "MAPE_p50": {
+            "mean": 6.762726977866675,
+            "median": 6.607472313703338,
+            "min": 3.2548145804462782,
+            "max": 12.09321844060454
+          },
+          "Pinball_p05": {
+            "mean": 152.57672089316554,
+            "median": 34.849853488395325,
+            "min": 4.733622039792349,
+            "max": 693.5928751057032
+          },
+          "Pinball_p50": {
+            "mean": 537.1686219094146,
+            "median": 140.94681167212354,
+            "min": 26.530916590003276,
+            "max": 2198.2818410956515
+          },
+          "Pinball_p95": {
+            "mean": 193.91899249314818,
+            "median": 43.810657315057156,
+            "min": 6.993298744813435,
+            "max": 1222.519375690005
+          },
+          "PICP_90": {
+            "mean": 0.8600000000000002,
+            "median": 0.8666666666666667,
+            "min": 0.6666666666666666,
+            "max": 1.0
+          },
+          "MPIW_90": {
+            "mean": 4267.237243962202,
+            "median": 1463.596389618417,
+            "min": 165.14321669547297,
+            "max": 18765.114641259875
+          },
+          "Val_PICP_90": {
+            "mean": 0.9000000000000001,
+            "median": 0.9,
+            "min": 0.9,
+            "max": 0.9
+          }
+        }
+      },
+      "split": {
+        "split_mode": "rolling_bdays",
+        "test_bdays": 30,
+        "valid_bdays": 60,
+        "train_start": "2023-01-02",
+        "train_end": "2026-02-09",
+        "valid_start": "2026-02-10",
+        "valid_end": "2026-05-12",
+        "test_start": "2026-05-13",
+        "test_end": "2026-06-24"
+      },
+      "post_processing": {
+        "holiday_adjacent_correction": false,
+        "drift_correction": true
+      }
+    }
+  },
+  "artifact_retention": {
+    "keep_per_model_key": 2,
+    "policy": "active_plus_recent",
+    "cleanup": "manual"
+  },
+  "active_artifact": {
+    "schema_version": 2,
+    "path": "app\\predictive model\\energy usage\\v5.3_20260625_130733.pkl",
+    "filename": "v5.3_20260625_130733.pkl",
+    "model_key": "v5.3",
+    "training_profile": "quantile_wip",
+    "sha256": "a9fb03ed8cca1d131ad3b722e6a209af17a421b6da721fe8e602a270e5f4f622",
+    "size_bytes": 628172027,
+    "mtime_ns": 1782360622986910100,
+    "created_at": "2026-06-25T04:11:29.995488+00:00",
+    "data_end_date": "2026-06-24",
+    "train_end_date": "2026-02-09",
+    "metrics": {
+      "mode": "full_quantile",
+      "trained_factories": [
+        "남양주1",
+        "남양주2",
+        "김해",
+        "광주",
+        "논산"
+      ],
+      "target_count": 15,
+      "n_estimators": 3000,
+      "per_target": {
+        "rows": 15,
+        "MAPE_p50": {
+          "mean": 6.762726977866675,
+          "median": 6.607472313703338,
+          "min": 3.2548145804462782,
+          "max": 12.09321844060454
+        },
+        "Pinball_p05": {
+          "mean": 152.57672089316554,
+          "median": 34.849853488395325,
+          "min": 4.733622039792349,
+          "max": 693.5928751057032
+        },
+        "Pinball_p50": {
+          "mean": 537.1686219094146,
+          "median": 140.94681167212354,
+          "min": 26.530916590003276,
+          "max": 2198.2818410956515
+        },
+        "Pinball_p95": {
+          "mean": 193.91899249314818,
+          "median": 43.810657315057156,
+          "min": 6.993298744813435,
+          "max": 1222.519375690005
+        },
+        "PICP_90": {
+          "mean": 0.8600000000000002,
+          "median": 0.8666666666666667,
+          "min": 0.6666666666666666,
+          "max": 1.0
+        },
+        "MPIW_90": {
+          "mean": 4267.237243962202,
+          "median": 1463.596389618417,
+          "min": 165.14321669547297,
+          "max": 18765.114641259875
+        },
+        "Val_PICP_90": {
+          "mean": 0.9000000000000001,
+          "median": 0.9,
+          "min": 0.9,
+          "max": 0.9
+        }
+      }
+    },
+    "split": {
+      "split_mode": "rolling_bdays",
+      "test_bdays": 30,
+      "valid_bdays": 60,
+      "train_start": "2023-01-02",
+      "train_end": "2026-02-09",
+      "valid_start": "2026-02-10",
+      "valid_end": "2026-05-12",
+      "test_start": "2026-05-13",
+      "test_end": "2026-06-24"
+    },
+    "post_processing": {
+      "holiday_adjacent_correction": false,
+      "drift_correction": true
+    }
+  },
+  "post_processing": {
+    "holiday_adjacent_correction": false,
+    "drift_correction": true
+  }
+}
