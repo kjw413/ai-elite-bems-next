@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, Sparkles, Stethoscope, X } from "lucide-react";
+import { Download, RefreshCw, Sparkles, Stethoscope, X } from "lucide-react";
 import { apiRequest, isAbortError } from "@/lib/bems-api";
+import { downloadCsv } from "@/lib/bems-csv";
 import { MarkdownReport } from "@/components/markdown-report";
 
 type HistoryRow = {
@@ -73,7 +74,16 @@ export function PredictionHistory({ rows, factory, isAdmin, diagnosable }: { row
 
   return <>
     <article className="card table-card">
-      <header className="card-title"><h3>최근 예측 이력</h3><span>P05~P95 정상범주{diagnosable ? " · 이탈 행은 AI 진단 가능" : ""}</span></header>
+      <header className="card-title"><h3>최근 예측 이력</h3><div className="card-title-side">
+        <button type="button" className="csv-button" title="현재 표를 CSV로 내려받습니다 (Excel 한글 호환)" disabled={rows.length === 0}
+          onClick={() => downloadCsv(`prediction_history_${factory}`,
+            rows.map(row => ({ ...row, status: statusLabels[row.status ?? "unknown"] ?? row.status })),
+            ["date", "target", "predicted", "lower", "upper", "actual", "status"],
+            { date: "일자", target: "지표", predicted: "P50", lower: "P05", upper: "P95", actual: "실측", status: "판정" })}>
+          <Download size={13}/>CSV
+        </button>
+        <span>P05~P95 정상범주{diagnosable ? " · 이탈 행은 AI 진단 가능" : ""}</span>
+      </div></header>
       <div className="table-wrap"><table>
         <thead><tr><th>일자</th><th>지표</th><th>P50</th><th>P05</th><th>P95</th><th>실측</th><th>판정</th>{diagnosable && <th>진단</th>}</tr></thead>
         <tbody>{rows.map((row, index) => {

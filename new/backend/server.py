@@ -345,6 +345,60 @@ def previous_year_date(value: date) -> date:
     return date(value.year - 1, value.month, min(value.day, last_day))
 
 
+def is_complete_month_span(date_from: date, date_to: date) -> bool:
+    """True when the period starts on day 1 and ends on a month's last day.
+
+    legacy production_modes.is_complete_month_span과 동일 규칙 — 계획 대비
+    지표는 완전한 월들로 구성된 범위에서만 의미가 있다.
+    """
+    if date_from > date_to:
+        return False
+    return (
+        date_from.day == 1
+        and date_to.day == calendar.monthrange(date_to.year, date_to.month)[1]
+    )
+
+
+PRODUCTION_MODES = {"month", "range", "year"}
+PRODUCTION_RANGE_MAX_DAYS = 1100
+
+
+def resolve_production_period(
+    mode: str,
+    base: date,
+    date_from: date | None,
+    date_to: date | None,
+) -> tuple[date, date]:
+    """조회 모드별 기간 확정 (월별/기간별/연간). 잘못된 범위는 400."""
+    if mode == "month":
+        return base.replace(day=1), base
+    if mode == "year":
+        return date(base.year, 1, 1), date(base.year, 12, 31)
+    # range 모드 — 기본값은 기준일 포함 최근 31일
+    resolved_to = date_to or base
+    resolved_from = date_from or (resolved_to - timedelta(days=30))
+    if resolved_from > resolved_to:
+        raise HTTPException(status_code=400, detail="시작일은 종료일보다 늦을 수 없습니다.")
+    if (resolved_to - resolved_from).days > PRODUCTION_RANGE_MAX_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"조회 기간은 최대 {PRODUCTION_RANGE_MAX_DAYS}일까지 지정할 수 있습니다.",
+        )
+    return resolved_from, resolved_to
+
+
+def annual_elapsed_ratio(year: int, as_of: date) -> float:
+    """연간 모드 경과율 (0.0~1.0). 연말 착지 예상·기대 누계 계산에 사용."""
+    year_start = date(year, 1, 1)
+    year_end = date(year, 12, 31)
+    if as_of < year_start:
+        return 0.0
+    if as_of >= year_end:
+        return 1.0
+    total_days = (year_end - year_start).days + 1
+    return ((as_of - year_start).days + 1) / total_days
+
+
 def physical_factory_members(factory: str) -> tuple[str, ...]:
     if factory in ("전사", "전체"):
         return tuple(PHYSICAL_FACTORIES)
@@ -905,10 +959,21 @@ def intensity_analysis(
 def production(
     factory: str = "전사",
     requested_date: date | None = Query(None, alias="date"),
+    mode: str = "month",
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
 ) -> dict[str, Any]:
+    """생산실적 분석 — 월별(기본)·기간별·연간 조회 모드 (legacy 동등 기능)."""
+    if mode not in PRODUCTION_MODES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 조회 모드입니다: {mode}")
+    if mode == "range" and date_from is not None and date_to is not None:
+        # 명시적 기간은 DB 조회 전에 검증한다 (잘못된 입력에 400을 우선 반환).
+        resolve_production_period(mode, date_to, date_from, date_to)
     max_row = fetch_one("SELECT MAX(date) max_date FROM production_daily") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
-    month_start = base.replace(day=1)
+    period_from, period_to = resolve_production_period(mode, base, date_from, date_to)
+    # 계획 대비 지표는 완전한 월들로 구성된 기간에서만 유효 (legacy 규칙)
+    plan_allowed = mode != "range" or is_complete_month_span(period_from, period_to)
     codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
     placeholders = ",".join(["%s"] * len(codes))
     clause = f" AND factory IN ({placeholders})"
@@ -918,38 +983,49 @@ def production(
         SELECT SUM(actual_qty)/1000 actual, COUNT(DISTINCT item_code) items
         FROM production_daily WHERE date BETWEEN %s AND %s
         """ + clause,
-        (month_start, base, *values),
+        (period_from, period_to, *values),
     ) or {}
+    # 다중 월 기간에서도 계획이 정확하도록 (공장·품목·연·월) 단위 MAX 후 합산
     plan_row = fetch_one(
         """
         SELECT SUM(planned_qty) plan FROM (
-          SELECT factory,item_code,MAX(planned_qty)/1000 planned_qty FROM production_daily
-          WHERE date BETWEEN %s AND %s
-        """ + clause + " GROUP BY factory,item_code) p",
-        (month_start, base, *values),
+          SELECT factory,item_code,YEAR(date) y,MONTH(date) m,
+                 MAX(planned_qty)/1000 planned_qty
+          FROM production_daily WHERE date BETWEEN %s AND %s
+        """ + clause + " GROUP BY factory,item_code,y,m) p",
+        (period_from, period_to, *values),
     ) or {}
     actual = scalar(summary.get("actual"))
     plan = scalar(plan_row.get("plan"))
-    days_in_month = calendar.monthrange(base.year, base.month)[1]
-    elapsed = base.day / days_in_month
-    forecast = actual / elapsed if elapsed else actual
-    daily = fetch_all(
-        """
-        SELECT date,
+
+    cat2_select = """
           SUM(CASE WHEN category2='IC' THEN actual_qty ELSE 0 END)/1000 IC,
           SUM(CASE WHEN category2='MY' THEN actual_qty ELSE 0 END)/1000 MY,
           SUM(CASE WHEN category2='FM' THEN actual_qty ELSE 0 END)/1000 FM,
-          SUM(CASE WHEN category2='SN' THEN actual_qty ELSE 0 END)/1000 SN
-        FROM production_daily WHERE date BETWEEN %s AND %s
-        """ + clause + " GROUP BY date ORDER BY date",
-        (month_start, base, *values),
-    )
+          SUM(CASE WHEN category2='SN' THEN actual_qty ELSE 0 END)/1000 SN,
+          SUM(CASE WHEN category2 IS NULL OR category2 NOT IN ('IC','MY','FM','SN')
+              THEN actual_qty ELSE 0 END)/1000 ETC
+    """
+    if mode == "year":
+        daily = fetch_all(
+            "SELECT MONTH(date) month_no," + cat2_select +
+            " FROM production_daily WHERE date BETWEEN %s AND %s"
+            + clause + " GROUP BY month_no ORDER BY month_no",
+            (period_from, period_to, *values),
+        )
+    else:
+        daily = fetch_all(
+            "SELECT date," + cat2_select +
+            " FROM production_daily WHERE date BETWEEN %s AND %s"
+            + clause + " GROUP BY date ORDER BY date",
+            (period_from, period_to, *values),
+        )
     mix_rows = fetch_all(
         """
         SELECT COALESCE(category2,'기타') name, SUM(actual_qty) value FROM production_daily
         WHERE date BETWEEN %s AND %s
         """ + clause + " GROUP BY category2 ORDER BY value DESC",
-        (month_start, base, *values),
+        (period_from, period_to, *values),
     )
     mix_total = sum(scalar(row["value"]) for row in mix_rows) or 1
     top_rows = fetch_all(
@@ -960,42 +1036,100 @@ def production(
                  MAX(planned_qty)/1000 plan, SUM(actual_qty)/1000 actual
           FROM production_daily WHERE date BETWEEN %s AND %s
         """ + clause + """
-          GROUP BY factory,item_code
+          GROUP BY factory,item_code,YEAR(date),MONTH(date)
         ) item_totals
         GROUP BY item_code,item_name ORDER BY actual DESC LIMIT 10
         """,
-        (month_start, base, *values),
+        (period_from, period_to, *values),
     )
+
+    cat2_keys = ("IC", "MY", "FM", "SN", "ETC")
     daily_output = []
-    for row in daily[-14:]:
-        row_date = normalize_date(row.get("date"))
-        if row_date is None:
-            continue
-        daily_output.append({
-            "date": row_date.strftime("%m.%d"),
-            **{key: round(scalar(row.get(key)), 3) for key in ("IC", "MY", "FM", "SN")},
-        })
+    burnup: list[dict[str, Any]] = []
+    if mode == "year":
+        monthly_map = {int(row["month_no"]): row for row in daily if row.get("month_no") is not None}
+        for month in range(1, 13):
+            row = monthly_map.get(month, {})
+            daily_output.append({
+                "date": f"{month}월",
+                **{key: round(scalar(row.get(key)), 3) for key in cat2_keys},
+            })
+        # 연간 Burn-up — 월별 계획 누계 vs 실적 누계 (legacy _render_annual_burnup)
+        monthly_plan_rows = fetch_all(
+            """
+            SELECT m, SUM(planned_qty) plan FROM (
+              SELECT factory,item_code,MONTH(date) m,MAX(planned_qty)/1000 planned_qty
+              FROM production_daily WHERE date BETWEEN %s AND %s
+            """ + clause + " GROUP BY factory,item_code,m) p GROUP BY m ORDER BY m",
+            (period_from, period_to, *values),
+        )
+        monthly_plan = {int(row["m"]): scalar(row.get("plan")) for row in monthly_plan_rows}
+        # 실적선은 마지막 실적 월까지만 그린다 (미래 월로 평탄하게 이어지지 않도록 None)
+        last_actual_month = max(monthly_map) if monthly_map else 0
+        cum_plan = 0.0
+        cum_actual = 0.0
+        for month in range(1, 13):
+            cum_plan += monthly_plan.get(month, 0.0)
+            row = monthly_map.get(month, {})
+            cum_actual += sum(scalar(row.get(key)) for key in cat2_keys)
+            burnup.append({
+                "month": f"{month}월",
+                "cumPlan": round(cum_plan, 1),
+                "cumActual": round(cum_actual, 1) if month <= last_actual_month else None,
+            })
+    else:
+        window = daily if mode == "range" else daily[-14:]
+        for row in window:
+            row_date = normalize_date(row.get("date"))
+            if row_date is None:
+                continue
+            daily_output.append({
+                "date": row_date.strftime("%m.%d") if mode == "month" else row_date.isoformat(),
+                **{key: round(scalar(row.get(key)), 3) for key in cat2_keys},
+            })
+
     top_items = []
     for row in top_rows:
         item_plan = scalar(row.get("plan"))
         item_actual = scalar(row.get("actual"))
         top_items.append({
             "name": row.get("name"),
-            "plan": round(item_plan, 3),
+            "plan": round(item_plan, 3) if plan_allowed else None,
             "actual": round(item_actual, 3),
-            "rate": round(item_actual / item_plan * 100, 1) if item_plan > 0 else None,
+            "rate": round(item_actual / item_plan * 100, 1) if plan_allowed and item_plan > 0 else None,
         })
+
+    # 진척률·페이스·착지 예상 — 모드별 경과율 기준
+    if mode == "month":
+        days_in_month = calendar.monthrange(base.year, base.month)[1]
+        elapsed = base.day / days_in_month
+    elif mode == "year":
+        elapsed = annual_elapsed_ratio(base.year, base)
+    else:
+        elapsed = None
+    forecast = actual / elapsed if elapsed else None
+    period_days = (period_to - period_from).days + 1
+    summary_output = {
+        "plan": round(plan, 1) if plan_allowed else None,
+        "actual": round(actual, 1),
+        "progress": round(actual / plan * 100, 1) if plan_allowed and plan > 0 else None,
+        "pace": (
+            round((actual / plan / elapsed) * 100, 1)
+            if plan_allowed and plan > 0 and elapsed else None
+        ),
+        "forecast": round(forecast, 1) if forecast is not None else None,
+        "items": int(summary.get("items") or 0),
+        "days": period_days,
+    }
     return json_safe({
         "baseDate": base,
-        "summary": {
-            "plan": round(plan, 1),
-            "actual": round(actual, 1),
-            "progress": round(actual / plan * 100, 1) if plan > 0 else None,
-            "pace": round((actual / plan / elapsed) * 100, 1) if plan > 0 and elapsed > 0 else None,
-            "forecast": round(forecast, 1),
-            "items": int(summary.get("items") or 0),
-        },
+        "mode": mode,
+        "dateFrom": period_from,
+        "dateTo": period_to,
+        "planAllowed": plan_allowed,
+        "summary": summary_output,
         "daily": daily_output,
+        "burnup": burnup,
         "mix": [{"name": row["name"], "value": round(scalar(row["value"]) / mix_total * 100, 1)} for row in mix_rows],
         "topItems": top_items,
     })

@@ -33,8 +33,10 @@ export const demo = {
     matrix: [{ factory: "남양주", current: 398, previous: 415, change: -4.1 }, { factory: "김해", current: 424, previous: 434, change: -2.2 }, { factory: "광주", current: 437, previous: 431, change: 1.3 }, { factory: "논산", current: 409, previous: 424, change: -3.4 }, { factory: "경산", current: 402, previous: 413, change: -2.7 }],
   },
   production: {
-    summary: { plan: 20500, actual: 18420, progress: 89.9, pace: 104.5, forecast: 21400, items: 82 },
-    daily: Array.from({ length: 14 }, (_, i) => ({ date: `07.${String(i + 2).padStart(2, "0")}`, IC: 380 + (i % 3) * 30, MY: 300 + (i % 4) * 22, FM: 210 + (i % 2) * 35, SN: 160 + (i % 5) * 18 })),
+    mode: "month", dateFrom: "2026-07-01", dateTo: "2026-07-15", planAllowed: true,
+    summary: { plan: 20500, actual: 18420, progress: 89.9, pace: 104.5, forecast: 21400, items: 82, days: 15 },
+    daily: Array.from({ length: 14 }, (_, i) => ({ date: `07.${String(i + 2).padStart(2, "0")}`, IC: 380 + (i % 3) * 30, MY: 300 + (i % 4) * 22, FM: 210 + (i % 2) * 35, SN: 160 + (i % 5) * 18, ETC: 20 + (i % 3) * 4 })),
+    burnup: [],
     mix: [{ name: "IC", value: 35 }, { name: "MY", value: 29 }, { name: "FM", value: 21 }, { name: "SN", value: 15 }],
     topItems: [{ name: "바나나맛우유", plan: 2400, actual: 2310, rate: 96.3 }, { name: "요플레", plan: 2100, actual: 1980, rate: 94.3 }, { name: "메로나", plan: 1800, actual: 1735, rate: 96.4 }],
   },
