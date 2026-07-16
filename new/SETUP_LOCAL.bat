@@ -3,29 +3,29 @@ chcp 65001 >nul 2>&1
 title BEMS Next - Setup (Run Once)
 cd /d "%~dp0"
 
-REM legacy 소스는 읽기 전용으로 두고 new 전용 .venv와 Node 패키지를 설치
+REM Self-contained setup: everything installs under new\ (no legacy dependency).
 set "PYTHONDONTWRITEBYTECODE=1"
-if not defined BEMS_CORE_ROOT set "BEMS_CORE_ROOT=%~dp0..\legacy"
 
-echo [1/5] Checking read-only legacy core: "%BEMS_CORE_ROOT%"
-if not exist "%BEMS_CORE_ROOT%\requirements.txt" (
-    echo [ERROR] legacy requirements.txt not found: %BEMS_CORE_ROOT%
+echo [1/5] Checking local core copy and requirements...
+if not exist "backend\app\services" (
+    echo [ERROR] backend\app core copy not found. See docs\AI_Elite_BEMS_Next_독립화_계획서.md
+    pause & exit /b 1
+)
+if not exist "backend\requirements-core.txt" (
+    echo [ERROR] backend\requirements-core.txt not found.
     pause & exit /b 1
 )
 
-set "PYTHON_EXE=%BEMS_CORE_ROOT%\.venv\Scripts\python.exe"
-if not exist "%PYTHON_EXE%" (
-    where python >nul 2>&1
-    if not errorlevel 1 (
-        set "PYTHON_EXE=python"
-    ) else (
-        where py >nul 2>&1
-        if errorlevel 1 (
-            echo [ERROR] Python not found. Install a legacy-compatible Python first.
-            pause & exit /b 1
-        )
-        set "PYTHON_EXE=py"
+where python >nul 2>&1
+if not errorlevel 1 (
+    set "PYTHON_EXE=python"
+) else (
+    where py >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] Python not found. Install Python 3.11+ first.
+        pause & exit /b 1
     )
+    set "PYTHON_EXE=py"
 )
 
 echo [2/5] Creating isolated new\.venv...
@@ -34,10 +34,10 @@ if not exist ".venv\Scripts\python.exe" (
     if errorlevel 1 ( echo [ERROR] new .venv creation failed. & pause & exit /b 1 )
 )
 
-echo [3/5] Installing legacy runtime and FastAPI bridge packages into new\.venv...
+echo [3/5] Installing core runtime and FastAPI bridge packages into new\.venv...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
 if errorlevel 1 ( echo [ERROR] pip upgrade failed. & pause & exit /b 1 )
-".venv\Scripts\python.exe" -m pip install -r "%BEMS_CORE_ROOT%\requirements.txt" -r backend\requirements.txt --quiet
+".venv\Scripts\python.exe" -m pip install -r backend\requirements-core.txt -r backend\requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] pip install failed. & pause & exit /b 1 )
 
 echo [4/5] Installing locked Node packages...

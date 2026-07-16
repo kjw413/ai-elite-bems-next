@@ -4,7 +4,9 @@ node_modules/
 out/
 next-env.d.ts
 *.tsbuildinfo
+.env
 .env.local
 .env*.local
+backend/app/predictive model/
 __pycache__/
 *.pyc

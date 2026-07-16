@@ -1,6 +1,11 @@
 # AI Elite BEMS Next 작업 정리 및 향후 계획
 
-> **최종 갱신: 2026-07-16 / 기준 브랜치: `main` / 후속 마일스톤 검증 완료**
+> **최종 갱신: 2026-07-16 / 기준 브랜치: `main` / 독립화 Phase 0·1 완료**
+>
+> **독립화 결정 (2026-07-16, 사용자):** legacy 의존을 완전히 배제하고 new/ 단독
+> 운용을 목표로 한다. 필요한 legacy 파일은 `new/backend/app/`으로 **복사해서**
+> 사용한다. 단계별 계획·현황은
+> [AI_Elite_BEMS_Next_독립화_계획서.md](AI_Elite_BEMS_Next_독립화_계획서.md)가 기준 문서다.
 >
 > 현재 GitHub 저장소를 유일한 기준으로 삼는다. 과거 임시 Sites 작업공간에서 만들었다고
 > 설명된 프런트엔드 파일과 화면은 커밋·ZIP으로 보존되지 않았으므로 복구 가능한 구현으로
@@ -39,11 +44,11 @@
 
 | 구분 | 현재 상태 |
 |---|---|
-| 변경 원칙 | `legacy/`는 읽기 전용으로 유지하고 모든 구현·문서 변경은 `new/`에만 반영 |
-| 현재 진행 | 보고서·관리자·예측 실행 마일스톤 완료, 실제 사내 DB·브라우저·viewer 권한 동등성 검증 준비 |
-| 이번 세션 완료 | 보고서·관리자·단일 예측 React UI; 엄격 API 오류·요청 취소; 오류 보고서 저장 차단; 이벤트 물리 공장 제한; 예측 이력 93일 상한; `npm ci`·TypeScript·Next.js 빌드·Python 문법·백엔드 단위 테스트 20건 통과 |
-| 바로 다음 작업 | 실제 DB에서 legacy 수치 비교, 다른 PC viewer 403, 브라우저 차트·반응형 확인 |
-| 이후 남은 작업 | 재학습·기상·What-if·이상 진단, 실제 DB 수치 동등성·권한·업로드 검증, 운영 안정화 |
+| 변경 원칙 | `legacy/`는 읽기 전용 참조본. 필요한 파일은 `new/backend/app/`으로 복사해 사용하고, 결함 수정은 복사본에만 반영(독립화 계획서 "발견·수정 로그" 기록) |
+| 현재 진행 | 독립화 Phase 0·1 완료 — legacy 코드 의존 제거, 복사본 기반 단독 실행 검증 |
+| 이번 세션 완료 (2026-07-16) | ① 검수: 마이그레이션 정합성 대조(F-코드·생산량 오버레이·권한 legacy 일치 확인) ② 수정: 경산 예측 제외(`PREDICTION_FACTORIES`), 생산량 KPI 색상, mix_prod 목표 라벨 ③ 독립화: app 코드+모델(3.8GB, _archive 제외)+.env 복사, `import_core` 로컬 전환, `_fetch_energy_history` factory 결함 복사본에서 수정, 배치 스크립트 legacy 미참조화 ④ 검증: 백엔드 테스트 24건, 실DB 대시보드·예측 이력, 복사 모델로 김해 실제 예측 실행 성공(51초) |
+| 바로 다음 작업 | Phase 2 — 업로드 미리보기 2단계, 이상 진단 연결, legacy 화면과 수치 동등성 스팟체크, RUN_GUIDE·README를 독립 구조 기준으로 정리 |
+| 이후 남은 작업 | Phase 3 자동화 독립(엑셀 동기화 스케줄러·기상·재학습·자동시작), Phase 4 UI 세련화·CSV·연간 모드, legacy 퇴역 |
 
 > 작성일: 2026-07-16
 > 원본 프로젝트: `kjw413/AI-Elite-BEMS`  
@@ -270,6 +275,7 @@ AI-Elite-BEMS/
 ### 4.10 문서화
 
 - 설치·운영 가이드 `README.md`
+- 서버 오픈·사내망 웹 접속 가이드 `RUN_GUIDE_KR.md`
 - 전체 아키텍처 `docs/ARCHITECTURE_KR.md`
 - 기능 전환 범위 `docs/MIGRATION_SCOPE_KR.md`
 - 환경변수 예시 `.env.local.example`
@@ -306,6 +312,7 @@ AI-Elite-BEMS/
    ├─ SETUP_LOCAL.bat
    ├─ RUN_BEMS_NEXT.bat
    ├─ CONFIGURE_FIREWALL.bat
+   ├─ RUN_GUIDE_KR.md
    ├─ package-lock.json
    └─ README.md
 ```

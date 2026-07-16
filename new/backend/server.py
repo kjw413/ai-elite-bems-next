@@ -5,9 +5,11 @@ client-IP based admin/viewer policy remains meaningful.  Read endpoints use
 parameterized SQL.  Model, report and upload actions delegate to the existing
 Python services under BEMS_CORE_ROOT instead of reimplementing their logic.
 
-레거시 서비스(app.services.*)는 streamlit 등 기존 requirements 전체에 의존하므로
-`SETUP_LOCAL.bat`가 해당 요구사항을 독립 `new/.venv`에 설치한다. legacy 소스는
-읽기 전용으로 import하며 bytecode도 그 경로에 생성하지 않는다.
+독립화(2026-07-16): 데이터 처리 서비스(app.services.* 등)는 legacy에서
+`new/backend/app/`으로 복사한 로컬 사본을 import한다. legacy 폴더는 더 이상
+코드 의존 대상이 아니며, .env도 `new/backend/.env`를 우선 사용한다
+(legacy/.env는 전환기 fallback). 복사본 대비 수정 내역은
+docs/AI_Elite_BEMS_Next_독립화_계획서.md의 발견·수정 로그에 기록한다.
 """
 
 from __future__ import annotations
@@ -55,7 +57,12 @@ def _resolve_core_root() -> Path:
     return candidates[0].resolve() if env_root else (PROJECT_ROOT.parent / "legacy").resolve()
 
 
+# 로컬 복사본(app 패키지)의 루트. import_core는 이 경로만 사용한다.
+LOCAL_CORE_ROOT = PROJECT_ROOT / "backend"
+
+# 전환기 fallback: backend/.env가 우선하고, 없던 키만 legacy/.env에서 보충한다.
 CORE_ROOT = _resolve_core_root()
+load_dotenv(LOCAL_CORE_ROOT / ".env")
 load_dotenv(CORE_ROOT / ".env")
 
 def _discover_local_addresses() -> set[str]:
@@ -160,6 +167,10 @@ FACTORY_MEMBERS = {
 }
 PHYSICAL_FACTORIES = ["남양주1", "남양주2", "김해", "광주", "논산", "경산"]
 DISPLAY_FACTORIES = ["남양주", "김해", "광주", "논산", "경산"]
+
+# v5.3 모델은 경산(F50, 2026-07 신규) 학습 데이터가 없다. 예측 실행과
+# 집계 완전성 판정은 학습된 공장만 대상으로 하고 경산은 제외한다.
+PREDICTION_FACTORIES = ["남양주1", "남양주2", "김해", "광주", "논산"]
 
 PRODUCTION_FACTORY_CODES: dict[str, tuple[str, ...]] = {
     "전사": ("F10", "F10A", "F10B", "F20", "F30", "F40", "F50"),
@@ -290,6 +301,15 @@ def physical_factory_members(factory: str) -> tuple[str, ...]:
     return tuple(members) if members else (factory,)
 
 
+def prediction_factory_members(factory: str) -> tuple[str, ...]:
+    """예측 집계용 구성 공장 — 모델 미학습 공장(경산)은 완전성 판정에서 제외."""
+    members = tuple(
+        member for member in physical_factory_members(factory)
+        if member in PREDICTION_FACTORIES
+    )
+    return members or physical_factory_members(factory)
+
+
 def json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, bool)):
         return value
@@ -336,17 +356,18 @@ def require_admin(request: Request) -> None:
 
 
 def import_core(module: str):
-    if not CORE_ROOT.exists():
-        logger.error("Configured BEMS core root does not exist.")
-        raise HTTPException(status_code=503, detail="기존 BEMS 서비스를 사용할 수 없습니다.")
-    root_text = str(CORE_ROOT)
+    """`new/backend/app/` 로컬 복사본에서 코어 모듈을 로드한다 (legacy 미참조)."""
+    if not (LOCAL_CORE_ROOT / "app" / "services").exists():
+        logger.error("Local BEMS core copy is missing: %s", LOCAL_CORE_ROOT / "app")
+        raise HTTPException(status_code=503, detail="BEMS 코어 모듈을 사용할 수 없습니다.")
+    root_text = str(LOCAL_CORE_ROOT)
     if root_text not in sys.path:
         sys.path.insert(0, root_text)
     try:
         return importlib.import_module(module)
     except Exception as exc:
         logger.error("Failed to load BEMS core module %s.", module, exc_info=(type(exc), exc, exc.__traceback__))
-        raise HTTPException(status_code=503, detail="기존 BEMS 서비스를 사용할 수 없습니다.") from exc
+        raise HTTPException(status_code=503, detail="BEMS 코어 모듈을 사용할 수 없습니다.") from exc
 
 
 def _table_records(frame: Any) -> list[dict[str, Any]]:
@@ -937,7 +958,7 @@ def aggregate_prediction_rows(
     target: str | None = None,
     limit: int = 60,
 ) -> list[dict[str, Any]]:
-    members = physical_factory_members(factory)
+    members = prediction_factory_members(factory)
     placeholders = ",".join(["%s"] * len(members))
     conditions = ["pred_date <= %s", f"factory IN ({placeholders})"]
     params: list[Any] = [date_to, *members]
@@ -1102,6 +1123,8 @@ def _format_prediction_results(pred_date: date, raw_results: dict[str, Any]) -> 
 @app.post("/api/v1/predictions/run")
 def run_prediction(payload: PredictionRequest, request: Request) -> dict[str, Any]:
     require_admin(request)
+    if payload.factory not in FACTORY_MEMBERS and payload.factory not in PREDICTION_FACTORIES:
+        raise HTTPException(status_code=400, detail="v5.3 모델 학습 대상 공장이 아닙니다. (경산은 예측 미지원)")
     service = import_core("app.services.usage_prediction_v5_service")
     if payload.factory in FACTORY_MEMBERS:  # 전사/전체/남양주 — 집계 공장은 배치 경로 사용
         batch = service.predict_v5_batch(payload.factory, payload.date, payload.date, save_to_db=False)

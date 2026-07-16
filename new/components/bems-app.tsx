@@ -57,9 +57,10 @@ function localToday() {
   return `${today.getFullYear()}-${month}-${day}`;
 }
 
-function Kpi({ label, value, unit, change, icon: Icon = Activity }: { label: string; value: unknown; unit?: string; change?: number | null; icon?: typeof Activity }) {
+function Kpi({ label, value, unit, change, goodWhen = "down", icon: Icon = Activity }: { label: string; value: unknown; unit?: string; change?: number | null; goodWhen?: "down" | "up"; icon?: typeof Activity }) {
   const digits = unit === "ton/ton" ? 2 : 1;
-  return <article className="kpi card"><div className="kpi-icon"><Icon size={20}/></div><div><p>{label}</p><strong>{fmt(value, digits)} <small>{unit}</small></strong>{change != null && <span className={change <= 0 ? "good" : "bad"}>{change > 0 ? "+" : ""}{fmt(change)}% 전년비</span>}</div></article>;
+  const isGood = goodWhen === "up" ? (change ?? 0) >= 0 : (change ?? 0) <= 0;
+  return <article className="kpi card"><div className="kpi-icon"><Icon size={20}/></div><div><p>{label}</p><strong>{fmt(value, digits)} <small>{unit}</small></strong>{change != null && <span className={isGood ? "good" : "bad"}>{change > 0 ? "+" : ""}{fmt(change)}% 전년비</span>}</div></article>;
 }
 
 function Dashboard({ data }: { data: AnyData }) {
@@ -67,7 +68,7 @@ function Dashboard({ data }: { data: AnyData }) {
     ...row,
     band: row.lower != null && row.upper != null ? [row.lower, row.upper] : null,
   }));
-  return <><section className="kpi-grid">{data.metrics?.map((m: AnyData) => <Kpi key={m.id} label={m.label} value={m.value} unit={m.unit} change={m.change} icon={m.id === "production" ? Factory : Bolt}/>)}</section>
+  return <><section className="kpi-grid">{data.metrics?.map((m: AnyData) => <Kpi key={m.id} label={m.label} value={m.value} unit={m.unit} change={m.change} goodWhen={m.id === "production" ? "up" : "down"} icon={m.id === "production" ? Factory : Bolt}/>)}</section>
     <section className={`alert ${data.alert?.level ?? "normal"}`}><BrainCircuit size={22}/><div><strong>{data.alert?.title}</strong><p>{data.alert?.description}</p></div></section>
     <section className="content-grid"><article className="card chart-card wide"><CardTitle title="최근 7일 전력 사용량" meta="MWh · AI P05~P95 정상범주"/><Chart><AreaChart data={trend}><defs><linearGradient id="band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#4f7cff" stopOpacity={.22}/><stop offset="1" stopColor="#4f7cff" stopOpacity={.02}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date"/><YAxis/><Tooltip/><Area type="monotone" dataKey="band" name="P05~P95" stroke="none" fill="url(#band)" connectNulls={false}/><Line type="monotone" dataKey="predicted" name="AI 예측" stroke="#8b5cf6" strokeDasharray="5 4" strokeWidth={2}/><Line type="monotone" dataKey="actual" name="실제" stroke="#2563eb" strokeWidth={3}/></AreaChart></Chart></article>
     <article className="card chart-card"><CardTitle title="공장별 전력 원단위" meta="낮을수록 효율적"/><Chart><BarChart data={data.factoryComparison} layout="vertical"><CartesianGrid strokeDasharray="3 3"/><XAxis type="number"/><YAxis dataKey="factory" type="category" width={58}/><Tooltip/><Bar dataKey="value" fill="#22a06b" radius={[0,6,6,0]}/></BarChart></Chart></article>

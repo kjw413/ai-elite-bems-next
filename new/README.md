@@ -20,6 +20,8 @@
 
 ## 설치 및 실행 (Windows)
 
+실제 서버 오픈, 사내망 웹 접속, 권한·방화벽·문제 해결 절차는 [RUN_GUIDE_KR.md](RUN_GUIDE_KR.md)를 따른다. 아래는 빠른 시작 요약이다.
+
 현재 저장소 구조:
 
 ```text
@@ -74,7 +76,7 @@ RUN_BEMS_NEXT.bat
 - 미구현: 재학습·기상 동기화·What-if·이상 진단 UI와 생산실적 연간 모드
 - 미검증: 실제 브라우저 차트·반응형·콘솔, 실제 사내 DB 수치·권한 동등성
 
-세부 구조와 전환 범위는 [docs/ARCHITECTURE_KR.md](docs/ARCHITECTURE_KR.md)와 [docs/MIGRATION_SCOPE_KR.md](docs/MIGRATION_SCOPE_KR.md)를 참고하세요.
+운영 절차는 [RUN_GUIDE_KR.md](RUN_GUIDE_KR.md), 세부 구조와 전환 범위는 [docs/ARCHITECTURE_KR.md](docs/ARCHITECTURE_KR.md)와 [docs/MIGRATION_SCOPE_KR.md](docs/MIGRATION_SCOPE_KR.md)를 참고하세요.
 
 ## 개발 명령
 

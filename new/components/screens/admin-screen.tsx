@@ -228,7 +228,7 @@ function TargetsPanel({ factory, date, isAdmin }: { factory: string; date: strin
       <div className="form-grid">
         <label className="field"><span>적용 범위</span><input value={targetScopeLabel} disabled/></label>
         <label className="field"><span>지표</span><select value={metric} onChange={event => setMetric(event.target.value)}>{targetMetrics.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-        <label className="field"><span>절감률(%)</span><input type="number" step="0.1" min="-100" max="100" value={targetPct} disabled={!isAdmin} onChange={event => setTargetPct(event.target.value)}/></label>
+        <label className="field"><span>{metric === "mix_prod" ? "증가율(%) · 전년 대비 생산 증가 목표" : "절감률(%) · 전년 대비 원단위 절감 목표"}</span><input type="number" step="0.1" min="-100" max="100" value={targetPct} disabled={!isAdmin} onChange={event => setTargetPct(event.target.value)}/></label>
         <label className="field full"><span>메모</span><textarea rows={3} value={note} disabled={!isAdmin} onChange={event => setNote(event.target.value)}/></label>
       </div>
       {isAdmin ? <button className="primary-button" type="submit" disabled={saving}><Save size={16}/>{saving ? "저장 중..." : "목표 저장"}</button> : <div className="permission-note">조회 사용자는 목표를 확인만 할 수 있습니다.</div>}
@@ -236,7 +236,7 @@ function TargetsPanel({ factory, date, isAdmin }: { factory: string; date: strin
     </form>
     <article className="card admin-list">
       <header className="panel-header"><div><span className="eyebrow">TARGET MATRIX</span><h3>등록된 목표</h3></div><button type="button" className="secondary-button" onClick={() => void load()}><RefreshCw size={15}/>새로고침</button></header>
-      {loading ? <div className="loading inline-loading"><RefreshCw className="spin"/>불러오는 중입니다.</div> : <div className="table-wrap"><table><thead><tr><th>공장</th><th>지표</th><th>절감률</th><th>메모</th><th>갱신</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.factory}-${row.metric}-${index}`}><td>{row.factory === "ALL" ? "전사" : display(row.factory)}</td><td>{targetMetrics.find(item => item.value === row.metric)?.label ?? display(row.metric)}</td><td>{row.target_pct == null ? "-" : `${display(row.target_pct)}%`}</td><td>{display(row.note)}</td><td>{display(row.updated_at)}</td></tr>)}</tbody></table></div>}
+      {loading ? <div className="loading inline-loading"><RefreshCw className="spin"/>불러오는 중입니다.</div> : <div className="table-wrap"><table><thead><tr><th>공장</th><th>지표</th><th>목표율(%)</th><th>메모</th><th>갱신</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.factory}-${row.metric}-${index}`}><td>{row.factory === "ALL" ? "전사" : display(row.factory)}</td><td>{targetMetrics.find(item => item.value === row.metric)?.label ?? display(row.metric)}</td><td>{row.target_pct == null ? "-" : `${display(row.target_pct)}% ${row.metric === "mix_prod" ? "증가" : "절감"}`}</td><td>{display(row.note)}</td><td>{display(row.updated_at)}</td></tr>)}</tbody></table></div>}
     </article>
   </div>;
 }

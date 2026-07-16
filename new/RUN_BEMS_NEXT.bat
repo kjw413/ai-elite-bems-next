@@ -4,13 +4,12 @@ title BEMS Next (React UI :3000 / FastAPI :8000)
 cd /d "%~dp0"
 
 set "PYTHONDONTWRITEBYTECODE=1"
-if not defined BEMS_CORE_ROOT set "BEMS_CORE_ROOT=%~dp0..\legacy"
 if not exist ".venv\Scripts\python.exe" (
     echo [ERROR] new\.venv not found. Run SETUP_LOCAL.bat first.
     pause & exit /b 1
 )
-if not exist "%BEMS_CORE_ROOT%\app\services" (
-    echo [ERROR] Read-only legacy core not found: "%BEMS_CORE_ROOT%"
+if not exist "backend\app\services" (
+    echo [ERROR] Local core copy not found: backend\app
     pause & exit /b 1
 )
 where npm >nul 2>&1

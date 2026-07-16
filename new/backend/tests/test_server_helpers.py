@@ -202,6 +202,40 @@ class ServerHelperTests(unittest.TestCase):
         self.assertEqual(result[0]["actual"], 335.0)
         self.assertEqual(result[0]["band_status"], "over")
 
+    def test_company_prediction_aggregate_excludes_untrained_gyeongsan(self) -> None:
+        rows = [
+            {
+                "pred_date": date(2026, 7, 15),
+                "target": "전력",
+                "factory": factory,
+                "predicted": 100.0,
+                "lower_band": 90.0,
+                "upper_band": 110.0,
+                "actual": 105.0,
+            }
+            for factory in ("남양주1", "남양주2", "김해", "광주", "논산")
+        ]
+        with patch.object(server, "fetch_all", return_value=rows):
+            result = server.aggregate_prediction_rows("전사", date(2026, 7, 15))
+        self.assertEqual(result[0]["predicted"], 500.0)
+        self.assertEqual(result[0]["actual"], 525.0)
+        self.assertEqual(result[0]["band_status"], "inside")
+
+    def test_prediction_run_rejects_untrained_factory_before_loading_model(self) -> None:
+        payload = server.PredictionRequest(
+            factory="경산",
+            date=date(2026, 7, 15),
+            mix_prod_kg=1_000.0,
+        )
+        with (
+            patch.object(server, "client_is_admin", return_value=True),
+            patch.object(server, "import_core") as import_core,
+            self.assertRaises(server.HTTPException) as raised,
+        ):
+            server.run_prediction(payload, self._request("POST"))
+        self.assertEqual(raised.exception.status_code, 400)
+        import_core.assert_not_called()
+
     def test_point_prediction_remains_visible_without_quantile_band(self) -> None:
         rows = [
             {
@@ -327,6 +361,21 @@ class ServerHelperTests(unittest.TestCase):
 
     def test_legacy_imports_cannot_write_bytecode(self) -> None:
         self.assertTrue(sys.dont_write_bytecode)
+
+    def test_core_modules_come_from_local_copy(self) -> None:
+        prediction_source = (
+            server.LOCAL_CORE_ROOT / "app" / "services" / "usage_prediction_v5_service.py"
+        )
+        self.assertTrue(prediction_source.exists())
+        fetch_section = prediction_source.read_text(encoding="utf-8").split(
+            "def _fetch_energy_history"
+        )[1][:900]
+        # 발견·수정 로그 №1: overlay가 요구하는 factory 컬럼을 SELECT에 포함해야 한다.
+        self.assertIn('"factory"', fetch_section)
+        self.assertIn('drop(columns=["factory"])', fetch_section)
+
+    def test_local_env_file_exists_for_standalone_run(self) -> None:
+        self.assertTrue((server.LOCAL_CORE_ROOT / ".env").exists())
 
 
 if __name__ == "__main__":
