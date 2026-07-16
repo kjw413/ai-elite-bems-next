@@ -1,12 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, BarChart3, Bolt, BrainCircuit, Building2, CalendarDays, ChevronRight, Database, Factory, Gauge, Menu, PackageCheck, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { Activity, BarChart3, Bolt, BrainCircuit, Building2, CalendarDays, ChevronRight, Database, Factory, FileText, Gauge, Menu, PackageCheck, RefreshCw, Settings, ShieldCheck, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiGet, query } from "@/lib/bems-api";
 import { demo, factories } from "@/lib/bems-data";
+import { AdminScreen } from "@/components/screens/admin-screen";
+import { PredictionRunner } from "@/components/screens/prediction-runner";
+import { ReportScreen } from "@/components/screens/report-screen";
 
-type Screen = "dashboard" | "energy" | "intensity" | "production" | "prediction";
+type Screen = "dashboard" | "energy" | "intensity" | "production" | "prediction" | "report" | "admin";
+type DataScreen = Exclude<Screen, "report" | "admin">;
 type IntensityMetric = "power" | "fuel" | "water";
 type AnyData = Record<string, any>;
 
@@ -16,6 +20,8 @@ const menus: { id: Screen; label: string; icon: typeof Activity }[] = [
   { id: "intensity", label: "에너지 원단위", icon: Gauge },
   { id: "production", label: "생산실적 분석", icon: PackageCheck },
   { id: "prediction", label: "AI 에너지 예측", icon: BrainCircuit },
+  { id: "report", label: "AI 실적 보고서", icon: FileText },
+  { id: "admin", label: "관리자·현장 메모", icon: Settings },
 ];
 
 const titles: Record<Screen, [string, string]> = {
@@ -24,16 +30,19 @@ const titles: Record<Screen, [string, string]> = {
   intensity: ["에너지 원단위", "생산량 대비 에너지 효율을 추적합니다."],
   production: ["생산실적 분석", "계획 대비 생산성과 제품 믹스를 분석합니다."],
   prediction: ["AI 에너지 예측", "v5.3 예측값과 정상범주 이탈을 모니터링합니다."],
+  report: ["AI 에너지 실적 보고서", "저장된 월간 보고서를 열람하고 생성합니다."],
+  admin: ["관리자·현장 메모", "목표, 이벤트, 업로드와 예측 이력을 관리합니다."],
 };
 
-const endpoint: Record<Screen, string> = { dashboard: "/dashboard", energy: "/energy", intensity: "/intensity", production: "/production", prediction: "/predictions" };
-const screenFallback: Record<Screen, AnyData> = {
+const endpoint: Record<DataScreen, string> = { dashboard: "/dashboard", energy: "/energy", intensity: "/intensity", production: "/production", prediction: "/predictions" };
+const screenFallback: Record<DataScreen, AnyData> = {
   dashboard: demo.dashboard,
   energy: demo.energy,
   intensity: demo.intensity,
   production: demo.production,
   prediction: demo.predictions,
 };
+const isDataScreen = (screen: Screen): screen is DataScreen => screen !== "report" && screen !== "admin";
 const intensityMetrics: { id: IntensityMetric; label: string }[] = [{ id: "power", label: "전력" }, { id: "fuel", label: "연료" }, { id: "water", label: "용수" }];
 const intensityUnits: Record<IntensityMetric, string> = { power: "kWh/ton", fuel: "Nm³/ton", water: "ton/ton" };
 
@@ -78,7 +87,7 @@ function Intensity({ data, metric, onMetricChange }: { data: AnyData; metric: In
 
 function Production({ data }: { data: AnyData }) { const s=data.summary??{}; return <><section className="kpi-grid"><Kpi label="누계 계획" value={s.plan} unit="ton" icon={CalendarDays}/><Kpi label="누계 실적" value={s.actual} unit="ton" icon={Factory}/><Kpi label="계획 달성률" value={s.progress} unit="%" icon={Gauge}/><Kpi label="예상 착지" value={s.forecast} unit="ton" icon={PackageCheck}/></section><section className="content-grid"><article className="card chart-card wide"><CardTitle title="제품유형별 일일 생산량" meta="ton"/><Chart><BarChart data={data.daily}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date"/><YAxis/><Tooltip/><Legend/><Bar dataKey="IC" stackId="a" fill="#2563eb"/><Bar dataKey="MY" stackId="a" fill="#22a06b"/><Bar dataKey="FM" stackId="a" fill="#8b5cf6"/><Bar dataKey="SN" stackId="a" fill="#f59e0b"/></BarChart></Chart></article><article className="card list"><CardTitle title="제품 믹스" meta="구성비"/>{data.mix?.map((r:AnyData)=><div className="progress" key={r.name}><div><span>{r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{width:`${r.value}%`}}/></i></div>)}</article><article className="card table-card wide"><CardTitle title="주요 품목 계획 대비 실적" meta={`${s.items??0}개 품목`}/><DataTable rows={data.topItems} columns={["name","plan","actual","rate"]} labels={{name:"품목",plan:"계획",actual:"실적",rate:"달성률(%)"}}/></article></section></> }
 
-function Prediction({ data }: { data: AnyData }) { return <><section className="model-banner"><div><BrainCircuit/><span>운영 모델</span><strong>{data.model?.version}</strong></div><div><span>상태</span><strong>{data.model?.state}</strong></div><div><span>최근 학습</span><strong>{data.model?.trainedAt}</strong></div></section><section className="kpi-grid compact"><Kpi label="정상 예측" value={data.status?.normal} unit="건" icon={ShieldCheck}/><Kpi label="정상범주 이탈" value={data.status?.alert} unit="건" icon={Activity}/><Kpi label="모니터링 상태" value={data.status?.label} icon={BrainCircuit}/></section><article className="card table-card"><CardTitle title="최근 예측 이력" meta="P05~P95 정상범주"/><DataTable rows={data.latest} columns={["date","target","predicted","lower","upper","actual","status"]} labels={{date:"일자",target:"지표",predicted:"P50",lower:"P05",upper:"P95",actual:"실측",status:"판정"}}/></article></> }
+function Prediction({ data, factory, date, isAdmin }: { data: AnyData; factory: string; date: string; isAdmin: boolean }) { return <><section className="model-banner"><div><BrainCircuit/><span>운영 모델</span><strong>{data.model?.version}</strong></div><div><span>상태</span><strong>{data.model?.state}</strong></div><div><span>최근 학습</span><strong>{data.model?.trainedAt}</strong></div></section><PredictionRunner factory={factory} date={date} isAdmin={isAdmin}/><section className="kpi-grid compact"><Kpi label="정상 예측" value={data.status?.normal} unit="건" icon={ShieldCheck}/><Kpi label="정상범주 이탈" value={data.status?.alert} unit="건" icon={Activity}/><Kpi label="모니터링 상태" value={data.status?.label} icon={BrainCircuit}/></section><article className="card table-card"><CardTitle title="최근 예측 이력" meta="P05~P95 정상범주"/><DataTable rows={data.latest} columns={["date","target","predicted","lower","upper","actual","status"]} labels={{date:"일자",target:"지표",predicted:"P50",lower:"P05",upper:"P95",actual:"실측",status:"판정"}}/></article></> }
 
 function CardTitle({ title, meta }: { title: string; meta: string }) { return <header className="card-title"><h3>{title}</h3><span>{meta}</span></header> }
 function Chart({ children }: { children: React.ReactElement }) { return <div className="chart"><ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer></div> }
@@ -87,13 +96,24 @@ function DataTable({ rows=[], columns, labels }: { rows?: AnyData[]; columns:str
 export function BemsApp() {
   const [screen,setScreen]=useState<Screen>("dashboard"), [factory,setFactory]=useState("전사"), [date,setDate]=useState(localToday), [mobile,setMobile]=useState(false);
   const [intensityMetric,setIntensityMetric]=useState<IntensityMetric>("power");
-  const [data,setData]=useState<AnyData>(demo.dashboard), [session,setSession]=useState<AnyData>(demo.session), [live,setLive]=useState(false), [loading,setLoading]=useState(true);
+  const [data,setData]=useState<AnyData>(demo.dashboard), [session,setSession]=useState<AnyData>(demo.session), [sessionLive,setSessionLive]=useState(false), [live,setLive]=useState(false), [loading,setLoading]=useState(true);
   const fallback=useMemo(()=>{
+    if (!isDataScreen(screen)) return {};
     const selected=screenFallback[screen];
     return screen==="intensity" ? {...selected,metric:intensityMetric,unit:intensityUnits[intensityMetric]} : selected;
   },[screen,intensityMetric]);
-  useEffect(()=>{apiGet("/session",demo.session).then(r=>setSession(r.data));},[]);
-  useEffect(()=>{const controller=new AbortController(); setLoading(true); const suffix=query({factory,date,...(screen==="intensity"?{metric:intensityMetric}:{})}); apiGet(`${endpoint[screen]}?${suffix}`,fallback,controller.signal).then(r=>{setData(r.data);setLive(r.live);setLoading(false)}).catch(()=>{}); return()=>controller.abort();},[screen,factory,date,intensityMetric,fallback]);
+  useEffect(()=>{apiGet("/session",demo.session).then(r=>{setSession(r.data);setSessionLive(r.live)});},[]);
+  useEffect(()=>{
+    if (!isDataScreen(screen)) { setLoading(false); return; }
+    const controller=new AbortController();
+    setLoading(true);
+    const suffix=query({factory,date,...(screen==="intensity"?{metric:intensityMetric}:{})});
+    apiGet(`${endpoint[screen]}?${suffix}`,fallback,controller.signal).then(r=>{setData(r.data);setLive(r.live);setLoading(false)}).catch(()=>{});
+    return()=>controller.abort();
+  },[screen,factory,date,intensityMetric,fallback]);
   const [title,subtitle]=titles[screen];
-  return <div className="app-shell"><aside className={mobile?"open":""} aria-label="주 메뉴"><div className="brand"><div><Bolt size={21}/></div><span>AI ELITE<strong>BEMS NEXT</strong></span><button type="button" className="close" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}><X/></button></div><nav>{menus.map(item=>{const Icon=item.icon;return <button type="button" key={item.id} className={screen===item.id?"active":""} aria-current={screen===item.id?"page":undefined} onClick={()=>{setScreen(item.id);setMobile(false)}}><Icon size={19}/><span>{item.label}</span><ChevronRight size={15}/></button>})}</nav><div className="side-status" role="status" aria-live="polite"><Database size={17}/><div><b>{live?"Local DB":"예시 데이터"}</b><span>{live?"MySQL 연결됨":"API 연결 실패"}</span></div><i className={live?"on":""}/></div><footer>v1.0 · Internal Network</footer></aside>{mobile&&<button type="button" className="scrim" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}/>}<main><header className="topbar"><button type="button" className="menu" aria-label="메뉴 열기" onClick={()=>setMobile(true)}><Menu/></button><div className="heading"><h1>{title}</h1><p>{subtitle}</p></div><div className="filters"><label><Building2 size={16}/><select aria-label="공장 선택" value={factory} onChange={e=>setFactory(e.target.value)}>{factories.map(f=><option key={f}>{f}</option>)}</select></label><label><CalendarDays size={16}/><input type="date" aria-label="기준일 선택" value={date} onChange={e=>setDate(e.target.value)}/></label><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>API 연결 실패 · 예시 데이터 표시 중</strong><p>현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다.</p></div></section>}{screen==="dashboard"&&<Dashboard data={data}/>} {screen==="energy"&&<Energy data={data}/>} {screen==="intensity"&&<Intensity data={data} metric={intensityMetric} onMetricChange={setIntensityMetric}/>} {screen==="production"&&<Production data={data}/>} {screen==="prediction"&&<Prediction data={data}/>}</>}</div></main></div>;
+  const statusLive=isDataScreen(screen)?live:sessionLive;
+  const statusTitle=isDataScreen(screen)?(live?"Local DB":"예시 데이터"):(sessionLive?"BEMS API":"API 연결 실패");
+  const statusDetail=isDataScreen(screen)?(live?"MySQL 연결됨":"API 연결 실패"):(sessionLive?"권한 확인됨":"세션 확인 실패");
+  return <div className="app-shell"><aside className={mobile?"open":""} aria-label="주 메뉴"><div className="brand"><div><Bolt size={21}/></div><span>AI ELITE<strong>BEMS NEXT</strong></span><button type="button" className="close" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}><X/></button></div><nav>{menus.map(item=>{const Icon=item.icon;return <button type="button" key={item.id} className={screen===item.id?"active":""} aria-current={screen===item.id?"page":undefined} onClick={()=>{setScreen(item.id);setMobile(false)}}><Icon size={19}/><span>{item.label}</span><ChevronRight size={15}/></button>})}</nav><div className="side-status" role="status" aria-live="polite"><Database size={17}/><div><b>{statusTitle}</b><span>{statusDetail}</span></div><i className={statusLive?"on":""}/></div><footer>v1.0 · Internal Network</footer></aside>{mobile&&<button type="button" className="scrim" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}/>}<main><header className="topbar"><button type="button" className="menu" aria-label="메뉴 열기" onClick={()=>setMobile(true)}><Menu/></button><div className="heading"><h1>{title}</h1><p>{subtitle}</p></div><div className="filters"><label><Building2 size={16}/><select aria-label="공장 선택" value={factory} onChange={e=>setFactory(e.target.value)}>{factories.map(f=><option key={f}>{f}</option>)}</select></label><label><CalendarDays size={16}/><input type="date" aria-label="기준일 선택" value={date} onChange={e=>setDate(e.target.value)}/></label><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&isDataScreen(screen)&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>API 연결 실패 · 예시 데이터 표시 중</strong><p>현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다.</p></div></section>}{screen==="dashboard"&&<Dashboard data={data}/>} {screen==="energy"&&<Energy data={data}/>} {screen==="intensity"&&<Intensity data={data} metric={intensityMetric} onMetricChange={setIntensityMetric}/>} {screen==="production"&&<Production data={data}/>} {screen==="prediction"&&<Prediction data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="report"&&<ReportScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="admin"&&<AdminScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>}</>}</div></main></div>;
 }

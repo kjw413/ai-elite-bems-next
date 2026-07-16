@@ -67,9 +67,11 @@ RUN_BEMS_NEXT.bat
 - 구현됨: 반응형 셸, 공장·기준일 필터, 역할·DB 연결 상태
 - 구현됨: 대시보드, 사용량, 원단위, 생산실적, AI 예측의 핵심 조회 화면
 - 구현됨: FastAPI 조회·관리 API와 API 실패 시 예시 데이터 fallback
-- 검증됨: `npm run typecheck`, 프로덕션 빌드, HTTP 200 기동 smoke, 백엔드 단위 테스트 17건
-- 미구현: AI 보고서 및 관리자 React 화면
-- 미구현: 예측 실행·재학습·기상 동기화·What-if·이상 진단 UI
+- 구현됨: AI 월간 보고서 조회·생성·안전한 Markdown 렌더링·인쇄/PDF 화면
+- 구현됨: 이벤트·절감 목표·Excel 업로드·감사 로그·예측 이력 관리자 화면
+- 구현됨: 관리자 전용 v5.3 단일 예측 미리보기(결과 비저장)
+- 검증됨: `npm run typecheck`, 프로덕션 빌드, HTTP 200 기동 smoke, 백엔드 단위 테스트 20건
+- 미구현: 재학습·기상 동기화·What-if·이상 진단 UI와 생산실적 연간 모드
 - 미검증: 실제 브라우저 차트·반응형·콘솔, 실제 사내 DB 수치·권한 동등성
 
 세부 구조와 전환 범위는 [docs/ARCHITECTURE_KR.md](docs/ARCHITECTURE_KR.md)와 [docs/MIGRATION_SCOPE_KR.md](docs/MIGRATION_SCOPE_KR.md)를 참고하세요.

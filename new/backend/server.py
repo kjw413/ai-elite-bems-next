@@ -1123,6 +1123,10 @@ class HistoryBackfillRequest(BaseModel):
 def generate_missing_history(payload: HistoryBackfillRequest, request: Request) -> dict[str, Any]:
     """prediction_log 누락 행 일괄 생성 (관리자 전용, 기존 서비스 위임)."""
     require_admin(request)
+    if payload.date_from > payload.date_to:
+        raise HTTPException(status_code=400, detail="시작일은 종료일보다 늦을 수 없습니다.")
+    if (payload.date_to - payload.date_from).days > 92:
+        raise HTTPException(status_code=400, detail="한 번에 최대 93일까지 생성할 수 있습니다.")
     service = import_core("app.services.usage_prediction_v5_service")
     factory = None if payload.factory in (None, "", "전사", "전체") else payload.factory
     result = service.generate_missing_prediction_history(factory, payload.date_from, payload.date_to)
@@ -1223,6 +1227,10 @@ class EventUpdateRequest(BaseModel):
 @app.post("/api/v1/events")
 def create_event(payload: EventCreateRequest, request: Request) -> dict[str, Any]:
     require_admin(request)
+    if payload.factory not in PHYSICAL_FACTORIES:
+        raise HTTPException(status_code=400, detail="이벤트는 개별 공장에만 등록할 수 있습니다.")
+    if not payload.note.strip():
+        raise HTTPException(status_code=400, detail="이벤트 내용을 입력하세요.")
     service = import_core("app.services.event_annotation_service")
     new_id = service.add_event(
         factory=payload.factory,
@@ -1324,6 +1332,12 @@ def generate_report(payload: ReportRequest, request: Request) -> dict[str, Any]:
     agent_service = import_core("app.services.ai_db_service")
     report_service = import_core("app.services.ai_report_service")
     content = agent_service.run_agent_report(payload.factory, payload.year, payload.month)
+    if (
+        not isinstance(content, str)
+        or not content.strip()
+        or "AI Agent 분석 중 오류" in content
+    ):
+        raise HTTPException(status_code=502, detail="AI 보고서 생성에 실패했습니다.")
     if not report_service.save_report(payload.factory, payload.year, payload.month, content):
         raise HTTPException(status_code=500, detail="보고서 DB 저장에 실패했습니다.")
     return {"updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"), "content": content}

@@ -6,7 +6,7 @@ import sys
 import unittest
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend import server
 
@@ -263,6 +263,67 @@ class ServerHelperTests(unittest.TestCase):
             server.run_prediction(payload, self._request("POST"))
         self.assertEqual(raised.exception.status_code, 403)
         import_core.assert_not_called()
+
+    def test_generate_missing_rejects_unsafe_range_before_loading_model(self) -> None:
+        payloads = (
+            server.HistoryBackfillRequest(
+                factory="김해",
+                date_from=date(2026, 7, 2),
+                date_to=date(2026, 7, 1),
+            ),
+            server.HistoryBackfillRequest(
+                factory="김해",
+                date_from=date(2026, 1, 1),
+                date_to=date(2026, 4, 4),
+            ),
+        )
+        for payload in payloads:
+            with (
+                self.subTest(payload=payload),
+                patch.object(server, "client_is_admin", return_value=True),
+                patch.object(server, "import_core") as import_core,
+                self.assertRaises(server.HTTPException) as raised,
+            ):
+                server.generate_missing_history(payload, self._request("POST"))
+            self.assertEqual(raised.exception.status_code, 400)
+            import_core.assert_not_called()
+
+    def test_event_create_rejects_aggregate_factory_before_loading_service(self) -> None:
+        payload = server.EventCreateRequest(
+            factory="전사",
+            event_date=date(2026, 7, 15),
+            note="테스트 이벤트",
+        )
+        with (
+            patch.object(server, "client_is_admin", return_value=True),
+            patch.object(server, "import_core") as import_core,
+            self.assertRaises(server.HTTPException) as raised,
+        ):
+            server.create_event(payload, self._request("POST"))
+        self.assertEqual(raised.exception.status_code, 400)
+        import_core.assert_not_called()
+
+    def test_failed_ai_report_is_not_saved(self) -> None:
+        agent_service = SimpleNamespace(
+            run_agent_report=lambda *_: "AI Agent 분석 중 오류가 발생했습니다.",
+        )
+        save_report = Mock()
+        report_service = SimpleNamespace(save_report=save_report)
+        payload = server.ReportRequest(factory="김해", year=2026, month=7)
+
+        with (
+            patch.object(server, "client_is_admin", return_value=True),
+            patch.object(
+                server,
+                "import_core",
+                side_effect=[agent_service, report_service],
+            ),
+            self.assertRaises(server.HTTPException) as raised,
+        ):
+            server.generate_report(payload, self._request("POST"))
+
+        self.assertEqual(raised.exception.status_code, 502)
+        save_report.assert_not_called()
 
     def test_legacy_imports_cannot_write_bytecode(self) -> None:
         self.assertTrue(sys.dont_write_bytecode)

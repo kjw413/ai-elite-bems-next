@@ -18,14 +18,54 @@ function getApiBase() {
   return "http://localhost:8000/api/v1";
 }
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function errorMessage(payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object" && "detail" in payload) {
+    const detail = (payload as { detail?: unknown }).detail;
+    return typeof detail === "string" ? detail : JSON.stringify(detail) || fallback;
+  }
+  return fallback;
+}
+
+export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const headers = new Headers(init.headers);
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(`${getApiBase()}${normalizedPath}`, {
+    cache: "no-store",
+    ...init,
+    headers,
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+  const payload: unknown = contentType.includes("application/json")
+    ? await response.json()
+    : await response.text();
+  if (!response.ok) {
+    throw new ApiError(response.status, errorMessage(payload, `API ${response.status}`));
+  }
+  return payload as T;
+}
+
 export async function apiGet<T>(path: string, fallback: T, signal?: AbortSignal): Promise<{ data: T; live: boolean }> {
   try {
-    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-    const response = await fetch(`${getApiBase()}${normalizedPath}`, { cache: "no-store", signal });
-    if (!response.ok) throw new Error(`API ${response.status}`);
-    return { data: (await response.json()) as T, live: true };
+    return { data: await apiRequest<T>(path, { signal }), live: true };
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    if (isAbortError(error)) throw error;
     return { data: fallback, live: false };
   }
 }
