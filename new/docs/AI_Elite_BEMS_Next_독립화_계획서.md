@@ -39,8 +39,14 @@
 
 ### 1.4 미구현 기능 (legacy에는 있으나 new에 아직 없음)
 
-What-if 시뮬레이터, 이상 원인 진단(LLM), 모델 재학습 UI, 기상 동기화 UI,
-생산실적 기간·연간 모드, CSV 내보내기, 일일 메일 리포트(tools/mail).
+~~What-if 시뮬레이터~~, ~~이상 원인 진단(LLM)~~, ~~모델 재학습 UI~~, ~~기상 동기화 UI~~,
+~~생산실적 기간·연간 모드~~, ~~CSV 내보내기~~, ~~일일 메일 리포트(tools/mail)~~ — 전부 해소.
+
+- What-if 시뮬레이터는 **legacy 자체가 2026-06-26에 UI에서 제거 확정**한 기능이라
+  (생산실적_분석_페이지_개선안 §④, 활용처 재검토) 이식 대상에서 제외한다(2026-07-17 결정).
+  `item_energy_impact_service`와 룩업 JSON은 이상 진단이 참조하므로 복사본으로 유지.
+- 나머지는 Phase 2~4에서 이식 완료. 메일 리포트는 2026-07-17 `new/backend/tools/mail`로
+  독립화(아래 Phase 4 추가분).
 
 ---
 
@@ -117,8 +123,17 @@ legacy `_fetch_energy_history`가 factory 컬럼 없이 `overlay_actual_producti
   툴팁·범례·숫자 포맷 일관화, CSV·진단 버튼 인쇄 제외 등 인쇄 품질 정비.
 - 검증 ✅: 백엔드 테스트 34건, typecheck·프로덕션 빌드, headless Edge(CDP)로
   대시보드·생산(3모드)·예측·관리자 화면 라이트/다크 실렌더링 캡처 — 콘솔 오류 0.
+- 추가분 (2026-07-17) ✅: **메일 리포트 독립화** — `legacy/tools/mail` →
+  `new/backend/tools/mail` 복사(일간/주간/월간, `parents[2]` 상대 경로라 자체 해석),
+  실행 bat의 venv 탐색에 `new/.venv` 우선 추가, 의존성(jinja2·plotly·kaleido)은
+  requirements-core.txt로 이미 커버. `REGISTER_MAIL_SCHEDULE.bat` 재실행 시 기존
+  `FEMS_Mail_*` 예약 작업이 new 실행기로 전환(RUN_GUIDE §7). **영향계수 룩업 자산
+  복사** — `legacy/analysis_results/item_energy_impact_lookup.json` →
+  `new/backend/analysis_results/` (이상 진단의 카테고리 계수 발췌가 legacy 폴더
+  없이 동작, `lookup_status().available=True` 확인). What-if UI는 legacy 제거
+  확정 기능이라 이식 제외(§1.4).
 - 남은 것 ⬜: 일정 기간 legacy 병행(read-only) → 수치·권한·업로드 동등성 최종
-  확인 → 퇴역. (실서버 환경에서 사용자가 진행)
+  확인 → 퇴역. (실서버 환경에서 사용자가 진행. 메일은 dry-run 후 스케줄 전환)
 
 ## 3. 단계 간 공통 규칙
 
@@ -141,4 +156,4 @@ legacy `_fetch_energy_history`가 factory 컬럼 없이 `overlay_actual_producti
 | 1. 코어 복사 이식 | ✅ 완료 (2026-07-16) | legacy 코드 의존 제거 |
 | 2. 기능 완성·동등성 검증 | ✅ 완료 (2026-07-16) | 미리보기·진단 연결, 오버레이 전수 비교 불일치 0 |
 | 3. 자동화 독립 | ✅ 완료 (2026-07-16) | 스케줄러가 기동 25초 내 DB를 엑셀 수준으로 자동 동기화 검증. 기상·재학습 API/UI, 자동시작·로그 |
-| 4. UI 완성·퇴역 | ◐ 개발분 완료 (2026-07-16) | 기간·연간 모드, CSV 전 화면, 다크모드·팔레트 검증, headless 실렌더링 확인. legacy 병행 비교 후 퇴역만 남음 |
+| 4. UI 완성·퇴역 | ◐ 개발분 완료 (2026-07-17) | 기간·연간 모드, CSV 전 화면, 다크모드·팔레트 검증, headless 실렌더링 확인, 메일 리포트·영향계수 룩업 독립화. **코드로 할 일은 전부 완료** — legacy 병행 비교 후 퇴역만 남음 |

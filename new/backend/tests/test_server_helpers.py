@@ -494,6 +494,21 @@ class ServerHelperTests(unittest.TestCase):
         mid = server.annual_elapsed_ratio(2026, date(2026, 7, 2))
         self.assertAlmostEqual(mid, 183 / 365, places=6)
 
+    def test_mail_tools_and_impact_lookup_live_inside_new_backend(self) -> None:
+        """메일 자동화·영향계수 룩업이 legacy 폴더 없이 new/backend에서 자체 해석되는지."""
+        mail_dir = server.LOCAL_CORE_ROOT / "tools" / "mail"
+        for name in ("run_mail.py", "run_daily_mail.py", "config.py",
+                     "daily_report_builder.py", "period_report_builder.py",
+                     "mail_service.py"):
+            self.assertTrue((mail_dir / name).exists(), name)
+        self.assertTrue((mail_dir / "templates" / "daily_energy_report.html").exists())
+        # config.PROJECT_ROOT = parents[2] → tools/mail 기준 2단계 위 = new/backend
+        config_source = (mail_dir / "config.py").read_text(encoding="utf-8")
+        self.assertIn("parents[2]", config_source)
+        # 이상 진단이 참조하는 회귀계수 룩업 (legacy/analysis_results에서 복사)
+        lookup = server.LOCAL_CORE_ROOT / "analysis_results" / "item_energy_impact_lookup.json"
+        self.assertTrue(lookup.exists())
+
     def test_annual_burnup_actual_line_stops_after_last_actual_month(self) -> None:
         def month_row(month: int, ic: float) -> dict[str, object]:
             return {"month_no": month, "IC": ic, "MY": 0, "FM": 0, "SN": 0, "ETC": 0}

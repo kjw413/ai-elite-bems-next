@@ -28,8 +28,10 @@
 >
 > **현재 미완료 또는 미검증:**
 >
-> - What-if 시뮬레이터, 일일 메일 리포트(tools/mail) — 독립화 필수 범위 아님
 > - 실제 사내 환경에서 legacy 병행(read-only) 수치·권한·업로드 최종 대조 후 퇴역
+>   (메일은 `run_mail.bat daily --dry-run` 확인 후 `REGISTER_MAIL_SCHEDULE.bat`로 전환)
+> - (해소) ~~일일 메일 리포트(tools/mail)~~ 2026-07-17 `new/backend/tools/mail`로 독립화
+> - (제외) What-if 시뮬레이터 — legacy가 2026-06-26 UI에서 제거 확정한 기능이라 이식하지 않음
 > - (해소) ~~모델 재학습·기상 동기화·이상 원인 진단 UI/API~~ Phase 2·3 완료
 > - (해소) ~~생산실적 기간·연간 모드와 CSV 출력~~ Phase 4에서 완료
 > - (해소) ~~브라우저 렌더링·콘솔 오류 검증~~ headless Edge 캡처로 라이트/다크 확인
@@ -48,7 +50,8 @@
 | 변경 원칙 | `legacy/`는 읽기 전용 참조본. 필요한 파일은 `new/backend/app/`으로 복사해 사용하고, 결함 수정은 복사본에만 반영(독립화 계획서 "발견·수정 로그" 기록) |
 | 현재 진행 | 독립화 Phase 0~3 완료 + Phase 4 개발분 완료 — legacy 없이 단독 운용 가능하고 UI 기능·디자인 정비 끝. 남은 것은 실서버 legacy 병행 비교 후 퇴역 |
 | 이번 세션 완료 (2026-07-16, Phase 4) | ① CSV 내보내기: `lib/bems-csv.ts`(utf-8-sig BOM, RFC 4180) + 대시보드 7일 추이·전년비/에너지 일별·공장별/원단위 추이·매트릭스/생산 일별·품목 순위/예측 이력 9곳 ② 생산실적 월별·기간별·연간 모드: `mode`/`date_from`/`date_to` API, 완전 월 범위만 계획 지표, 연간 Burn-up(마지막 실적 월 이후 평탄선 방지 수정), ETC 카테고리, 다중 월 계획 MAX 집계 ③ 디자인 시스템: 차트 팔레트 CSS 변수화 + dataviz 검증기 라이트/다크 통과(다크 amber #d97706), 다크모드(OS 감지+토글+localStorage, 인쇄는 라이트 고정), 툴팁·범례·인쇄 정비 ④ 검증: 백엔드 테스트 34건·typecheck·빌드, headless Edge(CDP)로 대시보드·생산 3모드·예측·관리자 라이트/다크 실렌더링 캡처(콘솔 오류 0) |
-| 바로 다음 작업 | 실서버에서 RUN_BEMS_NEXT 기동 → legacy 병행(read-only)으로 수치·권한·업로드 동등성 최종 대조 → legacy 퇴역. (선택) What-if 시뮬레이터·일일 메일 리포트 이식 여부 결정 |
+| 이번 세션 완료 (2026-07-17, Phase 4 추가분) | ① 메일 리포트 독립화: `legacy/tools/mail` → `new/backend/tools/mail`(일간/주간/월간, 경로 자체 해석 확인), 실행 bat에 `new/.venv` 우선 탐색 추가, RUN_GUIDE §7 신설 ② 영향계수 룩업 복사: `analysis_results/item_energy_impact_lookup.json` → new/backend (이상 진단 계수 발췌 legacy 미참조 동작 확인) ③ What-if 이식 제외 결정: legacy가 2026-06-26 UI 제거 확정한 기능 ④ 검증: 복사본 compileall·경로 해석·룩업 available 확인, 백엔드 테스트 35건(메일·룩업 자산 가드 테스트 추가) |
+| 바로 다음 작업 | 실서버에서 RUN_BEMS_NEXT 기동 → legacy 병행(read-only)으로 수치·권한·업로드 동등성 최종 대조 → 메일 dry-run 확인 후 `REGISTER_MAIL_SCHEDULE.bat`로 예약 전환 → legacy 퇴역 |
 | Phase 3 완료 내역 (2026-07-16) | FastAPI lifespan 스케줄러(120초 주기·기동 즉시 실행·잠금)로 에너지·생산실적 엑셀 자동 동기화 — 기동 25초 내 DB 07-14→07-15 자동 따라잡음 검증. sync/weather/model API 6종(관리자 전용, 재학습 락 충돌 409), 관리자 화면 동기화 상태·기상 동기화·재학습 카드(진행률 폴링), API 로그 파일화, AUTOSTART 배치 2종. 테스트 27건·typecheck·빌드 통과 |
 | Phase 2 완료 내역 (2026-07-16) | 업로드 2단계(미리보기 dry-run → 반영, 실원본 엑셀로 검증: 덮어쓰기 10,210건 정확 산출), 이상 진단 API+화면(캐시 우선·재생성 admin 전용), 동등성 전수 비교(오버레이 2,639키 불일치 0·대시보드 KPI 일치), RUN_GUIDE·README 독립 구조 갱신, 백엔드 테스트 24건·typecheck·빌드 통과 |
 
@@ -486,11 +489,12 @@ AI-Elite-BEMS/
 | Excel 업로드·감사 로그 | 즉시 UPSERT 확인·업로드·감사 UI/API 구현 | 복사 DB 검증, 필요 시 2단계 preview 추가 |
 | AI 보고서 | 조회·월 선택·생성·Markdown·인쇄/PDF 구현 | 실제 OpenAI·DB·인쇄 결과 검증 |
 | 단일 예측 실행 | 관리자 미리보기 UI/API 구현, 결과 비저장 | 실제 v5.3 모델 결과 검증 |
-| 모델 재학습 | legacy 서비스만 존재 | FastAPI 작업 상태 API와 React UI |
-| 기상청 동기화 | legacy 서비스만 존재 | FastAPI 동기화 API와 결과 UI |
-| What-if 분석 | legacy 영향계수 서비스만 존재 | FastAPI 계수 API와 분석 UI |
-| 생산실적 연간 모드 | 핵심 월간 화면만 구현 | 기간·연간·카테고리 다중필터 이식 |
-| 이상 원인 진단 | legacy 서비스만 존재 | 진단 FastAPI와 결과 UI |
+| 모델 재학습 | Phase 3 완료 — 상태·재학습 API와 관리자 카드 | 실제 재학습 트리거 검증 |
+| 기상청 동기화 | Phase 3 완료 — 동기화 API와 관리자 카드 | 실제 기상청 API 검증 |
+| What-if 분석 | 이식 제외 (legacy가 2026-06-26 UI 제거 확정) | 활용처 재검토 시 계수 서비스·룩업 복사본으로 API 신설 가능 |
+| 생산실적 연간 모드 | Phase 4 완료 — 월별/기간별/연간 + Burn-up | 실제 DB 수치 대조 |
+| 이상 원인 진단 | Phase 2 완료 — 진단 API·마크다운 패널 | LLM 재생성 비용·품질 관찰 |
+| 일일 메일 리포트 | 2026-07-17 tools/mail 독립화 완료 | 서버 dry-run 후 스케줄 전환 |
 
 ### 8.3 운영 안정화 작업
 

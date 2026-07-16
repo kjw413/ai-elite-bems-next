@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>{{ subject }}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#eef4f0; font-family:'Malgun Gothic','Apple SD Gothic Neo',Arial,sans-serif; color:#1f2937;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef4f0; padding:24px 0;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="820" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 4px 14px rgba(0, 0, 0, 0.07);">
+
+        <tr>
+          <td style="background:#065f46; background:linear-gradient(135deg,#065f46 0%,#059669 58%,#34d399 100%); padding:20px 28px; color:#ffffff;">
+            <div style="font-size:11px; font-weight:700; letter-spacing:1.4px; opacity:0.9;">생산담당 생산기술팀</div>
+            <div style="font-size:21px; font-weight:700; margin-top:5px;">일일 에너지 원단위 Alert</div>
+            <div style="font-size:13px; margin-top:7px; opacity:0.95;">
+              기준일 <b>{{ ref_date }}</b> ({{ ref_weekday }}) · 생성 {{ generated_at }}
+            </div>
+          </td>
+        </tr>
+
+        <!-- 섹션 1: 공장×지표 단일 스냅샷 (근무일 기준 D-1 실적 · 전주 동일 요일 대비 증감률) -->
+        <tr>
+          <td style="padding:20px 28px 7px 28px;">
+            <div style="font-size:16px; font-weight:700; color:#111827; margin-bottom:5px;">
+              <span style="display:inline-block; width:5px; height:17px; background:#059669; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
+              1. 전일 원단위 실적 (vs 직전주 동일 요일)
+            </div>
+            <div style="font-size:11px; color:#64748b; margin:0 0 12px 13px;">
+              광주공장 유틸리티 사용 재공품 Mix-kg 환산하여 생산량에 반영.
+            </div>
+
+            {% if snapshot_table and snapshot_table.metric_rows %}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:10.5px; table-layout:fixed;">
+              <thead>
+                <tr style="background:#f8fafc; color:#475569;">
+                  <th align="center" style="width:96px; padding:7px 4px; border:1px solid #e5e7eb;">지표</th>
+                  {% for f in snapshot_table.factories %}
+                  <th align="center" style="padding:7px 3px; border:1px solid #e5e7eb; font-weight:600; {% if f.is_total %}background:#ecfdf5; color:#065f46;{% endif %}">{{ f.factory }}</th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for mrow in snapshot_table.metric_rows %}
+                <tr>
+                  <td align="center" style="padding:7px 4px; border:1px solid #e5e7eb; background:{{ mrow.header_bg }}; font-weight:700; color:#374151;">
+                    {{ mrow.label }}<div style="font-size:8.5px; font-weight:400; color:#64748b; margin-top:1px;">{{ mrow.unit }}</div>
+                  </td>
+                  {% for cell in mrow.cells %}
+                  {% set f = snapshot_table.factories[loop.index0] %}
+                  <td align="center" style="padding:6px 3px; border:1px solid #e5e7eb; background:{{ mrow.cell_bg }}; {% if f.is_total %}border-left:2px solid #a7f3d0; border-right:2px solid #a7f3d0;{% endif %} font-variant-numeric:tabular-nums;">
+                    <div style="font-size:11.5px; color:#0f172a; font-weight:700;">{{ cell.value }}</div>
+                    <div style="font-size:9px; color:{{ cell.color }}; font-weight:700; margin-top:2px;">{{ cell.delta }}</div>
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% else %}
+            <div style="padding:12px; border:1px solid #e5e7eb; background:#f8fafc; color:#64748b; text-align:center;">표시할 원단위 데이터가 없습니다.</div>
+            {% endif %}
+            <div style="font-size:9.5px; color:#94a3b8; margin-top:2px; text-align:right;">
+              증감률은 직전주 동일 요일 대비입니다. 색상: <b style="color:#dc2626;">적색(악화)</b> · <b style="color:#2563eb;">청색(개선)</b>.
+            </div>
+          </td>
+        </tr>
+
+        <!-- 섹션 2: 직전주 동일 요일 대비 생산량·사용량 증감 비교 -->
+        <tr>
+          <td style="padding:20px 28px 20px 28px;">
+            <div style="font-size:16px; font-weight:700; color:#111827; margin-bottom:5px;">
+              <span style="display:inline-block; width:5px; height:17px; background:#059669; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
+              2. 생산량↓ · 사용량↑ (vs 직전주 동일 요일)
+            </div>
+            <div style="font-size:11px; color:#64748b; margin:0 0 12px 13px;">
+            </div>
+
+            {% if warning_items %}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:11px;">
+              <thead>
+                <tr style="background:#fff7ed; color:#9a3412;">
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">일자</th>
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">사업장</th>
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">지표</th>
+                  <th align="center" style="padding:7px; border:1px solid #fed7aa;">판정</th>
+                  <th align="right" style="padding:7px; border:1px solid #fed7aa;">생산량 전주비</th>
+                  <th align="right" style="padding:7px; border:1px solid #fed7aa;">사용량 전주비</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in warning_items %}
+                <tr>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.date }}</td>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5; font-weight:700;">{{ item.factory }}</td>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.energy }}</td>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5; color:#b91c1c; font-weight:700;">생산↓ 사용↑</td>
+                  <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.production_delta }}</td>
+                  <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.usage_delta }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% else %}
+            <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-left:5px solid #059669; border-radius:8px; padding:12px 15px;">
+              <div style="font-size:14px; font-weight:700; color:#065f46;">생산↓·사용↑ 조합 없음</div>
+              <div style="font-size:11px; color:#047857; margin-top:3px;">사업장별 생산량·사용량 방향에서 역행 신호가 발견되지 않았습니다.</div>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#ecfdf5; padding:13px 28px; border-top:1px solid #a7f3d0; font-size:11px; color:#065f46;">
+            백데이터 출처: 생산량 - 종합정보시스템 기간별 제품 생산실적(일/월) / 사용량 - 유틸리티 일자별 사용량 추이
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

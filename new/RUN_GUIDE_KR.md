@@ -144,7 +144,29 @@ http://<서버PC이름>:3000
 
 웹 화면에 `API 연결 실패 · 예시 데이터 표시 중` 경고가 보이면 실제 운영 수치가 아니다. API 주소, 8000 포트, MySQL 연결과 `DB_VIEWER_*` 설정을 먼저 확인한다.
 
-## 7. 자주 발생하는 문제
+## 7. 메일 리포트 자동화 (선택)
+
+일일·주간·월간 에너지 원단위 메일은 `new/backend/tools/mail`에서 legacy 없이 실행된다.
+SMTP·수신자 설정은 `backend/.env`의 기존 메일 키를 그대로 사용한다.
+
+발송 전 테스트(실제 발송 없이 HTML만 `backend/logs/automation`에 저장):
+
+```bat
+cd /d E:\AI-Elite-BEMS\new\backend\tools\mail
+run_mail.bat daily --dry-run
+```
+
+작업 스케줄러 등록(기존 legacy 등록과 같은 작업 이름 `FEMS_Mail_*`을 덮어쓰므로,
+실행하면 예약 작업이 new 쪽 실행기로 전환된다):
+
+```bat
+cd /d E:\AI-Elite-BEMS\new\backend\tools\mail
+REGISTER_MAIL_SCHEDULE.bat
+```
+
+해제는 같은 폴더의 `UNREGISTER_MAIL_SCHEDULE.bat`를 실행한다.
+
+## 8. 자주 발생하는 문제
 
 | 증상 | 확인·조치 |
 |---|---|
@@ -157,13 +179,13 @@ http://<서버PC이름>:3000
 | 브라우저 CORS 오류 | 접속 주소와 `BEMS_ALLOWED_ORIGINS`를 `http://호스트:3000`의 정확한 값으로 맞춘다. |
 | 원격 PC가 관리자여야 함 | 해당 PC의 고정 또는 예약 IP를 `BEMS_ADMIN_IPS`에 추가하고 FastAPI를 재시작한다. |
 
-## 8. 운영 종료·재시작
+## 9. 운영 종료·재시작
 
 정상 종료는 UI를 실행한 명령 창에서 `Ctrl+C`를 누른 뒤, 별도 `BEMS API :8000` 창도 닫는 방식으로 한다. 재시작할 때는 두 프로세스가 종료된 것을 확인한 뒤 `RUN_BEMS_NEXT.bat`를 다시 실행한다.
 
 소스 코드만 바뀌었다면 `RUN_BEMS_NEXT.bat`가 자동으로 다시 빌드한다. Node·Python 의존성이나 잠금파일이 바뀌었다면 `SETUP_LOCAL.bat`를 다시 실행해 설치와 빌드를 검증한다. 일반 재시작만 필요하면 `RUN_BEMS_NEXT.bat`만 실행하면 된다.
 
-## 9. 운영 전 최소 체크리스트
+## 10. 운영 전 최소 체크리스트
 
 - [ ] 서버 PC의 MySQL·`backend/.env`·`backend/app/predictive model` 준비 확인
 - [ ] `DB_VIEWER_USER`와 `DB_VIEWER_PASSWORD` 설정 및 SELECT grant 확인
