@@ -22,27 +22,25 @@
 
 실제 서버 오픈, 사내망 웹 접속, 권한·방화벽·문제 해결 절차는 [RUN_GUIDE_KR.md](RUN_GUIDE_KR.md)를 따른다. 아래는 빠른 시작 요약이다.
 
-현재 저장소 구조:
+현재 저장소 구조 (2026-07-16 독립화 이후):
 
 ```text
 AI-Elite-BEMS/
-  legacy/  # 기존 Streamlit 소스, .env, 모델 (Next 작업에서는 읽기 전용)
-  new/     # React/Next.js + FastAPI 마이그레이션 버전
+  legacy/  # 기존 Streamlit 원본 (읽기 전용 참조·비교 검증용, 실행 의존 없음)
+  new/     # React/Next.js + FastAPI 독립 실행 버전
+    backend/app/   # legacy에서 복사한 데이터 처리·예측·보고서 코어 (수정은 여기에만)
+    backend/.env   # DB·API 키 (git 미포함)
+    backend/app/predictive model/  # v5.3 모델·휴일·기상 자산 (git 미포함, 3.8GB)
 ```
 
-1. `legacy/`에 소스, `.env`, 모델 파일과 `requirements.txt`가 있는지 확인합니다.
-2. legacy와 호환되는 Python 및 Node.js 22.13 이상을 설치합니다.
-3. 이 폴더의 `SETUP_LOCAL.bat`를 한 번 실행합니다. 모든 Python 패키지는 `new/.venv`에 설치됩니다.
+1. Node.js 22.13 이상과 Python 3.11+를 설치합니다.
+2. git으로 새 PC에 배포하는 경우 `backend/.env`와 `backend/app/predictive model/`은
+   git에 포함되지 않으므로 기존 서버에서 **별도로 복사**합니다.
+3. 이 폴더의 `SETUP_LOCAL.bat`를 한 번 실행합니다. 모든 Python 패키지는
+   `backend/requirements-core.txt` 기준으로 `new/.venv`에 설치됩니다.
 4. `CONFIGURE_FIREWALL.bat`를 관리자 권한으로 한 번 실행합니다.
 5. 이후에는 `RUN_BEMS_NEXT.bat`로 실행합니다. 기본 동작은 현재 소스를 다시 빌드한 뒤 시작하는 것입니다.
 6. 같은 사내망 사용자에게 `http://<서버PC이름>:3000`을 공유합니다.
-
-기존 프로젝트가 기본 위치(`../legacy`)가 아니면 실행 전에 환경변수로 경로를 지정합니다.
-
-```bat
-set BEMS_CORE_ROOT=C:\work\AI-Elite-BEMS\legacy
-RUN_BEMS_NEXT.bat
-```
 
 검증 완료한 기존 번들을 의도적으로 재사용할 때만 `BEMS_SKIP_BUILD=1`을 지정할 수
 있습니다. API 주소를 별도로 지정하지 않으면 브라우저가 현재 접속한 서버 호스트의
@@ -51,8 +49,9 @@ RUN_BEMS_NEXT.bat
 
 ## 데이터 보호
 
-- DB 비밀번호와 API 키는 서버 프로세스 환경에서만 읽습니다. 시작할 때 기존
-  `legacy/.env`도 서버 환경으로 불러오며 브라우저에는 전달하지 않습니다.
+- DB 비밀번호와 API 키는 서버 프로세스 환경에서만 읽습니다. `backend/.env`를
+  우선 사용하고, 전환기 호환을 위해 없는 키만 `legacy/.env`에서 보충합니다.
+  브라우저에는 전달하지 않습니다.
 - `DB_VIEWER_USER`·`DB_VIEWER_PASSWORD`는 필수입니다. FastAPI 직접 조회에는 DB에서
   `SELECT`만 부여한 계정을 사용해야 하며, 실제 grant는 운영 전 별도로 확인합니다.
   쓰기 작업은 관리자 권한 검사 후 기존 서비스에 위임합니다.

@@ -14,6 +14,7 @@ docs/AI_Elite_BEMS_Next_독립화_계획서.md의 발견·수정 로그에 기�
 
 from __future__ import annotations
 
+import asyncio
 import calendar
 import importlib
 import logging
@@ -21,6 +22,8 @@ import math
 import os
 import socket
 import sys
+import threading
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -135,7 +138,55 @@ def _configured_allowed_origins() -> set[str]:
 ALLOWED_ORIGINS = _configured_allowed_origins()
 
 
-app = FastAPI(title="AI Elite BEMS API", version="1.2.0", docs_url="/api/docs", redoc_url=None)
+# ── 엑셀 → DB 자동 동기화 스케줄러 ──────────────────────────────
+# legacy에서는 Streamlit rerun마다 동기화가 실행됐다. 독립 운용에서는 이
+# 프로세스가 주기적으로 mtime을 비교해(미변경 시 수 ms) 직접 동기화한다.
+# BEMS_SYNC_INTERVAL_SECONDS=0 으로 끌 수 있다(테스트·개발용).
+SYNC_INTERVAL_SECONDS = int(os.getenv("BEMS_SYNC_INTERVAL_SECONDS", "120"))
+_sync_guard = threading.Lock()
+_scheduler_state: dict[str, Any] = {"lastRunAt": None, "lastError": None}
+
+
+def run_excel_sync(force: bool = False) -> dict[str, Any]:
+    """에너지·생산실적 엑셀 동기화 1회 실행 (수동·스케줄 공용, 동시 실행 방지)."""
+    with _sync_guard:
+        energy_service = import_core("app.services.daily_energy_sync_service")
+        production_service = import_core("app.services.production_dw_sync_service")
+        energy = energy_service.force_resync() if force else energy_service.auto_sync_once()
+        production = production_service.auto_sync_production_once(force=force)
+        _scheduler_state["lastRunAt"] = datetime.now()
+        _scheduler_state["lastError"] = None
+        return {"energy": energy, "production": production}
+
+
+async def _sync_scheduler(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(run_excel_sync)
+        except Exception as exc:
+            _scheduler_state["lastError"] = str(exc)
+            logger.error("Scheduled excel sync failed.", exc_info=(type(exc), exc, exc.__traceback__))
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=SYNC_INTERVAL_SECONDS)
+        except asyncio.TimeoutError:
+            continue
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    stop_event = asyncio.Event()
+    task = (
+        asyncio.create_task(_sync_scheduler(stop_event))
+        if SYNC_INTERVAL_SECONDS > 0
+        else None
+    )
+    yield
+    if task is not None:
+        stop_event.set()
+        await task
+
+
+app = FastAPI(title="AI Elite BEMS API", version="1.3.0", docs_url="/api/docs", redoc_url=None, lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(ALLOWED_ORIGINS),
@@ -1165,6 +1216,90 @@ def backfill_actuals(request: Request) -> dict[str, Any]:
     return {"updated_rows": int(updated)}
 
 
+@app.get("/api/v1/sync/status")
+def sync_status(request: Request) -> dict[str, Any]:
+    require_admin(request)
+    energy_service = import_core("app.services.daily_energy_sync_service")
+    production_service = import_core("app.services.production_dw_sync_service")
+    return json_safe({
+        "scheduler": {
+            "enabled": SYNC_INTERVAL_SECONDS > 0,
+            "intervalSeconds": SYNC_INTERVAL_SECONDS,
+            "lastRunAt": _scheduler_state["lastRunAt"],
+            "lastError": _scheduler_state["lastError"],
+        },
+        "energy": energy_service.get_daily_energy_sync_status(),
+        "production": production_service.get_sync_state(),
+    })
+
+
+class SyncRunRequest(BaseModel):
+    force: bool = False
+
+
+@app.post("/api/v1/sync/run")
+def sync_run(payload: SyncRunRequest, request: Request) -> dict[str, Any]:
+    """엑셀 → DB 동기화 즉시 실행 (관리자 전용)."""
+    require_admin(request)
+    return json_safe(run_excel_sync(force=payload.force))
+
+
+@app.get("/api/v1/weather/status")
+def weather_status(request: Request) -> dict[str, Any]:
+    require_admin(request)
+    service = import_core("app.services.weather_sync_service")
+    return json_safe(service.get_weather_sync_status())
+
+
+@app.post("/api/v1/weather/sync")
+def weather_sync(request: Request) -> dict[str, Any]:
+    """기상청 관측 데이터 동기화 (관리자 전용, 관측소별 결과 반환)."""
+    require_admin(request)
+    service = import_core("app.services.weather_sync_service")
+    return json_safe({"stations": service.sync_all_stations()})
+
+
+@app.get("/api/v1/model/training-status")
+def training_status(request: Request) -> dict[str, Any]:
+    require_admin(request)
+    service = import_core("app.services.usage_prediction_v5_service")
+    return json_safe(service.get_training_status())
+
+
+@app.post("/api/v1/model/retrain")
+def trigger_retrain(request: Request) -> dict[str, Any]:
+    """v5 모델 재학습 백그라운드 시작 (관리자 전용, 중복 실행은 잠금으로 차단)."""
+    require_admin(request)
+    service = import_core("app.services.v5_retrain_service")
+    result = service.trigger_v5_retrain(trigger_mode="manual")
+    if not result.get("started"):
+        raise HTTPException(status_code=409, detail=str(result.get("message", "재학습을 시작할 수 없습니다.")))
+    return json_safe(result)
+
+
+class DiagnosisRequest(BaseModel):
+    factory: str
+    date: date
+    target: str
+    force_refresh: bool = False
+
+
+@app.post("/api/v1/predictions/diagnose")
+def diagnose_anomaly(payload: DiagnosisRequest, request: Request) -> dict[str, Any]:
+    """이상 이벤트 LLM 진단 — 캐시 우선. 재생성(force_refresh)만 관리자 전용(비용 발생)."""
+    if payload.factory not in PREDICTION_FACTORIES:
+        raise HTTPException(status_code=400, detail="이상 진단은 개별 공장 단위로만 가능합니다.")
+    if payload.force_refresh:
+        require_admin(request)
+    service = import_core("app.services.anomaly_diagnosis_service")
+    result = service.get_or_create_diagnosis(
+        payload.factory, payload.date, payload.target, force_refresh=payload.force_refresh,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=str(result["error"]))
+    return json_safe(result)
+
+
 @app.get("/api/v1/targets")
 def get_targets(year: int) -> dict[str, Any]:
     rows = fetch_all(
@@ -1305,14 +1440,30 @@ def audit(request: Request) -> dict[str, Any]:
     return json_safe({"changes": changes, "uploads": uploads})
 
 
-@app.post("/api/v1/upload")
-async def upload(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
-    require_admin(request)
+async def _read_valid_excel(file: UploadFile) -> bytes:
     if not file.filename or Path(file.filename).suffix.lower() not in {".xlsx", ".xls"}:
         raise HTTPException(status_code=400, detail=".xlsx 또는 .xls 파일만 업로드할 수 있습니다.")
     content = await file.read()
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="파일 크기는 50MB 이하여야 합니다.")
+    return content
+
+
+@app.post("/api/v1/upload/preview")
+async def upload_preview(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
+    """업로드 dry-run — 파싱·검증 후 공장별 신규/덮어쓰기 건수만 계산 (DB 미변경)."""
+    require_admin(request)
+    content = await _read_valid_excel(file)
+    from io import BytesIO
+
+    service = import_core("app.services.upload_service")
+    return json_safe(service.preview_excel(BytesIO(content), file.filename))
+
+
+@app.post("/api/v1/upload")
+async def upload(request: Request, file: UploadFile = File(...)) -> dict[str, Any]:
+    require_admin(request)
+    content = await _read_valid_excel(file)
     from io import BytesIO
 
     service = import_core("app.services.upload_service")

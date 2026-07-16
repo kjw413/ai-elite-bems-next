@@ -72,20 +72,34 @@ legacy `_fetch_energy_history`가 factory 컬럼 없이 `overlay_actual_producti
 - 배치 스크립트가 legacy 폴더 없이도 설치·실행되도록 갱신.
 - 완료 기준: legacy 폴더를 참조하지 않고 서버 기동·조회·예측 동작.
 
-### Phase 2 — 복사본 기반 기능 완성·동등성 검증
+### Phase 2 — 복사본 기반 기능 완성·동등성 검증 ✅ (2026-07-16 완료)
 
-- 업로드 **미리보기(2단계 확인)** API·화면 추가 (`preview_excel` 활용).
-- 이상 원인 진단(`get_or_create_diagnosis`) API·화면 연결.
-- 실DB 동등성 스팟체크: 예측 P05/P50/P95, 업로드 결과, 보고서 생성이
-  legacy 화면과 일치하는지 확인. 복사 DB에서 업로드 검증 후 운영 적용.
+- 업로드 **미리보기(2단계 확인)**: `POST /api/v1/upload/preview`(dry-run) +
+  관리자 화면 1단계 검증·미리보기 → 2단계 DB 반영 흐름.
+  실제 RawDB_에너지.xlsx로 검증(공장 6곳, 덮어쓰기 10,210건 정확 산출, DB 무변경).
+- 이상 원인 진단: `POST /api/v1/predictions/diagnose`(캐시 우선, 재생성만 관리자) +
+  예측 이력 표의 이탈 행 진단 버튼·마크다운 진단 패널. 캐시 건으로 검증(LLM 비용 0).
+- 동등성 스팟체크: 브리지 SQL vs 복사본 legacy pandas의 생산량 오버레이를
+  2,639개 (일자×공장) 키 전수 비교 → **불일치 0건**. 대시보드 MTD 전력 원단위·생산량도
+  수동 계산과 일치(404.19 kWh/ton, 13,253.1 ton). 현재 DB에 F10 잔존 행 없음 확인.
+- RUN_GUIDE·README를 독립 실행 구조 기준으로 갱신(배포 시 .env·모델 폴더 별도 복사 명시).
 
-### Phase 3 — 자동화 독립 (운영 전환의 관문)
+### Phase 3 — 자동화 독립 ✅ (2026-07-16 완료)
 
-- FastAPI 프로세스에 백그라운드 스케줄러 도입: 엑셀 mtime 감시 동기화
-  (energy/production/WIP — 복사본 `*_sync_service` 재사용), 기상청 동기화,
-  재학습 워커·락·상태 API(복사본 `v5_retrain_*` 재사용).
-- Windows 자동 시작(작업 스케줄러)·자동 복구, 운영 로그.
-- 완료 기준: legacy 앱을 완전히 내려도 데이터 유입·예측·보고가 지속.
+- FastAPI lifespan 백그라운드 스케줄러: 기동 즉시 + `BEMS_SYNC_INTERVAL_SECONDS`
+  (기본 120초) 주기로 에너지·생산실적 엑셀 mtime 비교 동기화
+  (복사본 `daily_energy_sync_service`·`production_dw_sync_service` 재사용,
+  동시 실행 잠금, 0으로 비활성화 가능).
+- 신규 API: `GET/POST /api/v1/sync/{status,run}` (수동 강제 동기화),
+  `GET/POST /api/v1/weather/{status,sync}`, `GET /api/v1/model/training-status`,
+  `POST /api/v1/model/retrain` (락 충돌 시 409). 전부 관리자 전용.
+- 관리자 화면: "데이터·동기화" 탭에 자동 동기화 상태 카드+지금 동기화 버튼,
+  "예측·모델 운영" 탭에 기상 동기화·재학습 카드(진행률·10초 폴링).
+- 운영: API 로그 파일화(`logs/api_YYYYMMDD.log`), `AUTOSTART_REGISTER.bat`/
+  `AUTOSTART_UNREGISTER.bat`(로그온 시 자동 시작).
+- **검증: 서버 기동만으로 25초 내 energy_daily 07-14 → 07-15 자동 따라잡음(+6행,
+  사람 개입 없음).** 재학습 워커는 복사본 자체 경로로 spawn되는 것 확인(실행은 미트리거).
+- 완료 기준 충족: legacy 앱을 내려도 데이터 유입·예측·보고 지속.
 
 ### Phase 4 — UI 완성·세련화 & legacy 퇴역
 
@@ -113,6 +127,6 @@ legacy `_fetch_energy_history`가 factory 컬럼 없이 `overlay_actual_producti
 |---|---|---|
 | 0. 예측 경로 복구·경산 제외 | ✅ 완료 (2026-07-16) | 복사본 직접 수정으로 대체 |
 | 1. 코어 복사 이식 | ✅ 완료 (2026-07-16) | legacy 코드 의존 제거 |
-| 2. 기능 완성·동등성 검증 | ⬜ 예정 | 업로드 미리보기·이상 진단 포함 |
-| 3. 자동화 독립 | ⬜ 예정 | 스케줄러·재학습·자동시작 |
-| 4. UI 완성·퇴역 | ⬜ 예정 | 디자인 시스템 정비 |
+| 2. 기능 완성·동등성 검증 | ✅ 완료 (2026-07-16) | 미리보기·진단 연결, 오버레이 전수 비교 불일치 0 |
+| 3. 자동화 독립 | ✅ 완료 (2026-07-16) | 스케줄러가 기동 25초 내 DB를 엑셀 수준으로 자동 동기화 검증. 기상·재학습 API/UI, 자동시작·로그 |
+| 4. UI 완성·퇴역 | ⬜ 예정 | 디자인 시스템 정비, 연간 모드·CSV, legacy 병행 비교 후 퇴역 |

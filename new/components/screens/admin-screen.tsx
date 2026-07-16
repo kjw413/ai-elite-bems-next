@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Database, History, Pencil, Play, Plus, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
+import { BrainCircuit, CloudSun, Database, FolderSync, History, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
 import { apiRequest, isAbortError, query } from "@/lib/bems-api";
 import { factories } from "@/lib/bems-data";
 
@@ -241,9 +241,27 @@ function TargetsPanel({ factory, date, isAdmin }: { factory: string; date: strin
   </div>;
 }
 
+type UploadPreview = {
+  success: boolean;
+  message: string;
+  errors: AnyRow[];
+  summary: AnyRow[];
+  total_new: number;
+  total_overwrite: number;
+};
+
+type SyncStatus = {
+  scheduler: { enabled: boolean; intervalSeconds: number; lastRunAt: string | null; lastError: string | null };
+  energy: AnyRow;
+  production: AnyRow;
+};
+
 function DataPanel() {
   const [audit, setAudit] = useState<{ changes: AnyRow[]; uploads: AnyRow[] }>({ changes: [], uploads: [] });
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<UploadPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -258,8 +276,14 @@ function DataPanel() {
     setLoading(true);
     setError("");
     try {
-      const result = await apiRequest<{ changes: AnyRow[]; uploads: AnyRow[] }>("/audit", { signal: controller.signal });
-      if (!controller.signal.aborted) setAudit(result);
+      const [auditResult, syncResult] = await Promise.allSettled([
+        apiRequest<{ changes: AnyRow[]; uploads: AnyRow[] }>("/audit", { signal: controller.signal }),
+        apiRequest<SyncStatus>("/sync/status", { signal: controller.signal }),
+      ]);
+      if (controller.signal.aborted) return;
+      if (auditResult.status === "fulfilled") setAudit(auditResult.value);
+      else setError(messageOf(auditResult.reason));
+      if (syncResult.status === "fulfilled") setSync(syncResult.value);
     } catch (requestError) {
       if (isAbortError(requestError)) return;
       setError(messageOf(requestError));
@@ -267,25 +291,67 @@ function DataPanel() {
       if (loadController.current === controller) setLoading(false);
     }
   }, []);
+
+  async function runSyncNow() {
+    if (syncing) return;
+    setSyncing(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await apiRequest<{ energy: AnyRow; production: AnyRow }>("/sync/run", { method: "POST", body: JSON.stringify({ force: true }) });
+      const inserted = Number(result.energy?.inserted ?? 0);
+      const updated = Number(result.energy?.updated ?? 0);
+      setNotice(`동기화 완료 — 에너지 신규 ${inserted}·갱신 ${updated}행, 생산실적 ${display(result.production?.status)}`);
+      await load();
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    } finally {
+      setSyncing(false);
+    }
+  }
   useEffect(() => {
     void load();
     return () => loadController.current?.abort();
   }, [load]);
 
-  async function uploadFile(event: React.FormEvent) {
-    event.preventDefault();
-    if (!file) return;
+  function validFile(): File | null {
+    if (!file) return null;
     if (!/\.(xlsx|xls)$/i.test(file.name)) {
       setError("xlsx 또는 xls 파일만 업로드할 수 있습니다.");
-      return;
+      return null;
     }
     if (file.size > 50 * 1024 * 1024) {
       setError("파일 크기는 50MB 이하여야 합니다.");
-      return;
+      return null;
     }
-    if (!window.confirm("검증을 통과한 데이터는 즉시 MySQL에 UPSERT됩니다. 계속하시겠습니까?")) return;
+    return file;
+  }
+
+  async function previewFile(event: React.FormEvent) {
+    event.preventDefault();
+    const target = validFile();
+    if (!target || uploading) return;
     const body = new FormData();
-    body.append("file", file);
+    body.append("file", target);
+    setUploading(true);
+    setError("");
+    setNotice("");
+    setPreview(null);
+    try {
+      setPreview(await apiRequest<UploadPreview>("/upload/preview", { method: "POST", body }));
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function applyUpload() {
+    const target = validFile();
+    if (!target || !preview?.success || uploading) return;
+    if (!window.confirm(`신규 ${preview.total_new}건 · 덮어쓰기 ${preview.total_overwrite}건을 MySQL에 UPSERT합니다. 계속하시겠습니까?`)) return;
+    const body = new FormData();
+    body.append("file", target);
     setUploading(true);
     setError("");
     setNotice("");
@@ -293,6 +359,7 @@ function DataPanel() {
       const result = await apiRequest<{ rows: number; message: string }>("/upload", { method: "POST", body });
       setNotice(`${result.rows.toLocaleString("ko-KR")}행을 반영했습니다. ${result.message ?? ""}`);
       setFile(null);
+      setPreview(null);
       if (fileInput.current) fileInput.current.value = "";
       await load();
     } catch (requestError) {
@@ -303,12 +370,28 @@ function DataPanel() {
   }
 
   return <div className="screen-stack">
-    <form className="card upload-panel" onSubmit={uploadFile}>
-      <div><span className="eyebrow">EXCEL UPSERT</span><h3>에너지 실적 업로드</h3><p>검증 후 MySQL에 UPSERT하며 원본과 변경 이력을 남깁니다. 최대 50MB의 xlsx·xls만 허용됩니다.</p></div>
-      <label className="file-picker"><Upload size={22}/><span>{file?.name ?? "Excel 파일 선택"}</span><input ref={fileInput} type="file" accept=".xlsx,.xls" onChange={event => setFile(event.target.files?.[0] ?? null)}/></label>
-      <button type="submit" className="primary-button" disabled={!file || uploading}><Upload size={16}/>{uploading ? "업로드 중..." : "검증 및 업로드"}</button>
+    <article className="card admin-form">
+      <header><div><span className="eyebrow">AUTO SYNC</span><h3>엑셀 → DB 자동 동기화</h3></div><button type="button" className="primary-button" disabled={syncing} onClick={() => void runSyncNow()}><FolderSync size={16}/>{syncing ? "동기화 중..." : "지금 동기화"}</button></header>
+      {sync ? <div className="sync-grid">
+        <div><b>스케줄러</b><span>{sync.scheduler.enabled ? `${sync.scheduler.intervalSeconds}초 주기 실행 중` : "꺼짐"} · 최근 {display(sync.scheduler.lastRunAt).slice(0, 19).replace("T", " ")}</span>{sync.scheduler.lastError && <em className="bad">{sync.scheduler.lastError}</em>}</div>
+        <div><b>에너지 원본 {sync.energy.is_up_to_date ? <i className="sync-ok">최신</i> : <i className="sync-stale">지연</i>}</b><span>파일 {display(sync.energy.file_mtime).slice(0, 19).replace("T", " ")} · 마지막 동기화 {display(sync.energy.last_sync_at)} (신규 {display(sync.energy.last_inserted)}·갱신 {display(sync.energy.last_updated)})</span></div>
+        <div><b>생산실적 원본</b><span>마지막 동기화 {display(sync.production.last_sync_at)} · {display(sync.production.last_rows)}행 · {display(sync.production.last_duration_sec)}초</span></div>
+      </div> : <p className="panel-copy">동기화 상태를 불러오는 중이거나 확인할 수 없습니다.</p>}
+    </article>
+    <form className="card upload-panel" onSubmit={previewFile}>
+      <div><span className="eyebrow">EXCEL UPSERT</span><h3>에너지 실적 업로드</h3><p>1단계 미리보기로 신규·덮어쓰기 영향 범위를 확인한 뒤, 2단계에서 MySQL에 UPSERT합니다. 최대 50MB의 xlsx·xls만 허용됩니다.</p></div>
+      <label className="file-picker"><Upload size={22}/><span>{file?.name ?? "Excel 파일 선택"}</span><input ref={fileInput} type="file" accept=".xlsx,.xls" onChange={event => { setFile(event.target.files?.[0] ?? null); setPreview(null); setNotice(""); setError(""); }}/></label>
+      <button type="submit" className="primary-button" disabled={!file || uploading}><Play size={16}/>{uploading && !preview ? "검증 중..." : "1단계 · 검증·미리보기"}</button>
     </form>
     {error && <div className="form-message error">{error}</div>}{notice && <div className="form-message success">{notice}</div>}
+    {preview && <article className="card admin-list">
+      <header className="panel-header"><div><span className="eyebrow">UPLOAD PREVIEW</span><h3>{preview.success ? "미리보기 — DB 미반영" : "검증 실패"}</h3></div>
+        {preview.success && <button type="button" className="primary-button" disabled={uploading} onClick={() => void applyUpload()}><Upload size={16}/>{uploading ? "반영 중..." : `2단계 · DB 반영 (신규 ${preview.total_new} · 덮어쓰기 ${preview.total_overwrite})`}</button>}
+      </header>
+      {!preview.success && <div className="form-message error">{preview.message}</div>}
+      {preview.success && <div className="table-wrap"><table><thead><tr><th>공장</th><th>기간</th><th>일자 수</th><th>신규</th><th>덮어쓰기</th></tr></thead><tbody>{preview.summary.map((row, index) => <tr key={index}><td>{display(row["공장"])}</td><td>{display(row["기간"])}</td><td>{display(row["일자 수"])}</td><td>{display(row["신규"])}</td><td>{display(row["덮어쓰기"])}</td></tr>)}</tbody></table></div>}
+      {preview.errors.length > 0 && <div className="table-wrap"><table><thead><tr><th>시트</th><th>행</th><th>컬럼</th><th>사유</th><th>값</th></tr></thead><tbody>{preview.errors.slice(0, 50).map((row, index) => <tr key={index}><td>{display(row["시트"])}</td><td>{display(row["행"])}</td><td>{display(row["컬럼"])}</td><td>{display(row["사유"])}</td><td>{display(row["값"])}</td></tr>)}</tbody></table>{preview.errors.length > 50 && <div className="empty-row">외 {preview.errors.length - 50}건의 오류가 더 있습니다.</div>}</div>}
+    </article>}
     <div className="admin-grid equal">
       <article className="card admin-list"><header className="panel-header"><div><span className="eyebrow">UPLOAD HISTORY</span><h3>최근 업로드</h3></div><button type="button" className="secondary-button" onClick={() => void load()}><RefreshCw size={15}/></button></header>{loading ? <div className="loading inline-loading"><RefreshCw className="spin"/></div> : <div className="table-wrap"><table><thead><tr><th>파일</th><th>일시</th><th>행</th><th>상태</th></tr></thead><tbody>{audit.uploads.map((row, index) => <tr key={String(row.id ?? index)}><td>{display(row.filename)}</td><td>{display(row.uploadedAt)}</td><td>{display(row.rows)}</td><td>{display(row.status)}</td></tr>)}</tbody></table></div>}</article>
       <article className="card admin-list"><header className="panel-header"><div><span className="eyebrow">AUDIT LOG</span><h3>최근 데이터 변경</h3></div><History size={20}/></header>{loading ? <div className="loading inline-loading"><RefreshCw className="spin"/></div> : <div className="table-wrap"><table><thead><tr><th>일시</th><th>공장</th><th>필드</th><th>이전</th><th>변경</th></tr></thead><tbody>{audit.changes.map((row, index) => <tr key={String(row.id ?? index)}><td>{display(row.time)}</td><td>{display(row.factory)}</td><td>{display(row.field)}</td><td>{display(row.before)}</td><td>{display(row.after)}</td></tr>)}</tbody></table></div>}</article>
@@ -368,7 +451,7 @@ function PredictionOpsPanel({ factory, date }: { factory: string; date: string }
     }
   }
 
-  return <div className="admin-grid">
+  return <div className="admin-grid equal">
     <article className="card admin-form">
       <header><div><span className="eyebrow">PREDICTION HISTORY</span><h3>예측 누락이력 생성</h3></div><Database size={22}/></header>
       <div className="form-grid"><label className="field"><span>시작일</span><input required type="date" value={dateFrom} onChange={event => setDateFrom(event.target.value)}/></label><label className="field"><span>종료일</span><input required type="date" value={dateTo} onChange={event => setDateTo(event.target.value)}/></label></div>
@@ -379,16 +462,123 @@ function PredictionOpsPanel({ factory, date }: { factory: string; date: string }
       <p className="panel-copy">prediction_log의 누락된 실측값을 최신 energy_daily 데이터로 보완합니다.</p>
       <button type="button" className="primary-button" disabled={Boolean(running)} onClick={() => void run("actuals")}><Play size={16}/>{running === "actuals" ? "실행 중..." : "실측값 역채움"}</button>
     </article>
+    <WeatherCard/>
+    <RetrainCard/>
     {error && <div className="form-message error admin-span">{error}</div>}
     {result != null && <article className="card operation-result admin-span"><strong>작업 결과</strong><pre>{JSON.stringify(result, null, 2)}</pre></article>}
   </div>;
+}
+
+type WeatherStationStatus = { last_date: string; missing_days: number | null; is_up_to_date: boolean };
+type WeatherSyncResult = { station: string; added_days: number; last_date: string | null; error: string | null };
+
+function WeatherCard() {
+  const [status, setStatus] = useState<Record<string, WeatherStationStatus>>({});
+  const [results, setResults] = useState<WeatherSyncResult[] | null>(null);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await apiRequest<Record<string, WeatherStationStatus>>("/weather/status"));
+    } catch (requestError) {
+      if (!isAbortError(requestError)) setError(messageOf(requestError));
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function syncNow() {
+    if (running) return;
+    setRunning(true);
+    setError("");
+    setResults(null);
+    try {
+      const response = await apiRequest<{ stations: WeatherSyncResult[] }>("/weather/sync", { method: "POST" });
+      setResults(response.stations ?? []);
+      await load();
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return <article className="card admin-form">
+    <header><div><span className="eyebrow">WEATHER SYNC</span><h3>기상청 데이터 동기화</h3></div><CloudSun size={22}/></header>
+    <div className="sync-grid">{Object.entries(status).map(([name, row]) => <div key={name}><b>{name} {row.is_up_to_date ? <i className="sync-ok">최신</i> : <i className="sync-stale">{row.missing_days ?? "-"}일 누락</i>}</b><span>보유 {row.last_date}</span></div>)}</div>
+    {results && <p className="panel-copy">{results.map(row => `${row.station} ${row.error ? `오류: ${row.error}` : `+${row.added_days}일`}`).join(" · ")}</p>}
+    {error && <div className="form-message error">{error}</div>}
+    <button type="button" className="primary-button" disabled={running} onClick={() => void syncNow()}><CloudSun size={16}/>{running ? "동기화 중..." : "기상 데이터 동기화"}</button>
+  </article>;
+}
+
+type TrainingStatus = {
+  status?: string;
+  message?: string;
+  error?: string | null;
+  progress_pct?: number;
+  current_step?: string | null;
+  current_factory?: string | null;
+  current_target?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  data_end_date?: string | null;
+};
+
+const trainingLabels: Record<string, string> = { running: "학습 진행 중", success: "마지막 학습 성공", fail: "마지막 학습 실패", interrupted: "학습 중단됨", unknown: "이력 없음" };
+
+function RetrainCard() {
+  const [status, setStatus] = useState<TrainingStatus | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await apiRequest<TrainingStatus>("/model/training-status"));
+    } catch (requestError) {
+      if (!isAbortError(requestError)) setError(messageOf(requestError));
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (status?.status !== "running") return;
+    const timer = window.setInterval(() => void load(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [status?.status, load]);
+
+  async function start() {
+    if (starting || status?.status === "running") return;
+    if (!window.confirm("v5 모델 재학습을 시작합니다. 서버 자원이 장시간 사용됩니다. 계속하시겠습니까?")) return;
+    setStarting(true);
+    setError("");
+    try {
+      await apiRequest("/model/retrain", { method: "POST" });
+      await load();
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  const running = status?.status === "running";
+  const pct = Math.min(Math.max(Number(status?.progress_pct ?? 0), 0), 100);
+  return <article className="card admin-form">
+    <header><div><span className="eyebrow">MODEL RETRAIN</span><h3>v5 모델 재학습</h3></div><BrainCircuit size={22}/></header>
+    <div className="sync-grid">
+      <div><b>{trainingLabels[status?.status ?? "unknown"] ?? display(status?.status)}</b><span>{running ? `${status?.current_step ?? ""} ${status?.current_factory ?? ""} ${status?.current_target ?? ""}`.trim() || "준비 중" : `데이터 기준일 ${display(status?.data_end_date)} · 종료 ${display(status?.ended_at).slice(0, 19).replace("T", " ")}`}</span>{status?.error && <em className="bad">{status.error}</em>}</div>
+    </div>
+    {running && <div className="progress"><div><span>진행률</span><b>{pct.toFixed(0)}%</b></div><i><em style={{ width: `${pct}%` }}/></i></div>}
+    {error && <div className="form-message error">{error}</div>}
+    <button type="button" className="primary-button" disabled={starting || running} onClick={() => void start()}><Play size={16}/>{running ? "학습 진행 중..." : starting ? "시작 중..." : "재학습 시작"}</button>
+  </article>;
 }
 
 export function AdminScreen({ factory, date, isAdmin }: { factory: string; date: string; isAdmin: boolean }) {
   const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "data", "predictions"] : ["events", "targets"], [isAdmin]);
   const [tab, setTab] = useState<AdminTab>("events");
   useEffect(() => { if (!allowedTabs.includes(tab)) setTab("events"); }, [allowedTabs, tab]);
-  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", data: "업로드·감사", predictions: "예측 이력 관리" };
+  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", data: "데이터·동기화", predictions: "예측·모델 운영" };
 
   return <section className="screen-stack">
     {!isAdmin && <div className="permission-banner"><ShieldAlert size={21}/><div><strong>조회 사용자 모드</strong><p>이벤트와 절감 목표는 열람만 가능하며 모든 변경 작업은 서버에서 차단됩니다.</p></div></div>}

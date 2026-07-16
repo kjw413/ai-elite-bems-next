@@ -377,6 +377,47 @@ class ServerHelperTests(unittest.TestCase):
     def test_local_env_file_exists_for_standalone_run(self) -> None:
         self.assertTrue((server.LOCAL_CORE_ROOT / ".env").exists())
 
+    def test_sync_run_rejects_viewer_before_loading_services(self) -> None:
+        payload = server.SyncRunRequest(force=True)
+        with (
+            patch.object(server, "client_is_admin", return_value=False),
+            patch.object(server, "import_core") as import_core,
+            self.assertRaises(server.HTTPException) as raised,
+        ):
+            server.sync_run(payload, self._request("POST"))
+        self.assertEqual(raised.exception.status_code, 403)
+        import_core.assert_not_called()
+
+    def test_retrain_lock_conflict_maps_to_409(self) -> None:
+        service = SimpleNamespace(
+            trigger_v5_retrain=lambda trigger_mode: {"started": False, "message": "이미 학습 작업이 실행 중입니다."},
+        )
+        with (
+            patch.object(server, "client_is_admin", return_value=True),
+            patch.object(server, "import_core", return_value=service),
+            self.assertRaises(server.HTTPException) as raised,
+        ):
+            server.trigger_retrain(self._request("POST"))
+        self.assertEqual(raised.exception.status_code, 409)
+
+    def test_manual_sync_runs_both_sources_and_records_state(self) -> None:
+        energy_service = SimpleNamespace(
+            force_resync=Mock(return_value={"inserted": 6, "updated": 0}),
+            auto_sync_once=Mock(return_value={"inserted": 0, "updated": 0}),
+        )
+        production_service = SimpleNamespace(
+            auto_sync_production_once=Mock(return_value={"status": "unchanged"}),
+        )
+        with patch.object(
+            server, "import_core", side_effect=[energy_service, production_service],
+        ):
+            result = server.run_excel_sync(force=True)
+        energy_service.force_resync.assert_called_once()
+        energy_service.auto_sync_once.assert_not_called()
+        production_service.auto_sync_production_once.assert_called_once_with(force=True)
+        self.assertEqual(result["energy"], {"inserted": 6, "updated": 0})
+        self.assertIsNotNone(server._scheduler_state["lastRunAt"])
+
 
 if __name__ == "__main__":
     unittest.main()

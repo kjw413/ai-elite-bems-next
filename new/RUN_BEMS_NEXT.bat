@@ -47,7 +47,10 @@ echo [NOTICE] BEMS API already running on :8000 - skipping.
 goto api_ready
 
 :start_api
-start "BEMS API :8000" "%~dp0.venv\Scripts\python.exe" -B -m uvicorn backend.server:app --host 0.0.0.0 --port 8000
+if not exist "logs" mkdir "logs"
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set "TODAY=%%i"
+echo [BEMS] API log: logs\api_%TODAY%.log
+start "BEMS API :8000" cmd /c ""%~dp0.venv\Scripts\python.exe" -B -m uvicorn backend.server:app --host 0.0.0.0 --port 8000 >> "%~dp0logs\api_%TODAY%.log" 2>&1"
 set /a API_TRIES=0
 :wait_api
 curl.exe --fail --silent http://127.0.0.1:8000/api/v1/session >nul 2>&1
