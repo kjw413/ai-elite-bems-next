@@ -57,14 +57,11 @@
 }
 
 /* ── 2026-07-17 기능 격차 반영: 7일 방향 비교·메일 발송·전년대비 테이블 ── */
-:root{--chart-wastewater:#a21caf}
-:root[data-theme="dark"]{--chart-wastewater:#c026d3}
-.mail-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;margin-bottom:18px}
-.mail-bar .segmented{margin-bottom:0}
-.mail-bar-title{display:flex;align-items:center;gap:8px;color:var(--text)}
-.mail-bar-title b{font-size:13px}
-.mail-bar-title small{color:var(--muted);font-size:11px}
-.mail-bar .form-message{flex-basis:100%;margin:0}
+/* 생산량·에너지원 상징색 (2026-07-18 사용자 지정: 생산 연노랑, 전력 진노랑~주황,
+   연료 빨강, 용수 하늘색, 폐수 회색 — 생산색은 legacy 메일 리포트와 동일 #a4d65e).
+   전력은 사용자 지정 범위 안에서 주황(#f97316)으로 확정 — 라임과의 CVD 분리 확보. */
+:root{--chart-production:#a4d65e;--chart-power:#f97316;--chart-fuel:#dc2626;--chart-water:#0ea5e9;--chart-wastewater:#6b7280}
+:root[data-theme="dark"]{--chart-production:#a4d65e;--chart-power:#f97316;--chart-fuel:#ef4444;--chart-water:#38bdf8;--chart-wastewater:#9ca3af}
 .quad-caption{margin:0 0 14px;font-size:12px;color:var(--muted)}
 .quad-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 @media(max-width:960px){.quad-grid{grid-template-columns:1fr}}
@@ -86,7 +83,6 @@
 .yoy-table td.good{color:var(--blue);font-weight:600}
 .yoy-table td.bad{color:var(--red);font-weight:600}
 .yoy-table .total-row td{font-weight:700;border-top:2px solid var(--line);background:var(--soft,#f1f5fb)}
-@media print{.mail-bar{display:none!important}}
 
 /* ── 2026-07-17 P1: 월간 주요 이슈·전년비 3모드·변수 영향도 ── */
 .issues-card .issue-row{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:8px}

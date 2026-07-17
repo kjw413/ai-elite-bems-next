@@ -11,13 +11,13 @@ type AnyData = Record<string, any>;
 // 사용량을 한 축에서 비교하기 위해 — 이중축 금지 원칙), 생산량과 사용량의
 // 증감 방향이 반대로 움직인 날짜를 신호 마커로 강조한다.
 const usageMetrics = [
-  { key: "actual", label: "전력 사용량", unit: "MWh", color: "var(--chart-amber)", icon: "⚡" },
-  { key: "fuel", label: "연료 사용량", unit: "Nm³", color: "var(--chart-predicted)", icon: "🔥" },
-  { key: "water", label: "용수 사용량", unit: "ton", color: "var(--chart-actual)", icon: "💧" },
+  { key: "actual", label: "전력 사용량", unit: "MWh", color: "var(--chart-power)", icon: "⚡" },
+  { key: "fuel", label: "연료 사용량", unit: "Nm³", color: "var(--chart-fuel)", icon: "🔥" },
+  { key: "water", label: "용수 사용량", unit: "ton", color: "var(--chart-water)", icon: "💧" },
   { key: "wastewater", label: "폐수 사용량", unit: "ton", color: "var(--chart-wastewater)", icon: "🚿" },
 ] as const;
 
-const PROD_COLOR = "var(--chart-target)";
+const PROD_COLOR = "var(--chart-production)";
 const GOOD_COLOR = "var(--blue)";
 const WARN_COLOR = "var(--red)";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, CloudSun, Database, FolderSync, History, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
+import { BrainCircuit, CloudSun, Database, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
 import { apiRequest, isAbortError, query } from "@/lib/bems-api";
 import { factories } from "@/lib/bems-data";
 
@@ -241,6 +241,52 @@ function TargetsPanel({ factory, date, isAdmin }: { factory: string; date: strin
   </div>;
 }
 
+const mailPeriods = [
+  { id: "daily", label: "일간" },
+  { id: "weekly", label: "주간" },
+  { id: "monthly", label: "월간" },
+] as const;
+type MailPeriod = (typeof mailPeriods)[number]["id"];
+
+// legacy 대시보드 '📧 메일 송부'의 이식 — 관리자 전용 탭에만 배치되어 viewer에게는
+// 노출되지 않으며, 서버(/mail/send)에서도 관리자 IP를 재검사한다.
+function MailCard({ date }: { date: string }) {
+  const [period, setPeriod] = useState<MailPeriod>("daily");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const help: Record<MailPeriod, string> = {
+    daily: `기준일 ${date} 원단위 상세 · 즉시 점검 대상`,
+    weekly: "직전 완결 주 (월~일, 전주비)",
+    monthly: "직전 완결 월 (전년 동월비·YTD)",
+  };
+  async function send() {
+    if (sending) return;
+    const label = mailPeriods.find(item => item.id === period)?.label ?? period;
+    if (!window.confirm(`${label} 에너지 리포트를 .env에 설정된 수신자에게 즉시 발송합니다. 계속하시겠습니까?`)) return;
+    setSending(true); setError(""); setNotice("");
+    try {
+      const result = await apiRequest<{ label: string; refDate: string; recordCount: number; to: string[] }>("/mail/send", {
+        method: "POST",
+        body: JSON.stringify({ period, ...(period === "daily" ? { date } : {}) }),
+      });
+      setNotice(`${result.label} 메일 발송 완료 · 기준 ${result.refDate} · 공장 ${result.recordCount}개 · 수신 ${result.to.join(", ")}`);
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    } finally {
+      setSending(false);
+    }
+  }
+  return <article className="card admin-form">
+    <header><div><span className="eyebrow">MAIL REPORT</span><h3>에너지 리포트 메일 발송</h3></div><Mail size={22}/></header>
+    <p className="panel-copy">tools/mail 파이프라인으로 HTML 리포트를 생성해 .env의 MAIL_RECIPIENTS에게 즉시 발송합니다. {help[period]}</p>
+    <div className="segmented" role="group" aria-label="메일 발송 주기">{mailPeriods.map(item => <button type="button" key={item.id} className={period === item.id ? "active" : ""} aria-pressed={period === item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>
+    {error && <div className="form-message error">{error}</div>}
+    {notice && <div className="form-message success">{notice}</div>}
+    <button type="button" className="primary-button" disabled={sending} onClick={() => void send()}><Mail size={16}/>{sending ? "발송 중..." : "발송"}</button>
+  </article>;
+}
+
 type UploadPreview = {
   success: boolean;
   message: string;
@@ -256,7 +302,7 @@ type SyncStatus = {
   production: AnyRow;
 };
 
-function DataPanel() {
+function DataPanel({ date }: { date: string }) {
   const [audit, setAudit] = useState<{ changes: AnyRow[]; uploads: AnyRow[] }>({ changes: [], uploads: [] });
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -392,6 +438,7 @@ function DataPanel() {
       {preview.success && <div className="table-wrap"><table><thead><tr><th>공장</th><th>기간</th><th>일자 수</th><th>신규</th><th>덮어쓰기</th></tr></thead><tbody>{preview.summary.map((row, index) => <tr key={index}><td>{display(row["공장"])}</td><td>{display(row["기간"])}</td><td>{display(row["일자 수"])}</td><td>{display(row["신규"])}</td><td>{display(row["덮어쓰기"])}</td></tr>)}</tbody></table></div>}
       {preview.errors.length > 0 && <div className="table-wrap"><table><thead><tr><th>시트</th><th>행</th><th>컬럼</th><th>사유</th><th>값</th></tr></thead><tbody>{preview.errors.slice(0, 50).map((row, index) => <tr key={index}><td>{display(row["시트"])}</td><td>{display(row["행"])}</td><td>{display(row["컬럼"])}</td><td>{display(row["사유"])}</td><td>{display(row["값"])}</td></tr>)}</tbody></table>{preview.errors.length > 50 && <div className="empty-row">외 {preview.errors.length - 50}건의 오류가 더 있습니다.</div>}</div>}
     </article>}
+    <MailCard date={date}/>
     <div className="admin-grid equal">
       <article className="card admin-list"><header className="panel-header"><div><span className="eyebrow">UPLOAD HISTORY</span><h3>최근 업로드</h3></div><button type="button" className="secondary-button" onClick={() => void load()}><RefreshCw size={15}/></button></header>{loading ? <div className="loading inline-loading"><RefreshCw className="spin"/></div> : <div className="table-wrap"><table><thead><tr><th>파일</th><th>일시</th><th>행</th><th>상태</th></tr></thead><tbody>{audit.uploads.map((row, index) => <tr key={String(row.id ?? index)}><td>{display(row.filename)}</td><td>{display(row.uploadedAt)}</td><td>{display(row.rows)}</td><td>{display(row.status)}</td></tr>)}</tbody></table></div>}</article>
       <article className="card admin-list"><header className="panel-header"><div><span className="eyebrow">AUDIT LOG</span><h3>최근 데이터 변경</h3></div><History size={20}/></header>{loading ? <div className="loading inline-loading"><RefreshCw className="spin"/></div> : <div className="table-wrap"><table><thead><tr><th>일시</th><th>공장</th><th>필드</th><th>이전</th><th>변경</th></tr></thead><tbody>{audit.changes.map((row, index) => <tr key={String(row.id ?? index)}><td>{display(row.time)}</td><td>{display(row.factory)}</td><td>{display(row.field)}</td><td>{display(row.before)}</td><td>{display(row.after)}</td></tr>)}</tbody></table></div>}</article>
@@ -585,7 +632,7 @@ export function AdminScreen({ factory, date, isAdmin }: { factory: string; date:
     <div className="admin-tabs" role="tablist">{allowedTabs.map(item => <button type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{labels[item]}</button>)}</div>
     {tab === "events" && <EventsPanel factory={factory} date={date} isAdmin={isAdmin}/>}
     {tab === "targets" && <TargetsPanel factory={factory} date={date} isAdmin={isAdmin}/>}
-    {tab === "data" && isAdmin && <DataPanel/>}
+    {tab === "data" && isAdmin && <DataPanel date={date}/>}
     {tab === "predictions" && isAdmin && <PredictionOpsPanel factory={factory} date={date}/>}
   </section>;
 }

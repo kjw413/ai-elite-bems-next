@@ -18,19 +18,19 @@ const yoyModes: { id: YoyMode; label: string }[] = [
 
 type MetricDef = { key: string; label: string; unit: string; color: string };
 const intensityDefs: MetricDef[] = [
-  { key: "power", label: "전력 원단위", unit: "kWh/ton", color: "var(--chart-amber)" },
-  { key: "fuel", label: "연료 원단위", unit: "Nm³/ton", color: "var(--chart-predicted)" },
-  { key: "water", label: "용수 원단위", unit: "ton/ton", color: "var(--chart-actual)" },
+  { key: "power", label: "전력 원단위", unit: "kWh/ton", color: "var(--chart-power)" },
+  { key: "fuel", label: "연료 원단위", unit: "Nm³/ton", color: "var(--chart-fuel)" },
+  { key: "water", label: "용수 원단위", unit: "ton/ton", color: "var(--chart-water)" },
   { key: "wwratio", label: "폐수/용수", unit: "비율", color: "var(--chart-wastewater)" },
 ];
 const usageDefs: MetricDef[] = [
-  { key: "power", label: "전력 사용량", unit: "MWh", color: "var(--chart-amber)" },
-  { key: "fuel", label: "연료 사용량", unit: "Nm³", color: "var(--chart-predicted)" },
-  { key: "water", label: "용수 사용량", unit: "ton", color: "var(--chart-actual)" },
+  { key: "power", label: "전력 사용량", unit: "MWh", color: "var(--chart-power)" },
+  { key: "fuel", label: "연료 사용량", unit: "Nm³", color: "var(--chart-fuel)" },
+  { key: "water", label: "용수 사용량", unit: "ton", color: "var(--chart-water)" },
   { key: "wastewater", label: "폐수 사용량", unit: "ton", color: "var(--chart-wastewater)" },
 ];
 const productionDefs: MetricDef[] = [
-  { key: "production", label: "생산량 (DB 실적)", unit: "ton", color: "var(--chart-target)" },
+  { key: "production", label: "생산량 (DB 실적)", unit: "ton", color: "var(--chart-production)" },
 ];
 
 const fmtNum = (value: number | null | undefined, digits = 2) =>

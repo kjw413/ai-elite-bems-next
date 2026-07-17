@@ -33,7 +33,7 @@ export const demo = {
     events: [{ id: 1, date: "07.14", factory: "남양주", tag: "정비", note: "냉동기 정기점검 완료" }, { id: 2, date: "07.12", factory: "김해", tag: "생산", note: "주말 증산 대응" }],
   },
   energy: {
-    mode: "recent", dateFrom: "2026-06-16", dateTo: "2026-07-15", yoyYear: 2026,
+    mode: "recent", dateFrom: "2026-07-01", dateTo: "2026-07-15", yoyYear: 2026,
     daily: Array.from({ length: 14 }, (_, i) => {
       const power = 170 + ((i * 17) % 42);
       const freezing = Math.round(power * 0.38 * 10) / 10;
@@ -60,9 +60,9 @@ export const demo = {
   },
   intensity: {
     metric: "power", unit: "kWh/ton", year: 2026, targetPct: 3,
-    mode: "recent", dateFrom: "2026-06-16", dateTo: "2026-07-15",
-    daily: Array.from({ length: 30 }, (_, i) => {
-      const day = new Date(Date.parse("2026-06-16T00:00:00") + i * 86_400_000);
+    mode: "recent", dateFrom: "2026-07-01", dateTo: "2026-07-15",
+    daily: Array.from({ length: 15 }, (_, i) => {
+      const day = new Date(Date.parse("2026-07-01T00:00:00") + i * 86_400_000);
       const weekend = day.getDay() === 0 || day.getDay() === 6;
       return { date: `${String(day.getMonth() + 1).padStart(2, "0")}.${String(day.getDate()).padStart(2, "0")}`,
         value: weekend ? null : Math.round((408 + 22 * Math.sin(i / 4) + (i % 5) * 3) * 100) / 100 };

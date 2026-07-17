@@ -392,9 +392,13 @@ ENERGY_YOY_METRICS = ("power", "fuel", "water", "wastewater")
 
 
 def resolve_energy_window(base: date, date_from: date | None, date_to: date | None) -> tuple[date, date]:
-    """에너지 사용량 일별 조회 구간 확정 — 기간 미지정 시 기준일 역산 30일."""
+    """에너지·원단위 일별 조회 구간 확정 — 기간 미지정 시 당월 1일~기준일.
+
+    과거 '기준일 역산 30일' 방식은 31일인 달을 완결 조회해도 1일이 누락되는
+    결함이 있어 월 단위 시맨틱으로 변경했다 (2026-07-18).
+    """
     if date_from is None and date_to is None:
-        return base - timedelta(days=29), base
+        return base.replace(day=1), base
     if date_from is None or date_to is None:
         raise HTTPException(status_code=400, detail="date_from과 date_to는 함께 지정해야 합니다.")
     if date_from > date_to:
@@ -1261,8 +1265,9 @@ def production(
                 "cumActual": round(cum_actual, 1) if month <= last_actual_month else None,
             })
     else:
-        window = daily if mode == "range" else daily[-14:]
-        for row in window:
+        # 월별·기간별 모두 기간 전체를 그대로 반환한다 — 과거 [-14:] 절단은
+        # 월초 일자가 누락되는 결함이었음 (2026-07-18 수정).
+        for row in daily:
             row_date = normalize_date(row.get("date"))
             if row_date is None:
                 continue

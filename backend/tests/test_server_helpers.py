@@ -537,12 +537,42 @@ class ServerHelperTests(unittest.TestCase):
         self.assertIsNone(burnup[3]["cumActual"])
         self.assertIsNone(burnup[11]["cumActual"])
 
-    def test_energy_window_defaults_to_recent_30_days(self) -> None:
+    def test_energy_window_defaults_to_current_month(self) -> None:
         base = date(2026, 7, 15)
         self.assertEqual(
             server.resolve_energy_window(base, None, None),
-            (date(2026, 6, 16), base),
+            (date(2026, 7, 1), base),
         )
+        # 31일인 달을 말일 기준으로 조회하면 1일부터 말일까지 전부 포함된다
+        month_end = date(2026, 5, 31)
+        self.assertEqual(
+            server.resolve_energy_window(month_end, None, None),
+            (date(2026, 5, 1), month_end),
+        )
+
+    def test_production_month_mode_keeps_every_day_of_month(self) -> None:
+        period_from, period_to = server.resolve_production_period(
+            "month", date(2026, 5, 31), None, None,
+        )
+        self.assertEqual((period_from, period_to), (date(2026, 5, 1), date(2026, 5, 31)))
+        with (
+            patch.object(server, "fetch_one", side_effect=[
+                {"max_date": date(2026, 7, 15)},
+                {"actual": 310.0, "items": 3},
+                {"plan": 1200.0},
+            ]),
+            patch.object(server, "fetch_all", side_effect=[
+                [{"date": date(2026, 5, day), "IC": 10.0, "MY": 0, "FM": 0, "SN": 0, "ETC": 0}
+                 for day in range(1, 32)],                       # 일별 실적 31행
+                [{"name": "IC", "value": 310.0}],                # 제품 믹스
+                [{"name": "품목", "plan": 10.0, "actual": 9.0}], # 품목 순위
+            ]),
+        ):
+            result = server.production(factory="전사", requested_date=date(2026, 5, 31), mode="month")
+        # 과거 [-14:] 절단 결함 회귀 방지 — 31일 전부 반환돼야 한다
+        self.assertEqual(len(result["daily"]), 31)
+        self.assertEqual(result["daily"][0]["date"], "05.01")
+        self.assertEqual(result["daily"][30]["date"], "05.31")
 
     def test_energy_window_rejects_partial_or_reversed_range(self) -> None:
         base = date(2026, 7, 15)
