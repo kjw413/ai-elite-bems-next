@@ -2,11 +2,12 @@
 
 > 작성일: 2026-07-17 · 기준: 로컬 git 이력의 legacy 최종 스냅샷(`e1fef60~1`, "legacy로부터 완전 독립화 완완료" 직전 커밋) vs 현재 `main` 작업트리
 >
-> **비교 출처 참고**: 사용자가 지정한 GitHub `kjw413/ai-elite-bems-legacy` 저장소는
-> MCP 조회 결과 404(미존재 또는 접근 권한 없음)였다. origin(`AI-Elite-BEMS`)은
-> 현재 저장소(`ai-elite-bems-next`)로 개명된 상태라, legacy 코드의 유일한 기준은
-> **이 저장소 git 이력 안의 `legacy/` 폴더 최종본**이다. 본 문서는 그 스냅샷을
-> 전수 대조한 결과다. (스냅샷 추출: `git archive e1fef60~1 legacy`)
+> **비교 출처 참고**: 비교 기준은 이 저장소 git 이력 안의 `legacy/` 폴더 최종본이다
+> (스냅샷 추출: `git archive e1fef60~1 legacy`). 분석 당시 GitHub
+> `kjw413/ai-elite-bems-legacy`는 private라 MCP 조회가 404였으나, 2026-07-17
+> public 전환 후 클론·전체 diff로 대조한 결과 **로컬 스냅샷과 167개 파일 전부
+> 동일**함을 확인했다(차이 0건, 커밋 `6fa4da7` "bems-next로부터 완전 독립화 완료").
+> 따라서 본 격차표는 GitHub legacy 저장소 기준으로도 그대로 유효하다.
 
 ---
 
