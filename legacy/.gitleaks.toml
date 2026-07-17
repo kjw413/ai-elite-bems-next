@@ -1,7 +1,0 @@
-title = "AI-Elite Energy Dashboard secret scanning"
-
-[allowlist]
-description = "Template placeholders and documentation examples"
-regexes = [
-  '''(?i)(your|example|placeholder|dummy|changeme|<.*>)''',
-]
