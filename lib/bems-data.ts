@@ -12,19 +12,36 @@ export const demo = {
       { id: "production", label: "누계 생산량", value: 18420, unit: "ton", change: 4.6, tone: "emerald" },
     ],
     trend: [
-      { date: "07.09", actual: 191, predicted: 186, lower: 174, upper: 199 }, { date: "07.10", actual: 184, predicted: 188, lower: 175, upper: 201 },
-      { date: "07.11", actual: 201, predicted: 196, lower: 183, upper: 209 }, { date: "07.12", actual: 173, predicted: 178, lower: 166, upper: 190 },
-      { date: "07.13", actual: 169, predicted: 171, lower: 160, upper: 184 }, { date: "07.14", actual: 205, predicted: 199, lower: 186, upper: 213 },
-      { date: "07.15", actual: 198, predicted: 202, lower: 189, upper: 216 },
+      { date: "07.09", actual: 191, predicted: 186, lower: 174, upper: 199, production: 512, fuel: 1180, water: 1620, wastewater: 940 },
+      { date: "07.10", actual: 184, predicted: 188, lower: 175, upper: 201, production: 498, fuel: 1150, water: 1580, wastewater: 910 },
+      { date: "07.11", actual: 201, predicted: 196, lower: 183, upper: 209, production: 545, fuel: 1230, water: 1710, wastewater: 990 },
+      { date: "07.12", actual: 173, predicted: 178, lower: 166, upper: 190, production: 471, fuel: 1090, water: 1490, wastewater: 860 },
+      { date: "07.13", actual: 169, predicted: 171, lower: 160, upper: 184, production: 448, fuel: 1250, water: 1450, wastewater: 840 },
+      { date: "07.14", actual: 205, predicted: 199, lower: 186, upper: 213, production: 553, fuel: 1260, water: 1740, wastewater: 1010 },
+      { date: "07.15", actual: 198, predicted: 202, lower: 189, upper: 216, production: 536, fuel: 1210, water: 1690, wastewater: 980 },
     ],
     yoy: [{ month: "2월", current: 432, previous: 448 }, { month: "3월", current: 426, previous: 441 }, { month: "4월", current: 421, previous: 436 }, { month: "5월", current: 417, previous: 429 }, { month: "6월", current: 414, previous: 425 }, { month: "7월", current: 413, previous: 426 }],
     factoryComparison: [{ factory: "남양주", value: 398, change: -4.1 }, { factory: "김해", value: 424, change: -2.2 }, { factory: "광주", value: 437, change: 1.3 }, { factory: "논산", value: 409, change: -3.4 }, { factory: "경산", value: 402, change: -2.7 }],
     events: [{ id: 1, date: "07.14", factory: "남양주", tag: "정비", note: "냉동기 정기점검 완료" }, { id: 2, date: "07.12", factory: "김해", tag: "생산", note: "주말 증산 대응" }],
   },
   energy: {
+    mode: "recent", dateFrom: "2026-06-16", dateTo: "2026-07-15", yoyYear: 2026,
     daily: Array.from({ length: 14 }, (_, i) => ({ date: `07.${String(i + 2).padStart(2, "0")}`, power: 170 + ((i * 17) % 42), fuel: 18 + ((i * 3) % 9), water: 12 + ((i * 5) % 8), wastewater: 7 + ((i * 2) % 5) })),
     equipment: [{ name: "냉동", value: 38 }, { name: "공압", value: 17 }, { name: "생산설비·기타", value: 45 }],
     factories: [{ factory: "남양주", power: 920, fuel: 132, water: 86, wastewater: 48 }, { factory: "김해", power: 710, fuel: 104, water: 64, wastewater: 39 }, { factory: "광주", power: 540, fuel: 82, water: 51, wastewater: 31 }, { factory: "논산", power: 610, fuel: 91, water: 57, wastewater: 34 }, { factory: "경산", power: 430, fuel: 68, water: 43, wastewater: 26 }],
+    yoy: Array.from({ length: 12 }, (_, i) => {
+      const month = i + 1;
+      const hasCurrent = month <= 7;
+      const scale = 1 + 0.18 * Math.sin((month - 1) / 11 * Math.PI);
+      const round1 = (value: number) => Math.round(value * 10) / 10;
+      return {
+        month: `${month}월`,
+        power: { current: hasCurrent ? round1(5200 * scale) : null, previous: round1(5480 * scale) },
+        fuel: { current: hasCurrent ? round1(610 * scale) : null, previous: round1(648 * scale) },
+        water: { current: hasCurrent ? round1(420 * scale) : null, previous: round1(431 * scale) },
+        wastewater: { current: hasCurrent ? round1(245 * scale) : null, previous: round1(252 * scale) },
+      };
+    }),
   },
   intensity: {
     metric: "power", unit: "kWh/ton", year: 2026, targetPct: 3,

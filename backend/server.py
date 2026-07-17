@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger(__name__)
@@ -387,6 +387,51 @@ def resolve_production_period(
     return resolved_from, resolved_to
 
 
+ENERGY_RANGE_MAX_DAYS = 731
+ENERGY_YOY_METRICS = ("power", "fuel", "water", "wastewater")
+
+
+def resolve_energy_window(base: date, date_from: date | None, date_to: date | None) -> tuple[date, date]:
+    """에너지 사용량 일별 조회 구간 확정 — 기간 미지정 시 기준일 역산 30일."""
+    if date_from is None and date_to is None:
+        return base - timedelta(days=29), base
+    if date_from is None or date_to is None:
+        raise HTTPException(status_code=400, detail="date_from과 date_to는 함께 지정해야 합니다.")
+    if date_from > date_to:
+        raise HTTPException(status_code=400, detail="시작일은 종료일보다 늦을 수 없습니다.")
+    if (date_to - date_from).days > ENERGY_RANGE_MAX_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"조회 기간은 최대 {ENERGY_RANGE_MAX_DAYS}일까지 지정할 수 있습니다.",
+        )
+    return date_from, date_to
+
+
+def build_energy_yoy(rows: list[dict[str, Any]], year: int) -> list[dict[str, Any]]:
+    """금년 vs 전년 월별 사용량 비교 12행 구성.
+
+    legacy 사용량 통합의 '전년대비 분석'과 동일하게 1~12월 자리를 모두 만들고,
+    데이터가 없는 월은 None으로 남긴다(누계 계산에서 제외 가능하도록).
+    """
+    by_key: dict[tuple[int, int], dict[str, Any]] = {}
+    for row in rows:
+        by_key[(int(row["y"]), int(row["m"]))] = row
+    result: list[dict[str, Any]] = []
+    for month in range(1, 13):
+        entry: dict[str, Any] = {"month": f"{month}월"}
+        current = by_key.get((year, month))
+        previous = by_key.get((year - 1, month))
+        for metric in ENERGY_YOY_METRICS:
+            current_value = optional_scalar(current.get(metric)) if current else None
+            previous_value = optional_scalar(previous.get(metric)) if previous else None
+            entry[metric] = {
+                "current": round(current_value, 2) if current_value is not None else None,
+                "previous": round(previous_value, 2) if previous_value is not None else None,
+            }
+        result.append(entry)
+    return result
+
+
 def annual_elapsed_ratio(year: int, as_of: date) -> float:
     """연간 모드 경과율 (0.0~1.0). 연말 착지 예상·기대 누계 계산에 사용."""
     year_start = date(year, 1, 1)
@@ -687,7 +732,8 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
     clause, values = factory_clause(factory, "e.factory")
     trend_rows = fetch_all(
         """
-        SELECT e.date, SUM(e.total_power_kwh)/1000 actual
+        SELECT e.date, SUM(e.total_power_kwh)/1000 actual,
+               SUM(e.fuel_nm3) fuel, SUM(e.water_ton) water, SUM(e.wastewater_ton) wastewater
         FROM energy_daily e WHERE e.date BETWEEN %s AND %s
         """ + clause + " GROUP BY e.date ORDER BY e.date",
         (base - timedelta(days=6), base, *values),
@@ -720,6 +766,9 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
             "lower": round(lower, 2) if lower is not None else None,
             "upper": round(upper, 2) if upper is not None else None,
             "production": round(trend_production.get(row_date, 0.0) / 1000, 1),
+            "fuel": round(scalar(row.get("fuel")), 1),
+            "water": round(scalar(row.get("water")), 1),
+            "wastewater": round(scalar(row.get("wastewater")), 1),
         })
 
     yoy_clause, yoy_values = factory_clause(factory)
@@ -800,9 +849,16 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
 def energy(
     factory: str = "전사",
     requested_date: date | None = Query(None, alias="date"),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
 ) -> dict[str, Any]:
     max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
+    window_from, window_to = resolve_energy_window(base, date_from, date_to)
+    # 설비 구성·공장별 집계 범위: 기간 지정 시 그 기간, 기본은 기준월 1일~기준일(기존 동작).
+    ranged = date_from is not None
+    summary_from = window_from if ranged else base.replace(day=1)
+    summary_to = window_to if ranged else base
     clause, values = factory_clause(factory)
     rows = fetch_all(
         """
@@ -810,7 +866,7 @@ def energy(
                SUM(water_ton)/1000 water, SUM(wastewater_ton)/1000 wastewater
         FROM energy_daily WHERE date BETWEEN %s AND %s
         """ + clause + " GROUP BY date ORDER BY date",
-        (base - timedelta(days=29), base, *values),
+        (window_from, window_to, *values),
     )
     equipment = fetch_one(
         """
@@ -818,7 +874,7 @@ def energy(
                SUM(total_power_kwh) total_power
         FROM energy_daily WHERE date BETWEEN %s AND %s
         """ + clause,
-        (base.replace(day=1), base, *values),
+        (summary_from, summary_to, *values),
     ) or {}
     total = scalar(equipment.get("total_power"), 1) or 1
     freezing = scalar(equipment.get("freezing"))
@@ -835,7 +891,7 @@ def energy(
                SUM(water_ton)/1000 water, SUM(wastewater_ton)/1000 wastewater
         FROM energy_daily WHERE date BETWEEN %s AND %s GROUP BY factory ORDER BY factory
         """,
-        (base.replace(day=1), base),
+        (summary_from, summary_to),
     )
     combined: dict[str, dict[str, float | str]] = {}
     for row in factory_rows:
@@ -843,11 +899,25 @@ def energy(
         target = combined.setdefault(name, {"factory": name, "power": 0.0, "fuel": 0.0, "water": 0.0, "wastewater": 0.0})
         for key in ("power", "fuel", "water", "wastewater"):
             target[key] = scalar(target[key]) + scalar(row.get(key))
+    yoy_rows = fetch_all(
+        """
+        SELECT YEAR(date) y, MONTH(date) m,
+               SUM(total_power_kwh)/1000 power, SUM(fuel_nm3)/1000 fuel,
+               SUM(water_ton)/1000 water, SUM(wastewater_ton)/1000 wastewater
+        FROM energy_daily WHERE date BETWEEN %s AND %s
+        """ + clause + " GROUP BY y, m ORDER BY y, m",
+        (date(base.year - 1, 1, 1), date(base.year, 12, 31), *values),
+    )
     return json_safe({
         "baseDate": base,
+        "mode": "range" if ranged else "recent",
+        "dateFrom": window_from,
+        "dateTo": window_to,
         "daily": [{**row, "date": row["date"].strftime("%m.%d")} for row in rows],
         "equipment": equipment_rows,
         "factories": list(combined.values()),
+        "yoyYear": base.year,
+        "yoy": build_energy_yoy(yoy_rows, base.year),
     })
 
 
@@ -1649,3 +1719,66 @@ def generate_report(payload: ReportRequest, request: Request) -> dict[str, Any]:
     if not report_service.save_report(payload.factory, payload.year, payload.month, content):
         raise HTTPException(status_code=500, detail="보고서 DB 저장에 실패했습니다.")
     return {"updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"), "content": content}
+
+
+MAIL_PERIOD_LABELS = {"daily": "일간", "weekly": "주간", "monthly": "월간"}
+
+
+def normalize_mail_period(value: str) -> str:
+    period = (value or "").strip().lower()
+    if period not in MAIL_PERIOD_LABELS:
+        raise HTTPException(status_code=400, detail="period는 daily·weekly·monthly 중 하나여야 합니다.")
+    return period
+
+
+class MailSendRequest(BaseModel):
+    period: str
+    # 필드명을 date로 두면 클래스 본문에서 datetime.date 타입을 가려 애너테이션
+    # 평가가 깨진다 — 내부 이름은 ref_date, 요청 본문 키는 alias "date"를 유지.
+    ref_date: date | None = Field(default=None, alias="date")
+
+
+@app.post("/api/v1/mail/send")
+def send_mail_report(payload: MailSendRequest, request: Request) -> dict[str, Any]:
+    """에너지 리포트 메일 즉시 발송 (관리자 전용).
+
+    legacy 대시보드의 '📧 메일 송부'와 동일하게 tools/mail CLI 빌더·발송
+    파이프라인을 재사용한다. 일간은 기준일(미지정 시 근무일 D-1 규칙),
+    주간·월간은 직전 완결 주·월이 대상이다.
+    """
+    require_admin(request)
+    period = normalize_mail_period(payload.period)
+    mail_config = import_core("tools.mail.config")
+    config = mail_config.get_mail_config()
+    if not config.is_valid:
+        raise HTTPException(
+            status_code=503,
+            detail="메일 설정이 비어 있습니다. .env 항목을 확인하세요: " + ", ".join(config.missing_keys()),
+        )
+    mail_service = import_core("tools.mail.mail_service")
+    try:
+        if period == "weekly":
+            report = import_core("tools.mail.period_report_builder").build_weekly_report()
+        elif period == "monthly":
+            report = import_core("tools.mail.period_report_builder").build_monthly_report()
+        else:
+            report = import_core("tools.mail.daily_report_builder").build_daily_report(ref_date=payload.ref_date)
+        message = mail_service.MailMessage(
+            subject=report.subject,
+            html_body=report.html,
+            inline_images=report.inline_images,
+        )
+        result = mail_service.send_mail(message, config)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Mail report build/send failed (period=%s).", period, exc_info=True)
+        raise HTTPException(status_code=502, detail="메일 발송에 실패했습니다. 서버 로그를 확인하세요.") from exc
+    recipients = result.get("to") if isinstance(result, dict) else None
+    return json_safe({
+        "period": period,
+        "label": MAIL_PERIOD_LABELS[period],
+        "refDate": report.ref_date,
+        "recordCount": report.record_count,
+        "to": recipients or config.recipients,
+    })

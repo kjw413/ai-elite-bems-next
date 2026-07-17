@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, BarChart3, Bolt, BrainCircuit, Building2, CalendarDays, ChevronRight, Database, Download, Factory, FileText, Gauge, Menu, Moon, PackageCheck, RefreshCw, Settings, ShieldCheck, Sun, X } from "lucide-react";
+import { Activity, BarChart3, Bolt, BrainCircuit, Building2, CalendarDays, ChevronRight, Database, Download, Factory, FileText, Gauge, Mail, Menu, Moon, PackageCheck, RefreshCw, Settings, ShieldCheck, Sun, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { apiGet, query } from "@/lib/bems-api";
+import { apiGet, apiRequest, query } from "@/lib/bems-api";
 import { downloadCsv } from "@/lib/bems-csv";
 import { demo, factories } from "@/lib/bems-data";
 import { AdminScreen } from "@/components/screens/admin-screen";
 import { PredictionHistory } from "@/components/screens/prediction-history";
 import { PredictionRunner } from "@/components/screens/prediction-runner";
 import { ReportScreen } from "@/components/screens/report-screen";
+import { SevenDayCompare } from "@/components/seven-day-compare";
 
 type Screen = "dashboard" | "energy" | "intensity" | "production" | "prediction" | "report" | "admin";
 type DataScreen = Exclude<Screen, "report" | "admin">;
@@ -94,23 +95,129 @@ function Kpi({ label, value, unit, change, goodWhen = "down", icon: Icon = Activ
   return <article className="kpi card"><div className="kpi-icon"><Icon size={20}/></div><div><p>{label}</p><strong>{fmt(value, digits)} <small>{unit}</small></strong>{change != null && <span className={isGood ? "good" : "bad"}>{change > 0 ? "+" : ""}{fmt(change)}% 전년비</span>}</div></article>;
 }
 
-function Dashboard({ data, factory, date }: { data: AnyData; factory: string; date: string }) {
+const mailPeriods = [
+  { id: "daily", label: "일간" },
+  { id: "weekly", label: "주간" },
+  { id: "monthly", label: "월간" },
+] as const;
+type MailPeriod = (typeof mailPeriods)[number]["id"];
+
+// legacy 대시보드 '📧 메일 송부'의 React 이식 — tools/mail 빌더·발송 파이프라인을
+// 백엔드 API로 재사용한다. 관리자(호스트 PC)에게만 노출된다.
+function MailPanel({ date }: { date: string }) {
+  const [period, setPeriod] = useState<MailPeriod>("daily");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const help: Record<MailPeriod, string> = {
+    daily: `기준일 ${date} 원단위 상세 · 즉시 점검 대상`,
+    weekly: "직전 완결 주 (월~일, 전주비)",
+    monthly: "직전 완결 월 (전년 동월비·YTD)",
+  };
+  async function send() {
+    if (sending) return;
+    const label = mailPeriods.find(item => item.id === period)?.label ?? period;
+    if (!window.confirm(`${label} 에너지 리포트를 .env에 설정된 수신자에게 즉시 발송합니다. 계속하시겠습니까?`)) return;
+    setSending(true); setError(""); setNotice("");
+    try {
+      const result = await apiRequest<{ label: string; refDate: string; recordCount: number; to: string[] }>("/mail/send", {
+        method: "POST",
+        body: JSON.stringify({ period, ...(period === "daily" ? { date } : {}) }),
+      });
+      setNotice(`${result.label} 메일 발송 완료 · 기준 ${result.refDate} · 공장 ${result.recordCount}개 · 수신 ${result.to.join(", ")}`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "메일 발송에 실패했습니다.");
+    } finally {
+      setSending(false);
+    }
+  }
+  return <section className="card mail-bar">
+    <div className="mail-bar-title"><Mail size={17}/><b>에너지 리포트 메일</b><small>{help[period]}</small></div>
+    <div className="segmented" role="group" aria-label="메일 발송 주기">{mailPeriods.map(item => <button type="button" key={item.id} className={period === item.id ? "active" : ""} aria-pressed={period === item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>
+    <button type="button" className="primary-button" disabled={sending} onClick={() => void send()}><Mail size={15}/>{sending ? "발송 중..." : "발송"}</button>
+    {error && <div className="form-message error">{error}</div>}
+    {notice && <div className="form-message success">{notice}</div>}
+  </section>;
+}
+
+function Dashboard({ data, factory, date, isAdmin }: { data: AnyData; factory: string; date: string; isAdmin: boolean }) {
   const trend = (data.trend ?? []).map((row: AnyData) => ({
     ...row,
     band: row.lower != null && row.upper != null ? [row.lower, row.upper] : null,
   }));
-  return <><section className="kpi-grid">{data.metrics?.map((m: AnyData) => <Kpi key={m.id} label={m.label} value={m.value} unit={m.unit} change={m.change} goodWhen={m.id === "production" ? "up" : "down"} icon={m.id === "production" ? Factory : Bolt}/>)}</section>
+  return <>{isAdmin && <MailPanel date={date}/>}
+    <section className="kpi-grid">{data.metrics?.map((m: AnyData) => <Kpi key={m.id} label={m.label} value={m.value} unit={m.unit} change={m.change} goodWhen={m.id === "production" ? "up" : "down"} icon={m.id === "production" ? Factory : Bolt}/>)}</section>
     <section className={`alert ${data.alert?.level ?? "normal"}`}><BrainCircuit size={22}/><div><strong>{data.alert?.title}</strong><p>{data.alert?.description}</p></div></section>
     <section className="content-grid"><article className="card chart-card wide"><CardTitle title="최근 7일 전력 사용량" meta="MWh · AI P05~P95 정상범주"><CsvButton filename={`7day_trend_${factory}_${date}`} rows={data.trend} columns={["date","actual","predicted","lower","upper"]} labels={{date:"일자",actual:"실제(MWh)",predicted:"AI 예측(MWh)",lower:"P05(MWh)",upper:"P95(MWh)"}}/></CardTitle><Chart><AreaChart data={trend}><defs><linearGradient id="band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={palette.band} stopOpacity={.22}/><stop offset="1" stopColor={palette.band} stopOpacity={.02}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Area type="monotone" dataKey="band" name="P05~P95" stroke="none" fill="url(#band)" connectNulls={false}/><Line type="monotone" dataKey="predicted" name="AI 예측" stroke={palette.predicted} strokeDasharray="5 4" strokeWidth={2}/><Line type="monotone" dataKey="actual" name="실제" stroke={palette.actual} strokeWidth={3}/></AreaChart></Chart></article>
     <article className="card chart-card"><CardTitle title="공장별 전력 원단위" meta="낮을수록 효율적"/><Chart><BarChart data={data.factoryComparison} layout="vertical"><CartesianGrid strokeDasharray="3 3"/><XAxis type="number"/><YAxis dataKey="factory" type="category" width={58}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="value" name="kWh/ton" fill={palette.target} radius={[0,6,6,0]}/></BarChart></Chart></article>
     <article className="card chart-card"><CardTitle title="월별 전년 비교" meta="kWh/ton"><CsvButton filename={`yoy_power_${factory}_${date}`} rows={data.yoy} columns={["month","previous","current"]} labels={{month:"월","previous":"전년(kWh/ton)",current:"금년(kWh/ton)"}}/></CardTitle><Chart><LineChart data={data.yoy}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Line dataKey="previous" name="전년" stroke={palette.previous}/><Line dataKey="current" name="금년" stroke={palette.actual} strokeWidth={3}/></LineChart></Chart></article>
-    <article className="card events"><CardTitle title="최근 현장 이벤트" meta={`${data.events?.length ?? 0}건`}/>{data.events?.map((event: AnyData) => <div className="event" key={event.id}><time>{event.date}</time><span>{event.factory}</span><div><b>{event.tag}</b><p>{event.note}</p></div></div>)}</article></section></>;
+    <article className="card events"><CardTitle title="최근 현장 이벤트" meta={`${data.events?.length ?? 0}건`}/>{data.events?.map((event: AnyData) => <div className="event" key={event.id}><time>{event.date}</time><span>{event.factory}</span><div><b>{event.tag}</b><p>{event.note}</p></div></div>)}</article>
+    <SevenDayCompare trend={data.trend ?? []} factory={factory} date={date}/></section></>;
 }
 
-function Energy({ data }: { data: AnyData }) {
+type EnergyMode = "recent" | "range";
+const energyModes: { id: EnergyMode; label: string }[] = [
+  { id: "recent", label: "최근 30일" },
+  { id: "range", label: "기간 지정" },
+];
+const energyMetricLabels: Record<string, string> = { power: "전력", fuel: "연료", water: "용수", wastewater: "폐수" };
+
+// legacy '전년대비 사용량' 누계 테이블 — 월별 금년/전년/증감량/증감률에 누계 행을 더한다.
+function buildYoyTable(yoy: AnyData[], metric: string) {
+  const rows = (yoy ?? []).map(row => {
+    const current = row[metric]?.current ?? null;
+    const previous = row[metric]?.previous ?? null;
+    const diff = current != null && previous != null ? current - previous : null;
+    const diffPct = diff != null && previous > 0 ? (diff / previous) * 100 : null;
+    return { month: row.month as string, previous, current, diff, diffPct };
+  });
+  // 누계는 금년 실적이 있는 월까지만 전년과 같은 기간으로 합산한다 —
+  // 전년 전체(12개월) vs 금년 일부를 비교하면 증감률이 왜곡되기 때문.
+  const compared = rows.filter(row => row.current != null);
+  const basis = compared.length ? compared : rows.filter(row => row.previous != null);
+  const sum = (key: "previous" | "current") => basis.reduce((acc, row) => acc + (row[key] ?? 0), 0);
+  const sumPrev = sum("previous");
+  const sumCurr = sum("current");
+  const total = basis.length ? {
+    month: compared.length ? `누계 (1~${compared[compared.length - 1].month})` : "누계",
+    previous: sumPrev,
+    current: compared.length ? sumCurr : null,
+    diff: compared.length ? sumCurr - sumPrev : null,
+    diffPct: compared.length && sumPrev > 0 ? ((sumCurr - sumPrev) / sumPrev) * 100 : null,
+  } : null;
+  return { rows, total };
+}
+
+function Energy({ data, mode, onModeChange, rangeFrom, rangeTo, onRangeChange }: {
+  data: AnyData; mode: EnergyMode; onModeChange: (mode: EnergyMode) => void;
+  rangeFrom: string; rangeTo: string; onRangeChange: (from: string, to: string) => void;
+}) {
   const [metric, setMetric] = useState("power"); const units: AnyData = { power: "MWh", fuel: "천 Nm³", water: "천 ton", wastewater: "천 ton" };
   const values = data.daily?.map((r: AnyData) => Number(r[metric]) || 0) ?? []; const total = values.reduce((a: number,b: number)=>a+b,0);
-  return <><div className="segmented" role="group" aria-label="에너지 지표 선택">{Object.entries({power:"전력",fuel:"연료",water:"용수",wastewater:"폐수"}).map(([id,label])=><button type="button" className={metric===id?"active":""} aria-pressed={metric===id} onClick={()=>setMetric(id)} key={id}>{label}</button>)}</div><section className="kpi-grid compact"><Kpi label="기간 누계" value={total} unit={units[metric]} icon={Bolt}/><Kpi label="일평균" value={values.length?total/values.length:0} unit={units[metric]} icon={Activity}/><Kpi label="최대 사용량" value={values.length?Math.max(...values):0} unit={units[metric]} icon={Gauge}/></section><section className="content-grid"><article className="card chart-card wide"><CardTitle title="일별 사용 추이" meta={units[metric]}><CsvButton filename={`energy_daily_${metric}`} rows={data.daily} columns={["date","power","fuel","water","wastewater"]} labels={{date:"일자",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><Chart><AreaChart data={data.daily}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Area type="monotone" dataKey={metric} stroke={palette.actual} strokeWidth={3} fill="var(--chart-area-fill)"/></AreaChart></Chart></article><article className="card list"><CardTitle title="설비 구성" meta="이번 달"/>{data.equipment?.map((r:AnyData)=><div className="progress" key={r.name}><div><span>{r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{width:`${r.value}%`}}/></i></div>)}</article><article className="card table-card wide"><CardTitle title="공장별 사용량" meta="이번 달 누계"><CsvButton filename="energy_factories" rows={data.factories} columns={["factory","power","fuel","water","wastewater"]} labels={{factory:"공장",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><DataTable rows={data.factories} columns={["factory",metric]} labels={{factory:"공장",[metric]:units[metric]}}/></article></section></>;
+  const periodLabel = data.dateFrom && data.dateTo ? `${data.dateFrom} ~ ${data.dateTo}` : "";
+  const summaryMeta = mode === "range" ? "선택 기간" : "이번 달";
+  const yoyTable = buildYoyTable(data.yoy ?? [], metric);
+  const yoyUnit = units[metric];
+  const yoyCsvRows = [...yoyTable.rows, ...(yoyTable.total ? [yoyTable.total] : [])].map(row => ({
+    month: row.month, previous: row.previous, current: row.current, diff: row.diff,
+    diffPct: row.diffPct == null ? null : Math.round(row.diffPct * 10) / 10,
+  }));
+  return <><div className="segmented" role="group" aria-label="에너지 지표 선택">{Object.entries(energyMetricLabels).map(([id,label])=><button type="button" className={metric===id?"active":""} aria-pressed={metric===id} onClick={()=>setMetric(id)} key={id}>{label}</button>)}</div>
+    <div className="mode-row">
+      <div className="segmented" role="group" aria-label="사용량 조회 방식">{energyModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
+      {mode === "range" && <div className="range-fields">
+        <label><span>시작일</span><input type="date" value={rangeFrom} max={rangeTo} onChange={event => onRangeChange(event.target.value, rangeTo)}/></label>
+        <label><span>종료일</span><input type="date" value={rangeTo} min={rangeFrom} onChange={event => onRangeChange(rangeFrom, event.target.value)}/></label>
+      </div>}
+      {periodLabel && <span className="period-chip">{periodLabel}</span>}
+    </div>
+    <section className="kpi-grid compact"><Kpi label="기간 누계" value={total} unit={units[metric]} icon={Bolt}/><Kpi label="일평균" value={values.length?total/values.length:0} unit={units[metric]} icon={Activity}/><Kpi label="최대 사용량" value={values.length?Math.max(...values):0} unit={units[metric]} icon={Gauge}/></section><section className="content-grid"><article className="card chart-card wide"><CardTitle title="일별 사용 추이" meta={units[metric]}><CsvButton filename={`energy_daily_${metric}`} rows={data.daily} columns={["date","power","fuel","water","wastewater"]} labels={{date:"일자",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><Chart><AreaChart data={data.daily}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Area type="monotone" dataKey={metric} stroke={palette.actual} strokeWidth={3} fill="var(--chart-area-fill)"/></AreaChart></Chart></article><article className="card list"><CardTitle title="설비 구성" meta={summaryMeta}/>{data.equipment?.map((r:AnyData)=><div className="progress" key={r.name}><div><span>{r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{width:`${r.value}%`}}/></i></div>)}</article>
+    <article className="card chart-card wide"><CardTitle title={`전년대비 ${energyMetricLabels[metric]} 사용량`} meta={`${data.yoyYear ?? ""}년 vs 전년 · ${yoyUnit}`}><CsvButton filename={`energy_yoy_${metric}_${data.yoyYear ?? ""}`} rows={yoyCsvRows} columns={["month","previous","current","diff","diffPct"]} labels={{month:"월",previous:`전년(${yoyUnit})`,current:`금년(${yoyUnit})`,diff:`증감량(${yoyUnit})`,diffPct:"증감률(%)"}}/></CardTitle><Chart><BarChart data={yoyTable.rows}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Bar dataKey="previous" name="전년" fill={palette.previous} radius={[4,4,0,0]}/><Bar dataKey="current" name="금년" fill={palette.actual} radius={[4,4,0,0]}/></BarChart></Chart>
+      <div className="table-wrap yoy-table"><table><thead><tr><th>월</th><th>전년 실적</th><th>금년 실적</th><th>증감량</th><th>증감률(%)</th></tr></thead><tbody>
+        {yoyTable.rows.map(row => <tr key={row.month}><td>{row.month}</td><td>{row.previous == null ? "-" : fmt(row.previous)}</td><td>{row.current == null ? "-" : fmt(row.current)}</td><td>{row.diff == null ? "-" : fmt(row.diff)}</td><td className={row.diffPct == null ? "" : row.diffPct > 0 ? "bad" : "good"}>{row.diffPct == null ? "-" : `${row.diffPct > 0 ? "+" : ""}${fmt(row.diffPct)}`}</td></tr>)}
+        {yoyTable.total && <tr className="total-row"><td>{yoyTable.total.month}</td><td>{fmt(yoyTable.total.previous)}</td><td>{fmt(yoyTable.total.current)}</td><td>{fmt(yoyTable.total.diff)}</td><td className={yoyTable.total.diffPct == null ? "" : yoyTable.total.diffPct > 0 ? "bad" : "good"}>{yoyTable.total.diffPct == null ? "-" : `${yoyTable.total.diffPct > 0 ? "+" : ""}${fmt(yoyTable.total.diffPct)}`}</td></tr>}
+      </tbody></table></div></article>
+    <article className="card table-card wide"><CardTitle title="공장별 사용량" meta={`${summaryMeta} 누계`}><CsvButton filename="energy_factories" rows={data.factories} columns={["factory","power","fuel","water","wastewater"]} labels={{factory:"공장",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><DataTable rows={data.factories} columns={["factory",metric]} labels={{factory:"공장",[metric]:units[metric]}}/></article></section></>;
 }
 
 function Intensity({ data, metric, onMetricChange }: { data: AnyData; metric: IntensityMetric; onMetricChange: (metric: IntensityMetric) => void }) {
@@ -179,6 +286,12 @@ export function BemsApp() {
     const from=new Date(Date.parse(`${today}T00:00:00`)-30*86_400_000);
     return {from:`${from.getFullYear()}-${String(from.getMonth()+1).padStart(2,"0")}-${String(from.getDate()).padStart(2,"0")}`,to:today};
   });
+  const [energyMode,setEnergyMode]=useState<EnergyMode>("recent");
+  const [energyRange,setEnergyRange]=useState<{from:string;to:string}>(()=>{
+    const today=localToday();
+    const from=new Date(Date.parse(`${today}T00:00:00`)-30*86_400_000);
+    return {from:`${from.getFullYear()}-${String(from.getMonth()+1).padStart(2,"0")}-${String(from.getDate()).padStart(2,"0")}`,to:today};
+  });
   const [data,setData]=useState<AnyData>(demo.dashboard), [session,setSession]=useState<AnyData>(demo.session), [sessionLive,setSessionLive]=useState(false), [live,setLive]=useState(false), [loading,setLoading]=useState(true);
   const fallback=useMemo(()=>{
     if (!isDataScreen(screen)) return {};
@@ -194,13 +307,14 @@ export function BemsApp() {
       factory,date,
       ...(screen==="intensity"?{metric:intensityMetric}:{}),
       ...(screen==="production"?{mode:productionMode,...(productionMode==="range"?{date_from:productionRange.from,date_to:productionRange.to}:{})}:{}),
+      ...(screen==="energy"&&energyMode==="range"?{date_from:energyRange.from,date_to:energyRange.to}:{}),
     });
     apiGet(`${endpoint[screen]}?${suffix}`,fallback,controller.signal).then(r=>{setData(r.data);setLive(r.live);setLoading(false)}).catch(()=>{});
     return()=>controller.abort();
-  },[screen,factory,date,intensityMetric,productionMode,productionRange,fallback]);
+  },[screen,factory,date,intensityMetric,productionMode,productionRange,energyMode,energyRange,fallback]);
   const [title,subtitle]=titles[screen];
   const statusLive=isDataScreen(screen)?live:sessionLive;
   const statusTitle=isDataScreen(screen)?(live?"Local DB":"예시 데이터"):(sessionLive?"BEMS API":"API 연결 실패");
   const statusDetail=isDataScreen(screen)?(live?"MySQL 연결됨":"API 연결 실패"):(sessionLive?"권한 확인됨":"세션 확인 실패");
-  return <div className="app-shell"><aside className={mobile?"open":""} aria-label="주 메뉴"><div className="brand"><div><Bolt size={21}/></div><span>AI ELITE<strong>BEMS NEXT</strong></span><button type="button" className="close" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}><X/></button></div><nav>{menus.map(item=>{const Icon=item.icon;return <button type="button" key={item.id} className={screen===item.id?"active":""} aria-current={screen===item.id?"page":undefined} onClick={()=>{setScreen(item.id);setMobile(false)}}><Icon size={19}/><span>{item.label}</span><ChevronRight size={15}/></button>})}</nav><div className="side-status" role="status" aria-live="polite"><Database size={17}/><div><b>{statusTitle}</b><span>{statusDetail}</span></div><i className={statusLive?"on":""}/></div><footer>v1.0 · Internal Network</footer></aside>{mobile&&<button type="button" className="scrim" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}/>}<main><header className="topbar"><button type="button" className="menu" aria-label="메뉴 열기" onClick={()=>setMobile(true)}><Menu/></button><div className="heading"><h1>{title}</h1><p>{subtitle}</p></div><div className="filters"><label><Building2 size={16}/><select aria-label="공장 선택" value={factory} onChange={e=>setFactory(e.target.value)}>{factories.map(f=><option key={f}>{f}</option>)}</select></label><label><CalendarDays size={16}/><input type="date" aria-label="기준일 선택" value={date} onChange={e=>setDate(e.target.value)}/></label><button type="button" className="theme-toggle" aria-label="화면 테마 전환" title={theme==="dark"?"라이트 모드로 전환":"다크 모드로 전환"} onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}</button><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&isDataScreen(screen)&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>API 연결 실패 · 예시 데이터 표시 중</strong><p>현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다.</p></div></section>}{screen==="dashboard"&&<Dashboard data={data} factory={factory} date={date}/>} {screen==="energy"&&<Energy data={data}/>} {screen==="intensity"&&<Intensity data={data} metric={intensityMetric} onMetricChange={setIntensityMetric}/>} {screen==="production"&&<Production data={data} mode={productionMode} onModeChange={setProductionMode} rangeFrom={productionRange.from} rangeTo={productionRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setProductionRange({from:to,to}); } else { setProductionRange({from,to}); } }}/>} {screen==="prediction"&&<Prediction data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="report"&&<ReportScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="admin"&&<AdminScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>}</>}</div></main></div>;
+  return <div className="app-shell"><aside className={mobile?"open":""} aria-label="주 메뉴"><div className="brand"><div><Bolt size={21}/></div><span>AI ELITE<strong>BEMS NEXT</strong></span><button type="button" className="close" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}><X/></button></div><nav>{menus.map(item=>{const Icon=item.icon;return <button type="button" key={item.id} className={screen===item.id?"active":""} aria-current={screen===item.id?"page":undefined} onClick={()=>{setScreen(item.id);setMobile(false)}}><Icon size={19}/><span>{item.label}</span><ChevronRight size={15}/></button>})}</nav><div className="side-status" role="status" aria-live="polite"><Database size={17}/><div><b>{statusTitle}</b><span>{statusDetail}</span></div><i className={statusLive?"on":""}/></div><footer>v1.0 · Internal Network</footer></aside>{mobile&&<button type="button" className="scrim" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}/>}<main><header className="topbar"><button type="button" className="menu" aria-label="메뉴 열기" onClick={()=>setMobile(true)}><Menu/></button><div className="heading"><h1>{title}</h1><p>{subtitle}</p></div><div className="filters"><label><Building2 size={16}/><select aria-label="공장 선택" value={factory} onChange={e=>setFactory(e.target.value)}>{factories.map(f=><option key={f}>{f}</option>)}</select></label><label><CalendarDays size={16}/><input type="date" aria-label="기준일 선택" value={date} onChange={e=>setDate(e.target.value)}/></label><button type="button" className="theme-toggle" aria-label="화면 테마 전환" title={theme==="dark"?"라이트 모드로 전환":"다크 모드로 전환"} onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}</button><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&isDataScreen(screen)&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>API 연결 실패 · 예시 데이터 표시 중</strong><p>현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다.</p></div></section>}{screen==="dashboard"&&<Dashboard data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="energy"&&<Energy data={data} mode={energyMode} onModeChange={setEnergyMode} rangeFrom={energyRange.from} rangeTo={energyRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setEnergyRange({from:to,to}); } else { setEnergyRange({from,to}); } }}/>} {screen==="intensity"&&<Intensity data={data} metric={intensityMetric} onMetricChange={setIntensityMetric}/>} {screen==="production"&&<Production data={data} mode={productionMode} onModeChange={setProductionMode} rangeFrom={productionRange.from} rangeTo={productionRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setProductionRange({from:to,to}); } else { setProductionRange({from,to}); } }}/>} {screen==="prediction"&&<Prediction data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="report"&&<ReportScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="admin"&&<AdminScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>}</>}</div></main></div>;
 }

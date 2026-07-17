@@ -537,6 +537,100 @@ class ServerHelperTests(unittest.TestCase):
         self.assertIsNone(burnup[3]["cumActual"])
         self.assertIsNone(burnup[11]["cumActual"])
 
+    def test_energy_window_defaults_to_recent_30_days(self) -> None:
+        base = date(2026, 7, 15)
+        self.assertEqual(
+            server.resolve_energy_window(base, None, None),
+            (date(2026, 6, 16), base),
+        )
+
+    def test_energy_window_rejects_partial_or_reversed_range(self) -> None:
+        base = date(2026, 7, 15)
+        with self.assertRaises(server.HTTPException) as raised:
+            server.resolve_energy_window(base, date(2026, 7, 1), None)
+        self.assertEqual(raised.exception.status_code, 400)
+        with self.assertRaises(server.HTTPException) as raised:
+            server.resolve_energy_window(base, date(2026, 7, 10), date(2026, 7, 1))
+        self.assertEqual(raised.exception.status_code, 400)
+        with self.assertRaises(server.HTTPException) as raised:
+            server.resolve_energy_window(base, date(2023, 1, 1), date(2026, 7, 15))
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_energy_yoy_builds_12_months_with_missing_as_none(self) -> None:
+        rows = [
+            {"y": 2025, "m": 1, "power": 100.0, "fuel": 10.0, "water": 5.0, "wastewater": 2.0},
+            {"y": 2025, "m": 2, "power": 110.0, "fuel": 11.0, "water": 6.0, "wastewater": 2.5},
+            {"y": 2026, "m": 1, "power": 90.0, "fuel": 9.5, "water": 4.5, "wastewater": 1.8},
+        ]
+        yoy = server.build_energy_yoy(rows, 2026)
+        self.assertEqual(len(yoy), 12)
+        self.assertEqual(yoy[0]["month"], "1월")
+        self.assertEqual(yoy[0]["power"], {"current": 90.0, "previous": 100.0})
+        # 금년 2월 데이터 없음 → current None, 전년만 존재
+        self.assertEqual(yoy[1]["power"], {"current": None, "previous": 110.0})
+        # 양쪽 모두 없는 월은 전부 None
+        self.assertEqual(yoy[11]["power"], {"current": None, "previous": None})
+        self.assertEqual(yoy[0]["wastewater"], {"current": 1.8, "previous": 2.0})
+
+    def test_mail_period_normalization(self) -> None:
+        self.assertEqual(server.normalize_mail_period(" Daily "), "daily")
+        self.assertEqual(server.normalize_mail_period("weekly"), "weekly")
+        self.assertEqual(server.normalize_mail_period("MONTHLY"), "monthly")
+        for invalid in ("", "yearly", "매일", None):
+            with self.assertRaises(server.HTTPException) as raised:
+                server.normalize_mail_period(invalid)  # type: ignore[arg-type]
+            self.assertEqual(raised.exception.status_code, 400)
+
+    def test_mail_send_requires_admin_before_touching_mail_stack(self) -> None:
+        request = self._request(method="POST")
+        with patch.object(server, "import_core") as import_core:
+            with self.assertRaises(server.HTTPException) as raised:
+                server.send_mail_report(server.MailSendRequest(period="daily"), request)
+        self.assertEqual(raised.exception.status_code, 403)
+        import_core.assert_not_called()
+
+    def test_mail_send_reports_missing_configuration_keys(self) -> None:
+        request = self._request(method="POST")
+        config = SimpleNamespace(
+            is_valid=False,
+            missing_keys=lambda: ["SMTP_HOST", "MAIL_RECIPIENTS"],
+            recipients=[],
+        )
+        with (
+            patch.object(server, "client_is_admin", return_value=True),
+            patch.object(server, "import_core", return_value=SimpleNamespace(get_mail_config=lambda: config)),
+        ):
+            with self.assertRaises(server.HTTPException) as raised:
+                server.send_mail_report(server.MailSendRequest(period="daily"), request)
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertIn("SMTP_HOST", str(raised.exception.detail))
+
+    def test_dashboard_trend_includes_all_energy_sources(self) -> None:
+        with (
+            patch.object(server, "fetch_one", side_effect=[
+                {"max_date": date(2026, 7, 15), "updated_at": None},   # MAX(date)
+                {"count": 0},                                           # 이상 이탈 건수
+            ]),
+            patch.object(server, "fetch_all", side_effect=[
+                [{"date": date(2026, 7, 15), "actual": 191.0,
+                  "fuel": 1200.0, "water": 340.0, "wastewater": 150.0}],  # 7일 추이
+                [],                                                        # YoY rows
+                [],                                                        # events
+            ]),
+            patch.object(server, "aggregate_prediction_rows", return_value=[]),
+            patch.object(server, "fetch_actual_production_frame", return_value=None),
+            patch.object(server, "actual_production_records", return_value=[]),
+            patch.object(server, "actual_production_daily_kg", return_value={date(2026, 7, 15): 52340.0}),
+            patch.object(server, "aggregate_period", return_value={"power": 0.0, "fuel": 0.0, "water": 0.0, "production": 0.0}),
+        ):
+            result = server.dashboard(factory="전사", requested_date=date(2026, 7, 15))
+        row = result["trend"][0]
+        self.assertEqual(row["actual"], 191.0)
+        self.assertEqual(row["fuel"], 1200.0)
+        self.assertEqual(row["water"], 340.0)
+        self.assertEqual(row["wastewater"], 150.0)
+        self.assertEqual(row["production"], 52.3)
+
 
 if __name__ == "__main__":
     unittest.main()

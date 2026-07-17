@@ -55,3 +55,35 @@
 [data-theme="dark"] .diagnose-button:hover,[data-theme="dark"] .csv-button:hover,[data-theme="dark"] .theme-toggle:hover{border-color:#4a6cd4;color:#8fb0ff}
 [data-theme="dark"] .sync-ok{background:var(--tint-green-bg);color:var(--tint-green-tx)}[data-theme="dark"] .sync-stale{background:var(--tint-amber-bg);color:var(--tint-amber-tx)}
 }
+
+/* ── 2026-07-17 기능 격차 반영: 7일 방향 비교·메일 발송·전년대비 테이블 ── */
+:root{--chart-wastewater:#a21caf}
+:root[data-theme="dark"]{--chart-wastewater:#c026d3}
+.mail-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;margin-bottom:18px}
+.mail-bar .segmented{margin-bottom:0}
+.mail-bar-title{display:flex;align-items:center;gap:8px;color:var(--text)}
+.mail-bar-title b{font-size:13px}
+.mail-bar-title small{color:var(--muted);font-size:11px}
+.mail-bar .form-message{flex-basis:100%;margin:0}
+.quad-caption{margin:0 0 14px;font-size:12px;color:var(--muted)}
+.quad-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:960px){.quad-grid{grid-template-columns:1fr}}
+.quad-cell{min-width:0}
+.quad-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:5px 12px;margin-bottom:6px;border-left:3px solid;border-radius:6px;background:var(--soft,#f1f5fb);font-size:13px}
+.quad-head small{color:var(--muted)}
+.quad-chip{font-style:normal;font-size:10.5px;font-weight:700;border-radius:12px;padding:2px 8px;margin-left:4px;white-space:nowrap}
+.quad-chip.good{color:var(--blue);background:var(--tint-blue-bg,#eff5ff)}
+.quad-chip.warn{color:var(--red);background:var(--tint-red-bg,#fdeef0)}
+.quad-chart{height:235px}
+.quad-details{margin-top:6px}
+.quad-details summary{cursor:pointer;font-size:11.5px;color:var(--muted)}
+.quad-details .table-wrap{margin-top:8px}
+.quad-tooltip{display:flex;flex-direction:column;gap:3px;border-radius:10px;border:1px solid var(--line);background:var(--card);box-shadow:0 6px 18px #1e315514;font-size:12px;padding:10px 12px}
+.quad-tooltip em{font-style:normal;font-weight:700}
+.quad-tooltip em.good{color:var(--blue)}
+.quad-tooltip em.warn{color:var(--red)}
+.yoy-table{margin-top:12px}
+.yoy-table td.good{color:var(--blue);font-weight:600}
+.yoy-table td.bad{color:var(--red);font-weight:600}
+.yoy-table .total-row td{font-weight:700;border-top:2px solid var(--line);background:var(--soft,#f1f5fb)}
+@media print{.mail-bar{display:none!important}}
