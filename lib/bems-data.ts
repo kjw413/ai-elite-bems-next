@@ -1,5 +1,11 @@
 export const factories = ["전사", "남양주", "남양주1", "남양주2", "김해", "광주", "논산", "경산"];
 
+// legacy DASHBOARD_FACTORY_COLORS — 공장 아이덴티티 색 (도넛·공장별 비교 라인 공용)
+export const factoryColors: Record<string, string> = {
+  전사: "#3b82f6", 남양주: "#8b5cf6", 남양주1: "#a855f7", 남양주2: "#7c3aed",
+  김해: "#f97316", 광주: "#22c55e", 논산: "#ef4444", 경산: "#14b8a6",
+};
+
 export const demo = {
   session: { role: "viewer", clientIp: "demo", serverName: "BEMS-DEMO" },
   dashboard: {
@@ -31,6 +37,14 @@ export const demo = {
       { factory: "경산", intensity: { power: { current: 402, previous: 413 }, fuel: { current: 27.6, previous: 28.2 }, water: { current: 3.05, previous: 3.12 }, wwratio: { current: 0.55, previous: 0.57 } }, usage: { power: { current: 430, previous: 452 }, fuel: { current: 29500, previous: 30800 }, water: { current: 3260, previous: 3410 }, wastewater: { current: 1790, previous: 1940 } }, production: { current: 1069, previous: 1094 } },
     ],
     events: [{ id: 1, date: "07.14", factory: "남양주", tag: "정비", note: "냉동기 정기점검 완료" }, { id: 2, date: "07.12", factory: "김해", tag: "생산", note: "주말 증산 대응" }],
+    compositionLabel: "2026년 1월~7월 누계",
+    composition: [
+      { factory: "남양주", power: 6300, fuel: 428000, water: 47600, wastewater: 27600 },
+      { factory: "김해", power: 4870, fuel: 334000, water: 37100, wastewater: 23000 },
+      { factory: "광주", power: 3710, fuel: 256000, water: 28800, wastewater: 19000 },
+      { factory: "논산", power: 4190, fuel: 286000, water: 31700, wastewater: 18100 },
+      { factory: "경산", power: 2950, fuel: 202000, water: 22400, wastewater: 12300 },
+    ],
   },
   energy: {
     mode: "recent", dateFrom: "2026-07-01", dateTo: "2026-07-15", yoyYear: 2026,
@@ -44,6 +58,16 @@ export const demo = {
     }),
     equipment: [{ name: "냉동", value: 38 }, { name: "공압", value: 17 }, { name: "생산설비·기타", value: 45 }],
     factories: [{ factory: "남양주", power: 920, fuel: 132, water: 86, wastewater: 48 }, { factory: "김해", power: 710, fuel: 104, water: 64, wastewater: 39 }, { factory: "광주", power: 540, fuel: 82, water: 51, wastewater: 31 }, { factory: "논산", power: 610, fuel: 91, water: 57, wastewater: 34 }, { factory: "경산", power: 430, fuel: 68, water: 43, wastewater: 26 }],
+    dailyByFactory: Array.from({ length: 14 }, (_, i) => {
+      const date = `07.${String(i + 2).padStart(2, "0")}`;
+      const make = (scale: number) => ({
+        power: Math.round((34 + ((i * 17) % 42) / 5) * scale * 10) / 10,
+        fuel: Math.round((3.6 + ((i * 3) % 9) / 5) * scale * 10) / 10,
+        water: Math.round((2.4 + ((i * 5) % 8) / 5) * scale * 10) / 10,
+        wastewater: Math.round((1.4 + ((i * 2) % 5) / 5) * scale * 10) / 10,
+      });
+      return { date, metrics: { 남양주: make(1.35), 김해: make(1.05), 광주: make(0.8), 논산: make(0.9), 경산: make(0.63) } };
+    }),
     yoy: Array.from({ length: 12 }, (_, i) => {
       const month = i + 1;
       const hasCurrent = month <= 7;
@@ -64,8 +88,10 @@ export const demo = {
     daily: Array.from({ length: 15 }, (_, i) => {
       const day = new Date(Date.parse("2026-07-01T00:00:00") + i * 86_400_000);
       const weekend = day.getDay() === 0 || day.getDay() === 6;
+      const value = weekend ? null : Math.round((408 + 22 * Math.sin(i / 4) + (i % 5) * 3) * 100) / 100;
+      const productionTon = weekend ? 0 : Math.round((1180 + (i % 4) * 55) * 10) / 10;
       return { date: `${String(day.getMonth() + 1).padStart(2, "0")}.${String(day.getDate()).padStart(2, "0")}`,
-        value: weekend ? null : Math.round((408 + 22 * Math.sin(i / 4) + (i % 5) * 3) * 100) / 100 };
+        value, usage: value == null ? 0 : Math.round(value * productionTon), productionTon };
     }),
     yoyCumulative: { months: 7, lastMonth: 7, current: 419.6, previous: 433.1, change: -3.1 },
     summary: { mtd: { current: 412.8, previous: 426.4, change: -3.2 }, ytd: { current: 419.6, previous: 433.1, change: -3.1 } },
@@ -79,6 +105,10 @@ export const demo = {
     burnup: [],
     mix: [{ name: "IC", value: 35 }, { name: "MY", value: 29 }, { name: "FM", value: 21 }, { name: "SN", value: 15 }],
     topItems: [{ name: "바나나맛우유", plan: 2400, actual: 2310, rate: 96.3 }, { name: "요플레", plan: 2100, actual: 1980, rate: 94.3 }, { name: "메로나", plan: 1800, actual: 1735, rate: 96.4 }],
+    underItems: [{ name: "요플레", plan: 2100, actual: 1980, variance: -120, rate: 94.3 }, { name: "바나나맛우유", plan: 2400, actual: 2310, variance: -90, rate: 96.3 }],
+    overItems: [{ name: "붕어싸만코", plan: 900, actual: 1010, variance: 110, rate: 112.2 }, { name: "투게더", plan: 700, actual: 760, variance: 60, rate: 108.6 }],
+    insights: ["✅ 누계 진척률 89.9% — 정상 추세", "🏭 최대 제품유형: IC (실적 6,430 ton, 진척 92.1%)"],
+    monthlyYoy: [],
   },
   predictions: {
     status: { normal: 31, warning: 0, alert: 2, label: "주의" }, model: { version: "v5.3", trainedAt: "2026-06-25", mape: 0, coverage: 0, state: "운영 중" },

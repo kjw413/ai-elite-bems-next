@@ -5,14 +5,16 @@ import { Activity, BarChart3, Bolt, BrainCircuit, Building2, CalendarDays, Chevr
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiGet, query } from "@/lib/bems-api";
 import { downloadCsv } from "@/lib/bems-csv";
-import { demo, factories } from "@/lib/bems-data";
+import { demo, factories, factoryColors } from "@/lib/bems-data";
 import { AdminScreen } from "@/components/screens/admin-screen";
 import { PredictionHistory } from "@/components/screens/prediction-history";
 import { PredictionRunner } from "@/components/screens/prediction-runner";
 import { ReportScreen } from "@/components/screens/report-screen";
 import { SevenDayCompare } from "@/components/seven-day-compare";
+import { EnergyComposition } from "@/components/energy-composition";
 import { FactoryYoy, IssuesCard } from "@/components/factory-yoy";
 import { FeatureImportance } from "@/components/feature-importance";
+import { PredictionMonitoring } from "@/components/prediction-monitoring";
 
 type Screen = "dashboard" | "energy" | "intensity" | "production" | "prediction" | "report" | "admin";
 type DataScreen = Exclude<Screen, "report" | "admin">;
@@ -111,7 +113,8 @@ function Dashboard({ data, factory, date }: { data: AnyData; factory: string; da
     <article className="card events"><CardTitle title="최근 현장 이벤트" meta={`${data.events?.length ?? 0}건`}/>{data.events?.map((event: AnyData) => <div className="event" key={event.id}><time>{event.date}</time><span>{event.factory}</span><div><b>{event.tag}</b><p>{event.note}</p></div></div>)}</article>
     <SevenDayCompare trend={data.trend ?? []} factory={factory} date={date}/>
     <FactoryYoy rows={data.yoyFactories ?? []} period={data.yoyPeriod} factory={factory} date={date}/>
-    {(data.yoyFactories?.length ?? 0) > 0 && <IssuesCard rows={data.yoyFactories}/>}</section></>;
+    {(data.yoyFactories?.length ?? 0) > 0 && <IssuesCard rows={data.yoyFactories}/>}
+    <EnergyComposition rows={data.composition ?? []} label={data.compositionLabel}/></section></>;
 }
 
 type EnergyMode = "recent" | "range";
@@ -157,9 +160,17 @@ function Energy({ data, mode, onModeChange, rangeFrom, rangeTo, onRangeChange }:
   rangeFrom: string; rangeTo: string; onRangeChange: (from: string, to: string) => void;
 }) {
   const [metric, setMetric] = useState("power"); const units: AnyData = { power: "MWh", fuel: "천 Nm³", water: "천 ton", wastewater: "천 ton" };
+  const [compareFactories, setCompareFactories] = useState(false);
   const values = data.daily?.map((r: AnyData) => Number(r[metric]) || 0) ?? []; const total = values.reduce((a: number,b: number)=>a+b,0);
   const periodLabel = data.dateFrom && data.dateTo ? `${data.dateFrom} ~ ${data.dateTo}` : "";
   const summaryMeta = mode === "range" ? "선택 기간" : "당월";
+  // 공장별 비교 (legacy compare_factories) — 전사 조회에서만 서버가 공장별 시리즈 제공
+  const byFactoryRows = (data.dailyByFactory ?? []).map((row: AnyData) => ({
+    date: row.date,
+    ...Object.fromEntries(Object.entries(row.metrics ?? {}).map(([name, metricValues]) => [name, (metricValues as AnyData)?.[metric] ?? null])),
+  }));
+  const compareNames = ["남양주", "김해", "광주", "논산", "경산"].filter(name => byFactoryRows.some((row: AnyData) => row[name] != null));
+  const comparing = compareFactories && compareNames.length > 0;
   const yoyTable = buildYoyTable(data.yoy ?? [], metric);
   const yoyUnit = units[metric];
   const yoyCsvRows = [...yoyTable.rows, ...(yoyTable.total ? [yoyTable.total] : [])].map(row => ({
@@ -173,9 +184,14 @@ function Energy({ data, mode, onModeChange, rangeFrom, rangeTo, onRangeChange }:
         <label><span>시작일</span><input type="date" value={rangeFrom} max={rangeTo} onChange={event => onRangeChange(event.target.value, rangeTo)}/></label>
         <label><span>종료일</span><input type="date" value={rangeTo} min={rangeFrom} onChange={event => onRangeChange(rangeFrom, event.target.value)}/></label>
       </div>}
+      {(data.dailyByFactory?.length ?? 0) > 0 && <label className="check-toggle"><input type="checkbox" checked={compareFactories} onChange={event => setCompareFactories(event.target.checked)}/>공장별 비교</label>}
       {periodLabel && <span className="period-chip">{periodLabel}</span>}
     </div>
-    <section className="kpi-grid compact"><Kpi label="기간 누계" value={total} unit={units[metric]} icon={Bolt}/><Kpi label="일평균" value={values.length?total/values.length:0} unit={units[metric]} icon={Activity}/><Kpi label="최대 사용량" value={values.length?Math.max(...values):0} unit={units[metric]} icon={Gauge}/></section><section className="content-grid"><article className="card chart-card wide"><CardTitle title={metric === "power" ? "일별 사용 추이 · 설비 분해" : "일별 사용 추이"} meta={units[metric]}><CsvButton filename={`energy_daily_${metric}`} rows={data.daily} columns={["date","power","freezing","compressor","other","fuel","water","wastewater"]} labels={{date:"일자",power:"전력(MWh)",freezing:"냉동(MWh)",compressor:"공압(MWh)",other:"기타(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><Chart>{metric === "power"
+    <section className="kpi-grid compact"><Kpi label="기간 누계" value={total} unit={units[metric]} icon={Bolt}/><Kpi label="일평균" value={values.length?total/values.length:0} unit={units[metric]} icon={Activity}/><Kpi label="최대 사용량" value={values.length?Math.max(...values):0} unit={units[metric]} icon={Gauge}/></section><section className="content-grid"><article className="card chart-card wide"><CardTitle title={comparing ? "일별 사용 추이 · 공장별 비교" : metric === "power" ? "일별 사용 추이 · 설비 분해" : "일별 사용 추이"} meta={units[metric]}>{comparing
+      ? <CsvButton filename={`energy_daily_factories_${metric}`} rows={byFactoryRows} columns={["date", ...compareNames]} labels={{date:"일자",...Object.fromEntries(compareNames.map(name=>[name,`${name}(${units[metric]})`]))}}/>
+      : <CsvButton filename={`energy_daily_${metric}`} rows={data.daily} columns={["date","power","freezing","compressor","other","fuel","water","wastewater"]} labels={{date:"일자",power:"전력(MWh)",freezing:"냉동(MWh)",compressor:"공압(MWh)",other:"기타(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/>}</CardTitle><Chart>{comparing
+      ? <LineChart data={byFactoryRows}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/>{compareNames.map(name => <Line key={name} type="monotone" dataKey={name} name={name} stroke={factoryColors[name]} strokeWidth={2} dot={false} connectNulls={false}/>)}</LineChart>
+      : metric === "power"
       ? <ComposedChart data={data.daily}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Area type="monotone" dataKey="power" name="전체 전력" stroke={energyMetricColors.power} strokeWidth={3} fill={energyMetricColors.power} fillOpacity={0.1}/><Line type="monotone" dataKey="freezing" name="냉동" stroke={palette.actual} strokeWidth={2} dot={false}/><Line type="monotone" dataKey="compressor" name="공압" stroke={palette.target} strokeWidth={2} dot={false}/><Line type="monotone" dataKey="other" name="기타" stroke={palette.previous} strokeWidth={2} strokeDasharray="4 3" dot={false}/></ComposedChart>
       : <AreaChart data={data.daily}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Area type="monotone" dataKey={metric} stroke={energyMetricColors[metric]} strokeWidth={3} fill={energyMetricColors[metric]} fillOpacity={0.1}/></AreaChart>}</Chart></article><article className="card list"><CardTitle title="설비 구성" meta={summaryMeta}/>{data.equipment?.map((r:AnyData)=><div className="progress" key={r.name}><div><span>{r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{width:`${r.value}%`}}/></i></div>)}</article>
     {(metric === "water" || metric === "wastewater") && <article className="card chart-card wide"><CardTitle title="공장별 폐수/용수 비율" meta={`${summaryMeta} · 낮을수록 처리 효율 양호`}><CsvButton filename={`wastewater_ratio_${data.dateFrom ?? ""}`} rows={(data.factories ?? []).map((r: AnyData) => ({...r, ratio: r.water > 0 ? Math.round(r.wastewater / r.water * 100) / 100 : null}))} columns={["factory","water","wastewater","ratio"]} labels={{factory:"공장",water:"용수(천 ton)",wastewater:"폐수(천 ton)",ratio:"폐수/용수"}}/></CardTitle><Chart><BarChart data={(data.factories ?? []).map((r: AnyData) => ({factory: r.factory, ratio: r.water > 0 ? Math.round(r.wastewater / r.water * 100) / 100 : null}))}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="factory"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="ratio" name="폐수/용수 비율" fill={energyMetricColors.wastewater} radius={[4,4,0,0]}/></BarChart></Chart></article>}
@@ -193,6 +209,19 @@ function Intensity({ data, metric, onMetricChange, mode, onModeChange, rangeFrom
   rangeFrom: string; rangeTo: string; onRangeChange: (from: string, to: string) => void;
 }) {
   const periodLabel = data.dateFrom && data.dateTo ? `${data.dateFrom} ~ ${data.dateTo}` : "";
+  const [showCumulative, setShowCumulative] = useState(false);
+  // 누계 토글 (legacy '누계 추이 보기') — 각 날짜에서 시작일부터의 누계 원단위
+  // (Σ사용량 ÷ Σ생산톤)로 라인을 다시 그린다. 일 원단위 평균과 다르다.
+  const dailySeries = (() => {
+    if (!showCumulative) return data.daily ?? [];
+    let cumulativeUsage = 0;
+    let cumulativeTon = 0;
+    return (data.daily ?? []).map((row: AnyData) => {
+      cumulativeUsage += Number(row.usage) || 0;
+      cumulativeTon += Number(row.productionTon) || 0;
+      return { ...row, value: cumulativeTon > 0 ? Math.round(cumulativeUsage / cumulativeTon * 100) / 100 : null };
+    });
+  })();
   // 전년대비 테이블 — 월별 증감률은 클라이언트 계산, 누계 행은 서버의 가중 평균
   // (Σ사용량 ÷ Σ생산톤, 동월 누계) 값을 사용한다. 단순 평균 합산은 왜곡되기 때문.
   const yoyRows = (data.monthly ?? []).map((row: AnyData) => ({
@@ -210,7 +239,7 @@ function Intensity({ data, metric, onMetricChange, mode, onModeChange, rangeFrom
       {periodLabel && <span className="period-chip">{periodLabel}</span>}
     </div>
     <section className="kpi-grid compact"><Kpi label="MTD 원단위" value={data.summary?.mtd?.current} unit={data.unit} change={data.summary?.mtd?.change} icon={Gauge}/><Kpi label="YTD 원단위" value={data.summary?.ytd?.current} unit={data.unit} change={data.summary?.ytd?.change} icon={CalendarDays}/><Kpi label="절감 목표" value={data.targetPct} unit="%" icon={ShieldCheck}/></section><section className="content-grid">
-    <article className="card chart-card span-all"><CardTitle title="일별 원단위 추이" meta={`${data.unit} · 생산 실적 있는 날만 표시`}><CsvButton filename={`intensity_daily_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={data.daily} columns={["date","value"]} labels={{date:"일자",value:`원단위(${data.unit})`}}/></CardTitle><Chart><LineChart data={data.daily}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Line dataKey="value" name={`원단위(${data.unit})`} stroke={palette.actual} strokeWidth={2.5} connectNulls={false} dot={{ r: 2.5 }}/></LineChart></Chart></article>
+    <article className="card chart-card span-all"><CardTitle title={showCumulative ? "일별 원단위 추이 · 누계" : "일별 원단위 추이"} meta={`${data.unit} · 생산 실적 있는 날만 표시`}><label className="check-toggle"><input type="checkbox" checked={showCumulative} onChange={event => setShowCumulative(event.target.checked)}/>누계 추이 보기</label><CsvButton filename={`intensity_daily_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={dailySeries} columns={["date","value"]} labels={{date:"일자",value:`${showCumulative?"누계 ":""}원단위(${data.unit})`}}/></CardTitle><Chart><LineChart data={dailySeries}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Line dataKey="value" name={`${showCumulative?"누계 ":""}원단위(${data.unit})`} stroke={palette.actual} strokeWidth={2.5} connectNulls={false} dot={{ r: 2.5 }}/></LineChart></Chart></article>
     <article className="card chart-card span-all"><CardTitle title={`${data.year}년 원단위 추이`} meta={data.unit}><CsvButton filename={`intensity_monthly_${metric}_${data.year}`} rows={data.monthly} columns={["month","previous","target","current"]} labels={{month:"월",previous:`전년(${data.unit})`,target:`목표(${data.unit})`,current:`금년(${data.unit})`}}/></CardTitle><Chart><LineChart data={data.monthly}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Line dataKey="previous" name="전년" stroke={palette.previous}/><Line dataKey="target" name="목표" stroke={palette.target} strokeDasharray="5 4"/><Line dataKey="current" name="금년" stroke={palette.actual} strokeWidth={3}/></LineChart></Chart>
       <div className="table-wrap yoy-table"><table><thead><tr><th>월</th><th>전년</th><th>금년</th><th>증감률(%)</th></tr></thead><tbody>
         {yoyRows.map((row: AnyData) => <tr key={row.month}><td>{row.month}</td><td>{row.previous == null ? "-" : fmt(row.previous, 2)}</td><td>{row.current == null ? "-" : fmt(row.current, 2)}</td><td className={row.change == null ? "" : row.change > 0 ? "bad" : "good"}>{row.change == null ? "-" : `${row.change > 0 ? "+" : ""}${fmt(row.change)}`}</td></tr>)}
@@ -230,6 +259,12 @@ function Production({ data, mode, onModeChange, rangeFrom, rangeTo, onRangeChang
   const trendTitle = mode === "year" ? "월별 생산량 (제품유형별)" : "제품유형별 일일 생산량";
   const csvColumns = ["date", "IC", "MY", "FM", "SN", "ETC"];
   const csvLabels = { date: mode === "year" ? "월" : "일자", IC: "IC(ton)", MY: "MY(ton)", FM: "FM(ton)", SN: "SN(ton)", ETC: "기타(ton)" };
+  // 품목 순위 탭 (legacy 계획 미달/초과 Top 탭) — 계획 유효 기간에만 미달/초과 노출
+  const [rankTab, setRankTab] = useState<"top" | "under" | "over">("top");
+  const gapAvailable = planAllowed && ((data.underItems?.length ?? 0) > 0 || (data.overItems?.length ?? 0) > 0);
+  const activeRankTab = gapAvailable ? rankTab : "top";
+  const rankRows: AnyData[] = activeRankTab === "top" ? data.topItems ?? [] : activeRankTab === "under" ? data.underItems ?? [] : data.overItems ?? [];
+  const rankTitle = activeRankTab === "top" ? "주요 품목 계획 대비 실적" : activeRankTab === "under" ? "계획 미달 Top" : "계획 초과 Top";
   return <>
     <div className="mode-row">
       <div className="segmented" role="group" aria-label="생산실적 조회 모드">{productionModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
@@ -246,18 +281,28 @@ function Production({ data, mode, onModeChange, rangeFrom, rangeTo, onRangeChang
       <Kpi label="계획 달성률" value={planAllowed ? s.progress : "N/A"} unit={planAllowed ? "%" : undefined} icon={Gauge}/>
       <Kpi label={mode === "year" ? "연말 착지 예상" : "예상 착지"} value={mode === "range" ? "N/A" : s.forecast} unit={mode === "range" ? undefined : "ton"} icon={PackageCheck}/>
     </section>
+    {(data.insights?.length ?? 0) > 0 && <section className="card insight-list">{data.insights.map((message: string, index: number) => <p key={index}>{message}</p>)}</section>}
     <section className="content-grid">
       {mode === "year" && (data.burnup?.length ?? 0) > 0 && <article className="card chart-card wide"><CardTitle title="연간 Burn-up" meta="월별 누적 실적 vs 계획 누계 (ton)"/><Chart><LineChart data={data.burnup}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Line dataKey="cumPlan" name="누적 계획" stroke={palette.previous} strokeDasharray="6 4" strokeWidth={2} dot={false}/><Line dataKey="cumActual" name="누적 실적" stroke={palette.actual} strokeWidth={3} connectNulls={false}/></LineChart></Chart></article>}
+      {mode === "year" && (data.monthlyYoy?.length ?? 0) > 0 && <article className="card chart-card wide"><CardTitle title="월별 생산량 전년비" meta="ton"><CsvButton filename={`production_monthly_yoy_${(data.dateFrom ?? "").slice(0,4)}`} rows={data.monthlyYoy} columns={["month","previous","current"]} labels={{month:"월",previous:"전년(ton)",current:"금년(ton)"}}/></CardTitle><Chart><BarChart data={data.monthlyYoy}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Bar dataKey="previous" name="전년" fill={palette.previous} radius={[4,4,0,0]}/><Bar dataKey="current" name="금년" fill="var(--chart-production)" radius={[4,4,0,0]}/></BarChart></Chart></article>}
       <article className="card chart-card wide"><CardTitle title={trendTitle} meta="ton"><CsvButton filename={`production_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={data.daily} columns={csvColumns} labels={csvLabels}/></CardTitle><Chart><BarChart data={data.daily}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend formatter={(value: string) => cat2Labels[value] ?? value}/><Bar dataKey="IC" stackId="a" fill={palette.cat2.IC}/><Bar dataKey="MY" stackId="a" fill={palette.cat2.MY}/><Bar dataKey="FM" stackId="a" fill={palette.cat2.FM}/><Bar dataKey="SN" stackId="a" fill={palette.cat2.SN}/><Bar dataKey="ETC" stackId="a" fill={palette.cat2.ETC}/></BarChart></Chart></article>
       <article className="card list"><CardTitle title="제품 믹스" meta="구성비"/>{data.mix?.map((r: AnyData) => <div className="progress" key={r.name}><div><span>{cat2Labels[r.name] ?? r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{ width: `${r.value}%` }}/></i></div>)}</article>
-      <article className="card table-card wide"><CardTitle title="주요 품목 계획 대비 실적" meta={`${s.items ?? 0}개 품목`}><CsvButton filename={`item_ranking_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={data.topItems} columns={["name", "plan", "actual", "rate"]} labels={{ name: "품목", plan: "계획(ton)", actual: "실적(ton)", rate: "달성률(%)" }}/></CardTitle><DataTable rows={data.topItems} columns={["name", "plan", "actual", "rate"]} labels={{ name: "품목", plan: "계획", actual: "실적", rate: "달성률(%)" }}/></article>
+      <article className="card table-card wide"><CardTitle title={rankTitle} meta={`${s.items ?? 0}개 품목`}><CsvButton filename={`item_ranking_${activeRankTab}_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={rankRows} columns={activeRankTab === "top" ? ["name", "plan", "actual", "rate"] : ["name", "plan", "actual", "variance", "rate"]} labels={{ name: "품목", plan: "계획(ton)", actual: "실적(ton)", variance: "편차(ton)", rate: "달성률(%)" }}/></CardTitle>
+        {gapAvailable && <div className="segmented" role="group" aria-label="품목 순위 구분">{([["top","실적 Top"],["under","미달 Top"],["over","초과 Top"]] as const).map(([id,label]) => <button type="button" key={id} className={activeRankTab === id ? "active" : ""} aria-pressed={activeRankTab === id} onClick={() => setRankTab(id)}>{label}</button>)}</div>}
+        {activeRankTab === "top"
+          ? <DataTable rows={rankRows} columns={["name", "plan", "actual", "rate"]} labels={{ name: "품목", plan: "계획", actual: "실적", rate: "달성률(%)" }}/>
+          : <div className="table-wrap"><table><thead><tr><th>품목</th><th>계획</th><th>실적</th><th>편차</th><th>달성률(%)</th></tr></thead><tbody>
+              {rankRows.map((row: AnyData, index: number) => <tr key={index}><td>{row.name}</td><td>{fmt(row.plan)}</td><td>{fmt(row.actual)}</td><td className={Number(row.variance) < 0 ? "bad" : "good"}>{Number(row.variance) > 0 ? "+" : ""}{fmt(row.variance)}</td><td>{row.rate == null ? "-" : fmt(row.rate)}</td></tr>)}
+              {rankRows.length === 0 && <tr><td colSpan={5}>{activeRankTab === "under" ? "계획 대비 미달 품목이 없습니다." : "계획 대비 초과 품목이 없습니다."}</td></tr>}
+            </tbody></table></div>}
+      </article>
     </section>
   </>;
 }
 
 const diagnosableFactories = ["남양주1", "남양주2", "김해", "광주", "논산"];
 
-function Prediction({ data, factory, date, isAdmin }: { data: AnyData; factory: string; date: string; isAdmin: boolean }) { return <><section className="model-banner"><div><BrainCircuit/><span>운영 모델</span><strong>{data.model?.version}</strong></div><div><span>상태</span><strong>{data.model?.state}</strong></div><div><span>최근 학습</span><strong>{data.model?.trainedAt}</strong></div></section><PredictionRunner factory={factory} date={date} isAdmin={isAdmin}/><section className="kpi-grid compact"><Kpi label="정상 예측" value={data.status?.normal} unit="건" icon={ShieldCheck}/><Kpi label="정상범주 이탈" value={data.status?.alert} unit="건" icon={Activity}/><Kpi label="모니터링 상태" value={data.status?.label} icon={BrainCircuit}/></section>{diagnosableFactories.includes(factory) ? <FeatureImportance factory={factory}/> : <div className="info-note">모델 변수 영향도는 개별 공장(남양주1·남양주2·김해·광주·논산) 선택 시 표시됩니다.</div>}<PredictionHistory rows={data.latest ?? []} factory={factory} isAdmin={isAdmin} diagnosable={diagnosableFactories.includes(factory)}/></> }
+function Prediction({ data, factory, date, isAdmin }: { data: AnyData; factory: string; date: string; isAdmin: boolean }) { return <><section className="model-banner"><div><BrainCircuit/><span>운영 모델</span><strong>{data.model?.version}</strong></div><div><span>상태</span><strong>{data.model?.state}</strong></div><div><span>최근 학습</span><strong>{data.model?.trainedAt}</strong></div></section><PredictionRunner factory={factory} date={date} isAdmin={isAdmin}/><section className="kpi-grid compact"><Kpi label="정상 예측" value={data.status?.normal} unit="건" icon={ShieldCheck}/><Kpi label="정상범주 이탈" value={data.status?.alert} unit="건" icon={Activity}/><Kpi label="모니터링 상태" value={data.status?.label} icon={BrainCircuit}/></section>{diagnosableFactories.includes(factory) ? <FeatureImportance factory={factory}/> : <div className="info-note">모델 변수 영향도는 개별 공장(남양주1·남양주2·김해·광주·논산) 선택 시 표시됩니다.</div>}<PredictionMonitoring factory={factory}/><PredictionHistory rows={data.latest ?? []} factory={factory} isAdmin={isAdmin} diagnosable={diagnosableFactories.includes(factory)}/></> }
 
 function CardTitle({ title, meta, children }: { title: string; meta: string; children?: React.ReactNode }) { return <header className="card-title"><h3>{title}</h3><div className="card-title-side">{children}<span>{meta}</span></div></header> }
 function Chart({ children }: { children: React.ReactElement }) { return <div className="chart"><ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer></div> }

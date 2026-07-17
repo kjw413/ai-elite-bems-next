@@ -469,6 +469,50 @@ def weighted_intensity_yoy(
     }
 
 
+def build_production_insights(
+    *,
+    plan: float | None,
+    actual: float,
+    progress: float | None,
+    cat2_plan: dict[str, float],
+    cat2_actual: dict[str, float],
+) -> list[str]:
+    """생산실적 자동 인사이트 — legacy _generate_insights 규칙의 이식.
+
+    진척률 구간 판정 + 최대 제품유형 + 부진 제품유형(진척 80% 미만)을
+    문장 리스트로 반환한다.
+    """
+    messages: list[str] = []
+    if plan is None or plan <= 0 or progress is None:
+        messages.append(f"📊 누계 실적 {actual:,.0f} ton (계획 데이터 없음)")
+    elif progress >= 100:
+        messages.append(f"🎯 누계 진척률 {progress:.1f}% — 계획 초과 달성")
+    elif progress >= 90:
+        messages.append(f"✅ 누계 진척률 {progress:.1f}% — 정상 추세")
+    elif progress >= 70:
+        messages.append(f"🟡 누계 진척률 {progress:.1f}% — 잔여 기간 주의")
+    else:
+        messages.append(f"⚠️ 누계 진척률 {progress:.1f}% — 가속 필요")
+
+    ranked = sorted(cat2_actual.items(), key=lambda item: item[1], reverse=True)
+    if ranked and ranked[0][1] > 0:
+        top_key, top_actual = ranked[0]
+        top_plan = cat2_plan.get(top_key, 0.0)
+        piece = f"🏭 최대 제품유형: {top_key} (실적 {top_actual:,.0f} ton"
+        if top_plan > 0:
+            piece += f", 진척 {top_actual / top_plan * 100:.1f}%"
+        messages.append(piece + ")")
+    with_plan = [
+        (key, cat2_actual.get(key, 0.0) / cat2_plan[key] * 100)
+        for key in cat2_plan if cat2_plan[key] > 0
+    ]
+    if with_plan:
+        worst_key, worst_progress = min(with_plan, key=lambda item: item[1])
+        if worst_progress < 80:
+            messages.append(f"📉 부진 제품유형: {worst_key} (진척 {worst_progress:.1f}%)")
+    return messages
+
+
 def annual_elapsed_ratio(year: int, as_of: date) -> float:
     """연간 모드 경과율 (0.0~1.0). 연말 착지 예상·기대 누계 계산에 사용."""
     year_start = date(year, 1, 1)
@@ -895,6 +939,22 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
                 "change": rate_change(cur_value, prv_value) if prv_value else None,
             })
 
+    # 공장별 에너지 사용 비율 도넛 — legacy _render_energy_composition (YTD 누계)
+    composition_rows = fetch_all(
+        """
+        SELECT factory, SUM(total_power_kwh)/1000 power, SUM(fuel_nm3) fuel,
+               SUM(water_ton) water, SUM(wastewater_ton) wastewater
+        FROM energy_daily WHERE date BETWEEN %s AND %s GROUP BY factory
+        """,
+        (date(base.year, 1, 1), base),
+    )
+    composition: dict[str, dict[str, float | str]] = {}
+    for row in composition_rows:
+        name = "남양주" if row["factory"] in ("남양주1", "남양주2") else str(row["factory"])
+        entry = composition.setdefault(name, {"factory": name, "power": 0.0, "fuel": 0.0, "water": 0.0, "wastewater": 0.0})
+        for key in ("power", "fuel", "water", "wastewater"):
+            entry[key] = round(scalar(entry[key]) + scalar(row.get(key)), 1)
+
     event_clause, event_values = factory_clause(factory)
     events = fetch_all(
         "SELECT id, event_date, factory, target, tag, severity, note FROM event_annotation WHERE 1=1" + event_clause + " ORDER BY event_date DESC, id DESC LIMIT 5",
@@ -925,6 +985,8 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
             "currentFrom": month_start.isoformat(), "currentTo": base.isoformat(),
             "previousFrom": prev_start.isoformat(), "previousTo": prev_base.isoformat(),
         },
+        "composition": list(composition.values()),
+        "compositionLabel": f"{base.year}년 1월~{base.month}월 누계",
         "events": [{**row, "date": row["event_date"].strftime("%m.%d")} for row in events],
     })
 
@@ -996,12 +1058,37 @@ def energy(
         """ + clause + " GROUP BY y, m ORDER BY y, m",
         (date(base.year - 1, 1, 1), date(base.year, 12, 31), *values),
     )
+    # 공장별 비교 라인(legacy compare_factories) — 전사 조회일 때만 제공.
+    daily_by_factory: list[dict[str, Any]] = []
+    if factory in ("전사", "전체"):
+        per_factory_rows = fetch_all(
+            """
+            SELECT date, factory, SUM(total_power_kwh)/1000 power, SUM(fuel_nm3)/1000 fuel,
+                   SUM(water_ton)/1000 water, SUM(wastewater_ton)/1000 wastewater
+            FROM energy_daily WHERE date BETWEEN %s AND %s
+            GROUP BY date, factory ORDER BY date
+            """,
+            (window_from, window_to),
+        )
+        merged: dict[date, dict[str, Any]] = {}
+        for row in per_factory_rows:
+            row_date = normalize_date(row.get("date"))
+            if row_date is None:
+                continue
+            name = "남양주" if row["factory"] in ("남양주1", "남양주2") else str(row["factory"])
+            bucket = merged.setdefault(row_date, {"date": row_date.strftime("%m.%d")})
+            metrics_bucket = bucket.setdefault("metrics", {})
+            factory_bucket = metrics_bucket.setdefault(name, {"power": 0.0, "fuel": 0.0, "water": 0.0, "wastewater": 0.0})
+            for key in ("power", "fuel", "water", "wastewater"):
+                factory_bucket[key] = round(scalar(factory_bucket[key]) + scalar(row.get(key)), 2)
+        daily_by_factory = [merged[key] for key in sorted(merged)]
     return json_safe({
         "baseDate": base,
         "mode": "range" if ranged else "recent",
         "dateFrom": window_from,
         "dateTo": window_to,
         "daily": [{**row, "date": row["date"].strftime("%m.%d")} for row in rows],
+        "dailyByFactory": daily_by_factory,
         "equipment": equipment_rows,
         "factories": list(combined.values()),
         "yoyYear": base.year,
@@ -1049,6 +1136,9 @@ def intensity_analysis(
         daily.append({
             "date": row_date.strftime("%m.%d"),
             "value": round(value, 2) if value is not None else None,
+            # 누계 토글용 원자료 — 클라이언트가 Σ사용량÷Σ생산톤 누계선을 재계산한다.
+            "usage": round(scalar(row.get("usage_sum")), 2),
+            "productionTon": round(prod_ton, 3),
         })
     monthly_rows = fetch_all(
         f"""
@@ -1287,6 +1377,61 @@ def production(
             "rate": round(item_actual / item_plan * 100, 1) if plan_allowed and item_plan > 0 else None,
         })
 
+    # 계획 미달/초과 Top (legacy under/over 탭) — 계획 지표가 유효한 기간에만
+    under_items: list[dict[str, Any]] = []
+    over_items: list[dict[str, Any]] = []
+    if plan_allowed:
+        gap_rows = fetch_all(
+            """
+            SELECT item_name name, SUM(plan) plan, SUM(actual) actual
+            FROM (
+              SELECT factory, item_code, MAX(item_name) item_name,
+                     MAX(planned_qty)/1000 plan, SUM(actual_qty)/1000 actual
+              FROM production_daily WHERE date BETWEEN %s AND %s
+            """ + clause + """
+              GROUP BY factory,item_code,YEAR(date),MONTH(date)
+            ) item_totals
+            GROUP BY item_code,item_name HAVING SUM(plan) > 0
+            """,
+            (period_from, period_to, *values),
+        )
+        ranked = []
+        for row in gap_rows:
+            gap_plan = scalar(row.get("plan"))
+            gap_actual = scalar(row.get("actual"))
+            ranked.append({
+                "name": row.get("name"),
+                "plan": round(gap_plan, 3),
+                "actual": round(gap_actual, 3),
+                "variance": round(gap_actual - gap_plan, 3),
+                "rate": round(gap_actual / gap_plan * 100, 1) if gap_plan > 0 else None,
+            })
+        under_items = sorted((r for r in ranked if r["variance"] < 0), key=lambda r: r["variance"])[:8]
+        over_items = sorted((r for r in ranked if r["variance"] > 0), key=lambda r: r["variance"], reverse=True)[:8]
+
+    # 제품유형별 계획·실적 breakdown → 자동 인사이트 (legacy _generate_insights)
+    cat2_plan_rows = fetch_all(
+        """
+        SELECT cat2, SUM(plan) plan FROM (
+          SELECT CASE WHEN category2 IN ('IC','MY','FM','SN') THEN category2 ELSE 'ETC' END cat2,
+                 factory, item_code, MAX(planned_qty)/1000 plan
+          FROM production_daily WHERE date BETWEEN %s AND %s
+        """ + clause + """
+          GROUP BY cat2,factory,item_code,YEAR(date),MONTH(date)
+        ) t GROUP BY cat2
+        """,
+        (period_from, period_to, *values),
+    ) if plan_allowed else []
+    cat2_plan = {str(row["cat2"]): scalar(row.get("plan")) for row in cat2_plan_rows}
+    cat2_actual = {key: sum(scalar(row.get(key)) for row in daily) for key in cat2_keys}
+    insights = build_production_insights(
+        plan=plan if plan_allowed else None,
+        actual=actual,
+        progress=(actual / plan * 100) if plan_allowed and plan > 0 else None,
+        cat2_plan=cat2_plan,
+        cat2_actual=cat2_actual,
+    )
+
     # 진척률·페이스·착지 예상 — 모드별 경과율 기준
     if mode == "month":
         days_in_month = calendar.monthrange(base.year, base.month)[1]
@@ -1297,6 +1442,26 @@ def production(
         elapsed = None
     forecast = actual / elapsed if elapsed else None
     period_days = (period_to - period_from).days + 1
+
+    # 연간 모드 월별 전년비 (legacy '연간 월별 실적 — 전년비')
+    monthly_yoy: list[dict[str, Any]] = []
+    if mode == "year":
+        yoy_rows = fetch_all(
+            """
+            SELECT YEAR(date) y, MONTH(date) m, SUM(actual_qty)/1000 total
+            FROM production_daily WHERE date BETWEEN %s AND %s
+            """ + clause + " GROUP BY y, m ORDER BY y, m",
+            (date(base.year - 1, 1, 1), date(base.year, 12, 31), *values),
+        )
+        yoy_map = {(int(row["y"]), int(row["m"])): scalar(row.get("total")) for row in yoy_rows}
+        for month in range(1, 13):
+            current_total = yoy_map.get((base.year, month))
+            previous_total = yoy_map.get((base.year - 1, month))
+            monthly_yoy.append({
+                "month": f"{month}월",
+                "current": round(current_total, 1) if current_total is not None else None,
+                "previous": round(previous_total, 1) if previous_total is not None else None,
+            })
     summary_output = {
         "plan": round(plan, 1) if plan_allowed else None,
         "actual": round(actual, 1),
@@ -1320,6 +1485,10 @@ def production(
         "burnup": burnup,
         "mix": [{"name": row["name"], "value": round(scalar(row["value"]) / mix_total * 100, 1)} for row in mix_rows],
         "topItems": top_items,
+        "underItems": under_items,
+        "overItems": over_items,
+        "insights": insights,
+        "monthlyYoy": monthly_yoy,
     })
 
 
@@ -1536,6 +1705,31 @@ def backfill_actuals(request: Request) -> dict[str, Any]:
     service = import_core("app.services.usage_prediction_v5_service")
     updated = service.backfill_actuals()
     return {"updated_rows": int(updated)}
+
+
+@app.get("/api/v1/predictions/monitoring")
+def prediction_monitoring(factory: str = "전사") -> dict[str, Any]:
+    """모델 성능/offset 감지 요약 — legacy 예측 이력 탭의 모니터링 패널 이식.
+
+    실측값이 있는 예측 이력을 prediction_monitoring_service에 위임해
+    bias·패턴 일치·offset 판정을 반환한다.
+    """
+    service = import_core("app.services.prediction_monitoring_service")
+    members = prediction_factory_members(factory)
+    placeholders = ",".join(["%s"] * len(members))
+    rows = fetch_all(
+        f"""
+        SELECT factory, pred_date, target, pred_value, actual_value
+        FROM prediction_log
+        WHERE actual_value IS NOT NULL AND factory IN ({placeholders})
+        ORDER BY pred_date DESC LIMIT 5000
+        """,
+        tuple(members),
+    )
+    frame = service.pd.DataFrame(rows)
+    monitoring = service.build_prediction_monitoring_summary(frame)
+    overall = service.get_monitoring_overall_status(monitoring)
+    return json_safe({"overall": overall, "rows": _table_records(monitoring)})
 
 
 @app.get("/api/v1/sync/status")

@@ -523,7 +523,10 @@ class ServerHelperTests(unittest.TestCase):
                 [month_row(month, 50.0) for month in (1, 2, 3)],  # 월별 실적 (3월까지)
                 [{"name": "IC", "value": 300.0}],                  # 제품 믹스
                 [{"name": "품목", "plan": 10.0, "actual": 9.0}],   # 품목 순위
-                [{"m": month, "plan": 100.0} for month in range(1, 13)],  # 월별 계획
+                [{"m": month, "plan": 100.0} for month in range(1, 13)],  # 월별 계획 (burnup)
+                [],                                                # 미달/초과 gap
+                [],                                                # 제품유형 계획
+                [],                                                # 월별 전년비
             ]),
         ):
             result = server.production(factory="전사", requested_date=date(2026, 7, 15), mode="year")
@@ -566,6 +569,8 @@ class ServerHelperTests(unittest.TestCase):
                  for day in range(1, 32)],                       # 일별 실적 31행
                 [{"name": "IC", "value": 310.0}],                # 제품 믹스
                 [{"name": "품목", "plan": 10.0, "actual": 9.0}], # 품목 순위
+                [],                                              # 미달/초과 gap
+                [],                                              # 제품유형 계획
             ]),
         ):
             result = server.production(factory="전사", requested_date=date(2026, 5, 31), mode="month")
@@ -643,6 +648,28 @@ class ServerHelperTests(unittest.TestCase):
             self.assertEqual(raised.exception.status_code, 400)
         import_core.assert_not_called()
 
+    def test_production_insights_follow_legacy_rules(self) -> None:
+        # 계획 없음 → 실적만
+        no_plan = server.build_production_insights(
+            plan=None, actual=1234.0, progress=None, cat2_plan={}, cat2_actual={},
+        )
+        self.assertIn("계획 데이터 없음", no_plan[0])
+        # 진척 구간 + 최대/부진 제품유형
+        messages = server.build_production_insights(
+            plan=1000.0, actual=750.0, progress=75.0,
+            cat2_plan={"IC": 500.0, "MY": 300.0},
+            cat2_actual={"IC": 480.0, "MY": 210.0, "FM": 60.0},
+        )
+        self.assertIn("잔여 기간 주의", messages[0])          # 70~90 구간
+        self.assertIn("최대 제품유형: IC", messages[1])        # 실적 1위 + 진척 96.0%
+        self.assertIn("부진 제품유형: MY", messages[2])        # 진척 70% < 80
+        # 부진 없음(모두 80% 이상)이면 부진 문장은 생략
+        healthy = server.build_production_insights(
+            plan=1000.0, actual=950.0, progress=95.0,
+            cat2_plan={"IC": 500.0}, cat2_actual={"IC": 450.0},
+        )
+        self.assertEqual(len(healthy), 2)
+
     def test_mail_period_normalization(self) -> None:
         self.assertEqual(server.normalize_mail_period(" Daily "), "daily")
         self.assertEqual(server.normalize_mail_period("weekly"), "weekly")
@@ -686,6 +713,7 @@ class ServerHelperTests(unittest.TestCase):
                 [{"date": date(2026, 7, 15), "actual": 191.0,
                   "fuel": 1200.0, "water": 340.0, "wastewater": 150.0}],  # 7일 추이
                 [],                                                        # YoY rows
+                [],                                                        # 구성비 (YTD)
                 [],                                                        # events
             ]),
             patch.object(server, "aggregate_prediction_rows", return_value=[]),
