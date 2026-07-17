@@ -572,6 +572,47 @@ class ServerHelperTests(unittest.TestCase):
         self.assertEqual(yoy[11]["power"], {"current": None, "previous": None})
         self.assertEqual(yoy[0]["wastewater"], {"current": 1.8, "previous": 2.0})
 
+    def test_weighted_intensity_cumulative_uses_same_period_weighted_average(self) -> None:
+        usage = {
+            (2026, 1): 1000.0, (2026, 2): 1200.0,
+            (2025, 1): 1100.0, (2025, 2): 1300.0, (2025, 3): 900.0,
+        }
+        production_kg = {
+            (2026, 1): 10_000.0, (2026, 2): 8_000.0,
+            (2025, 1): 10_000.0, (2025, 2): 10_000.0, (2025, 3): 9_000.0,
+        }
+        result = server.weighted_intensity_yoy(usage, production_kg, 2026)
+        self.assertIsNotNone(result)
+        # 금년 실적이 있는 1~2월만 합산: (1000+1200)/(18톤) vs (1100+1300)/(20톤)
+        self.assertEqual(result["months"], 2)
+        self.assertEqual(result["lastMonth"], 2)
+        self.assertAlmostEqual(result["current"], round(2200.0 / 18.0, 2))
+        self.assertAlmostEqual(result["previous"], round(2400.0 / 20.0, 2))
+        # 3월(전년만 존재)은 누계에서 제외된다
+        self.assertIsNone(server.weighted_intensity_yoy({}, production_kg, 2026))
+
+    def test_factory_yoy_entry_builds_intensity_usage_production(self) -> None:
+        current = {"power": 100_000.0, "fuel": 5_000.0, "water": 2_000.0, "wastewater": 1_000.0, "production": 50_000.0}
+        previous = {"power": 120_000.0, "fuel": 6_000.0, "water": 0.0, "wastewater": 500.0, "production": 60_000.0}
+        entry = server.factory_yoy_entry("김해", current, previous)
+        self.assertEqual(entry["factory"], "김해")
+        self.assertAlmostEqual(entry["intensity"]["power"]["current"], 2000.0)   # 100000/50톤
+        self.assertAlmostEqual(entry["intensity"]["power"]["previous"], 2000.0)  # 120000/60톤
+        self.assertAlmostEqual(entry["intensity"]["wwratio"]["current"], 0.5)
+        self.assertIsNone(entry["intensity"]["wwratio"]["previous"])             # 용수 0 → None
+        self.assertAlmostEqual(entry["usage"]["power"]["current"], 100.0)        # kWh → MWh
+        self.assertAlmostEqual(entry["production"]["current"], 50.0)             # kg → ton
+
+    def test_feature_importance_validates_factory_and_target(self) -> None:
+        with patch.object(server, "import_core") as import_core:
+            with self.assertRaises(server.HTTPException) as raised:
+                server.model_feature_importance(factory="전사", target="전력")
+            self.assertEqual(raised.exception.status_code, 400)
+            with self.assertRaises(server.HTTPException) as raised:
+                server.model_feature_importance(factory="김해", target="폐수")
+            self.assertEqual(raised.exception.status_code, 400)
+        import_core.assert_not_called()
+
     def test_mail_period_normalization(self) -> None:
         self.assertEqual(server.normalize_mail_period(" Daily "), "daily")
         self.assertEqual(server.normalize_mail_period("weekly"), "weekly")
@@ -621,7 +662,7 @@ class ServerHelperTests(unittest.TestCase):
             patch.object(server, "fetch_actual_production_frame", return_value=None),
             patch.object(server, "actual_production_records", return_value=[]),
             patch.object(server, "actual_production_daily_kg", return_value={date(2026, 7, 15): 52340.0}),
-            patch.object(server, "aggregate_period", return_value={"power": 0.0, "fuel": 0.0, "water": 0.0, "production": 0.0}),
+            patch.object(server, "aggregate_period", return_value={"power": 0.0, "fuel": 0.0, "water": 0.0, "wastewater": 0.0, "production": 0.0}),
         ):
             result = server.dashboard(factory="전사", requested_date=date(2026, 7, 15))
         row = result["trend"][0]

@@ -157,7 +157,7 @@ export function SevenDayCompare({ trend, factory, date }: { trend: AnyData[]; fa
   if (!trend?.length) return null;
   const hasUsageBreakdown = trend.some(row => row.fuel != null || row.water != null || row.wastewater != null);
   if (!hasUsageBreakdown) return null;
-  return <article className="card chart-card wide">
+  return <article className="card chart-card span-all">
     <header className="card-title">
       <h3>7일간 생산량 · 사용량 방향 비교</h3>
       <div className="card-title-side">

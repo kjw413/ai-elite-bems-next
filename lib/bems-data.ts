@@ -22,11 +22,26 @@ export const demo = {
     ],
     yoy: [{ month: "2월", current: 432, previous: 448 }, { month: "3월", current: 426, previous: 441 }, { month: "4월", current: 421, previous: 436 }, { month: "5월", current: 417, previous: 429 }, { month: "6월", current: 414, previous: 425 }, { month: "7월", current: 413, previous: 426 }],
     factoryComparison: [{ factory: "남양주", value: 398, change: -4.1 }, { factory: "김해", value: 424, change: -2.2 }, { factory: "광주", value: 437, change: 1.3 }, { factory: "논산", value: 409, change: -3.4 }, { factory: "경산", value: 402, change: -2.7 }],
+    yoyPeriod: { currentFrom: "2026-07-01", currentTo: "2026-07-15", previousFrom: "2025-07-01", previousTo: "2025-07-15" },
+    yoyFactories: [
+      { factory: "남양주", intensity: { power: { current: 398, previous: 415 }, fuel: { current: 27.1, previous: 27.9 }, water: { current: 3.02, previous: 3.1 }, wwratio: { current: 0.58, previous: 0.61 } }, usage: { power: { current: 920, previous: 958 }, fuel: { current: 62800, previous: 64100 }, water: { current: 6980, previous: 7150 }, wastewater: { current: 4050, previous: 4360 } }, production: { current: 2312, previous: 2309 } },
+      { factory: "김해", intensity: { power: { current: 424, previous: 434 }, fuel: { current: 29.3, previous: 28.7 }, water: { current: 3.24, previous: 3.31 }, wwratio: { current: 0.62, previous: 0.6 } }, usage: { power: { current: 710, previous: 731 }, fuel: { current: 49100, previous: 48300 }, water: { current: 5420, previous: 5570 }, wastewater: { current: 3360, previous: 3340 } }, production: { current: 1675, previous: 1684 } },
+      { factory: "광주", intensity: { power: { current: 437, previous: 431 }, fuel: { current: 30.2, previous: 29.5 }, water: { current: 3.4, previous: 3.28 }, wwratio: { current: 0.66, previous: 0.63 } }, usage: { power: { current: 540, previous: 522 }, fuel: { current: 37300, previous: 35700 }, water: { current: 4200, previous: 3970 }, wastewater: { current: 2770, previous: 2500 } }, production: { current: 1236, previous: 1211 } },
+      { factory: "논산", intensity: { power: { current: 409, previous: 424 }, fuel: { current: 28, previous: 28.9 }, water: { current: 3.1, previous: 3.22 }, wwratio: { current: 0.57, previous: 0.59 } }, usage: { power: { current: 610, previous: 645 }, fuel: { current: 41700, previous: 43900 }, water: { current: 4620, previous: 4890 }, wastewater: { current: 2630, previous: 2890 } }, production: { current: 1491, previous: 1521 } },
+      { factory: "경산", intensity: { power: { current: 402, previous: 413 }, fuel: { current: 27.6, previous: 28.2 }, water: { current: 3.05, previous: 3.12 }, wwratio: { current: 0.55, previous: 0.57 } }, usage: { power: { current: 430, previous: 452 }, fuel: { current: 29500, previous: 30800 }, water: { current: 3260, previous: 3410 }, wastewater: { current: 1790, previous: 1940 } }, production: { current: 1069, previous: 1094 } },
+    ],
     events: [{ id: 1, date: "07.14", factory: "남양주", tag: "정비", note: "냉동기 정기점검 완료" }, { id: 2, date: "07.12", factory: "김해", tag: "생산", note: "주말 증산 대응" }],
   },
   energy: {
     mode: "recent", dateFrom: "2026-06-16", dateTo: "2026-07-15", yoyYear: 2026,
-    daily: Array.from({ length: 14 }, (_, i) => ({ date: `07.${String(i + 2).padStart(2, "0")}`, power: 170 + ((i * 17) % 42), fuel: 18 + ((i * 3) % 9), water: 12 + ((i * 5) % 8), wastewater: 7 + ((i * 2) % 5) })),
+    daily: Array.from({ length: 14 }, (_, i) => {
+      const power = 170 + ((i * 17) % 42);
+      const freezing = Math.round(power * 0.38 * 10) / 10;
+      const compressor = Math.round(power * 0.17 * 10) / 10;
+      return { date: `07.${String(i + 2).padStart(2, "0")}`, power, freezing, compressor,
+        other: Math.round((power - freezing - compressor) * 10) / 10,
+        fuel: 18 + ((i * 3) % 9), water: 12 + ((i * 5) % 8), wastewater: 7 + ((i * 2) % 5) };
+    }),
     equipment: [{ name: "냉동", value: 38 }, { name: "공압", value: 17 }, { name: "생산설비·기타", value: 45 }],
     factories: [{ factory: "남양주", power: 920, fuel: 132, water: 86, wastewater: 48 }, { factory: "김해", power: 710, fuel: 104, water: 64, wastewater: 39 }, { factory: "광주", power: 540, fuel: 82, water: 51, wastewater: 31 }, { factory: "논산", power: 610, fuel: 91, water: 57, wastewater: 34 }, { factory: "경산", power: 430, fuel: 68, water: 43, wastewater: 26 }],
     yoy: Array.from({ length: 12 }, (_, i) => {
@@ -45,6 +60,14 @@ export const demo = {
   },
   intensity: {
     metric: "power", unit: "kWh/ton", year: 2026, targetPct: 3,
+    mode: "recent", dateFrom: "2026-06-16", dateTo: "2026-07-15",
+    daily: Array.from({ length: 30 }, (_, i) => {
+      const day = new Date(Date.parse("2026-06-16T00:00:00") + i * 86_400_000);
+      const weekend = day.getDay() === 0 || day.getDay() === 6;
+      return { date: `${String(day.getMonth() + 1).padStart(2, "0")}.${String(day.getDate()).padStart(2, "0")}`,
+        value: weekend ? null : Math.round((408 + 22 * Math.sin(i / 4) + (i % 5) * 3) * 100) / 100 };
+    }),
+    yoyCumulative: { months: 7, lastMonth: 7, current: 419.6, previous: 433.1, change: -3.1 },
     summary: { mtd: { current: 412.8, previous: 426.4, change: -3.2 }, ytd: { current: 419.6, previous: 433.1, change: -3.1 } },
     monthly: Array.from({ length: 12 }, (_, i) => ({ month: `${i + 1}월`, current: i < 7 ? 438 - i * 4 : null, previous: 451 - i * 4, target: 437 - i * 4 })),
     matrix: [{ factory: "남양주", current: 398, previous: 415, change: -4.1 }, { factory: "김해", current: 424, previous: 434, change: -2.2 }, { factory: "광주", current: 437, previous: 431, change: 1.3 }, { factory: "논산", current: 409, previous: 424, change: -3.4 }, { factory: "경산", current: 402, previous: 413, change: -2.7 }],

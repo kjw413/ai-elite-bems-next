@@ -432,6 +432,39 @@ def build_energy_yoy(rows: list[dict[str, Any]], year: int) -> list[dict[str, An
     return result
 
 
+def weighted_intensity_yoy(
+    monthly_usage: dict[tuple[int, int], float],
+    monthly_production_kg: dict[tuple[int, int], float],
+    year: int,
+) -> dict[str, Any] | None:
+    """전년대비 원단위 누계 — 단순 평균이 아닌 가중 평균(Σ사용량 ÷ Σ생산톤).
+
+    legacy 원단위 페이지의 누계 규칙과 동일하되, 금년 실적이 있는 월들만
+    전년과 같은 기간으로 합산한다(동월 누계 — 왜곡 방지).
+    """
+    months = sorted(
+        m for (y, m) in monthly_usage
+        if y == year and monthly_production_kg.get((y, m), 0.0) > 0
+    )
+    if not months:
+        return None
+
+    def cumulative(target_year: int) -> float | None:
+        usage = sum(monthly_usage.get((target_year, m), 0.0) for m in months)
+        prod_ton = sum(monthly_production_kg.get((target_year, m), 0.0) for m in months) / 1000
+        return usage / prod_ton if prod_ton > 0 else None
+
+    current = cumulative(year)
+    previous = cumulative(year - 1)
+    return {
+        "months": len(months),
+        "lastMonth": months[-1],
+        "current": round(current, 2) if current is not None else None,
+        "previous": round(previous, 2) if previous is not None else None,
+        "change": rate_change(current, previous) if (current is not None and previous) else None,
+    }
+
+
 def annual_elapsed_ratio(year: int, as_of: date) -> float:
     """연간 모드 경과율 (0.0~1.0). 연말 착지 예상·기대 누계 계산에 사용."""
     year_start = date(year, 1, 1)
@@ -675,7 +708,8 @@ def aggregate_period(
         """
         SELECT COALESCE(SUM(total_power_kwh),0) power,
                COALESCE(SUM(fuel_nm3),0) fuel,
-               COALESCE(SUM(water_ton),0) water
+               COALESCE(SUM(water_ton),0) water,
+               COALESCE(SUM(wastewater_ton),0) wastewater
         FROM energy_daily WHERE date BETWEEN %s AND %s
         """ + clause,
         (date_from, date_to, *values),
@@ -683,13 +717,52 @@ def aggregate_period(
     if actual_records is None:
         frame = fetch_actual_production_frame(date_from, date_to)
         actual_records = actual_production_records(frame)
-    totals = {key: scalar(row.get(key)) for key in ("power", "fuel", "water")}
+    totals = {key: scalar(row.get(key)) for key in ("power", "fuel", "water", "wastewater")}
     totals["production"] = actual_production_kg(actual_records, factory, date_from, date_to)
     return totals
 
 
 def rate_change(current: float, previous: float) -> float:
     return round((current / previous - 1) * 100, 1) if previous else 0.0
+
+
+def factory_yoy_entry(factory: str, current: dict[str, float], previous: dict[str, float]) -> dict[str, Any]:
+    """공장 1곳의 당월 vs 전년 동기 원단위·사용량·생산량 비교 블록.
+
+    legacy 대시보드 '월간 원단위/사용량/생산량 전년비'(get_monthly_yoy_summary)의
+    지표 구성을 따른다 — 원단위 3종 + 폐수/용수 비율, 사용량 4종, 생산량(ton).
+    사용량 표시는 7일 추이와 같은 단위(전력 MWh, 연료 Nm³, 용수·폐수 ton).
+    """
+    def pair(cur: float | None, prev: float | None, digits: int = 2) -> dict[str, float | None]:
+        return {
+            "current": round(cur, digits) if cur is not None else None,
+            "previous": round(prev, digits) if prev is not None else None,
+        }
+
+    def intensity_of(values: dict[str, float], key: str) -> float | None:
+        prod_ton = values.get("production", 0.0) / 1000
+        return values[key] / prod_ton if prod_ton > 0 else None
+
+    def wwratio_of(values: dict[str, float]) -> float | None:
+        water = values.get("water", 0.0)
+        return values.get("wastewater", 0.0) / water if water > 0 else None
+
+    return {
+        "factory": factory,
+        "intensity": {
+            "power": pair(intensity_of(current, "power"), intensity_of(previous, "power"), 1),
+            "fuel": pair(intensity_of(current, "fuel"), intensity_of(previous, "fuel")),
+            "water": pair(intensity_of(current, "water"), intensity_of(previous, "water")),
+            "wwratio": pair(wwratio_of(current), wwratio_of(previous)),
+        },
+        "usage": {
+            "power": pair(current["power"] / 1000, previous["power"] / 1000, 1),
+            "fuel": pair(current["fuel"], previous["fuel"], 1),
+            "water": pair(current["water"], previous["water"], 1),
+            "wastewater": pair(current["wastewater"], previous["wastewater"], 1),
+        },
+        "production": pair(current["production"] / 1000, previous["production"] / 1000, 1),
+    }
 
 
 @app.get("/api/v1/dashboard")
@@ -802,9 +875,11 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
         })
 
     comparisons = []
+    yoy_factories = []
     for display_factory in DISPLAY_FACTORIES:
         current_factory = aggregate_period(display_factory, month_start, base, actual_records=actual_records)
         previous_factory = aggregate_period(display_factory, prev_start, prev_base, actual_records=actual_records)
+        yoy_factories.append(factory_yoy_entry(display_factory, current_factory, previous_factory))
         cur_ton = current_factory["production"] / 1000
         prv_ton = previous_factory["production"] / 1000
         cur_value = intensity(current_factory, "power", cur_ton)
@@ -841,6 +916,11 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
         "trend": trend,
         "yoy": yoy,
         "factoryComparison": comparisons,
+        "yoyFactories": yoy_factories,
+        "yoyPeriod": {
+            "currentFrom": month_start.isoformat(), "currentTo": base.isoformat(),
+            "previousFrom": prev_start.isoformat(), "previousTo": prev_base.isoformat(),
+        },
         "events": [{**row, "date": row["event_date"].strftime("%m.%d")} for row in events],
     })
 
@@ -863,11 +943,15 @@ def energy(
     rows = fetch_all(
         """
         SELECT date, SUM(total_power_kwh)/1000 power, SUM(fuel_nm3)/1000 fuel,
-               SUM(water_ton)/1000 water, SUM(wastewater_ton)/1000 wastewater
+               SUM(water_ton)/1000 water, SUM(wastewater_ton)/1000 wastewater,
+               SUM(freezing_power_kwh)/1000 freezing, SUM(air_compressor_kwh)/1000 compressor
         FROM energy_daily WHERE date BETWEEN %s AND %s
         """ + clause + " GROUP BY date ORDER BY date",
         (window_from, window_to, *values),
     )
+    # 전력 설비 분해(legacy 일별 추이) — 기타 = 전체 − 냉동 − 공압, 음수 방지.
+    for row in rows:
+        row["other"] = round(max(0.0, scalar(row.get("power")) - scalar(row.get("freezing")) - scalar(row.get("compressor"))), 2)
     equipment = fetch_one(
         """
         SELECT SUM(freezing_power_kwh) freezing, SUM(air_compressor_kwh) compressor,
@@ -926,8 +1010,10 @@ def intensity_analysis(
     factory: str = "전사",
     metric: str = "power",
     requested_date: date | None = Query(None, alias="date"),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
 ) -> dict[str, Any]:
-    """원단위 분석: 월별 금년/전년/목표 추이 + MTD/YTD 요약 + 공장 매트릭스."""
+    """원단위 분석: 일별 추이 + 월별 금년/전년/목표 추이 + 가중 누계 + 공장 매트릭스."""
     spec = INTENSITY_METRICS.get(metric)
     if spec is None:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 지표입니다: {metric}")
@@ -935,11 +1021,31 @@ def intensity_analysis(
 
     max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
-    history_start = date(base.year - 1, 1, 1)
+    window_from, window_to = resolve_energy_window(base, date_from, date_to)
+    history_start = min(date(base.year - 1, 1, 1), window_from)
     actual_frame = fetch_actual_production_frame(history_start, base)
     actual_records = actual_production_records(actual_frame)
 
     clause, values = factory_clause(factory)
+    daily_rows = fetch_all(
+        f"""
+        SELECT date, SUM({usage_col}) usage_sum
+        FROM energy_daily WHERE date BETWEEN %s AND %s
+        """ + clause + " GROUP BY date ORDER BY date",
+        (window_from, window_to, *values),
+    )
+    daily_production = actual_production_daily_kg(actual_records, factory, window_from, window_to)
+    daily = []
+    for row in daily_rows:
+        row_date = normalize_date(row.get("date"))
+        if row_date is None:
+            continue
+        prod_ton = daily_production.get(row_date, 0.0) / 1000
+        value = scalar(row.get("usage_sum")) / prod_ton if prod_ton > 0 else None
+        daily.append({
+            "date": row_date.strftime("%m.%d"),
+            "value": round(value, 2) if value is not None else None,
+        })
     monthly_rows = fetch_all(
         f"""
         SELECT YEAR(date) y, MONTH(date) m,
@@ -954,9 +1060,11 @@ def intensity_analysis(
     ).items():
         key = (production_date.year, production_date.month)
         monthly_production[key] = monthly_production.get(key, 0.0) + production_kg
+    monthly_usage: dict[tuple[int, int], float] = {}
     monthly_map: dict[tuple[int, int], float] = {}
     for row in monthly_rows:
         key = (int(row["y"]), int(row["m"]))
+        monthly_usage[key] = scalar(row.get("usage_sum"))
         prod_ton = monthly_production.get(key, 0.0) / 1000
         if prod_ton > 0:
             monthly_map[key] = scalar(row.get("usage_sum")) / prod_ton
@@ -1019,8 +1127,13 @@ def intensity_analysis(
         "unit": spec["unit"],
         "year": base.year,
         "targetPct": target_pct,
+        "mode": "range" if date_from is not None else "recent",
+        "dateFrom": window_from,
+        "dateTo": window_to,
+        "daily": daily,
         "summary": summary,
         "monthly": monthly,
+        "yoyCumulative": weighted_intensity_yoy(monthly_usage, monthly_production, base.year),
         "matrix": matrix,
     })
 
@@ -1479,6 +1592,26 @@ def trigger_retrain(request: Request) -> dict[str, Any]:
     if not result.get("started"):
         raise HTTPException(status_code=409, detail=str(result.get("message", "재학습을 시작할 수 없습니다.")))
     return json_safe(result)
+
+
+FEATURE_IMPORTANCE_TARGETS = ("전력", "연료", "용수")
+
+
+@app.get("/api/v1/model/feature-importance")
+def model_feature_importance(factory: str, target: str = "전력") -> dict[str, Any]:
+    """활성 v5 모델의 변수 영향도 Top 5 — legacy 예측 화면의 한국어 설명 이식."""
+    if factory not in PREDICTION_FACTORIES:
+        raise HTTPException(status_code=400, detail="변수 영향도는 개별 공장 단위로만 제공합니다.")
+    if target not in FEATURE_IMPORTANCE_TARGETS:
+        raise HTTPException(status_code=400, detail="target은 전력·연료·용수 중 하나여야 합니다.")
+    service = import_core("app.services.v5_explainability")
+    items = service.get_v5_feature_importance(factory, target, top_n=5)
+    return json_safe({
+        "factory": factory,
+        "target": target,
+        "items": items,
+        "summary": service.explain_top_features_korean(items),
+    })
 
 
 class DiagnosisRequest(BaseModel):
