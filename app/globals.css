@@ -127,16 +127,15 @@
 .monitor-kpis b{font-size:15px}
 @media(max-width:760px){.monitor-kpis{grid-template-columns:1fr 1fr}}
 
-/* ── 2026-07-18 세부 개선: 접이식 카드(에너지·원단위 기본 접힘)·나란히 배치 ── */
-.collapsible{padding:0;align-self:start}
-.collapsible>summary{padding:16px 18px;cursor:pointer;list-style:none;margin:0}
-.collapsible>summary::-webkit-details-marker{display:none}
-.collapsible>summary::after{content:"▾";margin-left:8px;color:var(--muted);font-size:11px;transition:transform .15s}
-.collapsible[open]>summary::after{transform:rotate(180deg)}
-.collapsible>summary:hover{background:#fafbfe}
-[data-theme="dark"] .collapsible>summary:hover{background:#182444}
-.collapsible>summary h3{display:inline-block}
-.collapsible-body{padding:0 18px 18px}
+/* ── 2026-07-18 세부 개선: 차트 아래 데이터 표만 접기(기본 접힘)·나란히 배치 ── */
+/* 차트는 항상 노출하고, 그 아래 상세 데이터 표만 토글한다. */
+.data-toggle{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.data-toggle>summary{cursor:pointer;list-style:none;font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px;user-select:none}
+.data-toggle>summary::-webkit-details-marker{display:none}
+.data-toggle>summary::before{content:"▸";font-size:10px;transition:transform .15s}
+.data-toggle[open]>summary::before{transform:rotate(90deg)}
+.data-toggle>summary:hover{color:var(--blue)}
+.data-toggle-body{margin-top:10px}
 /* 대시보드: 월간 주요 이슈 + 공장별 도넛을 한 행에 (공간 절약) */
 .dash-pair{display:grid;grid-template-columns:1fr 2fr;gap:16px;grid-column:1/-1}
 @media(max-width:1050px){.dash-pair{grid-template-columns:1fr}}

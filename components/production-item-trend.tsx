@@ -84,13 +84,13 @@ export function ProductionItemTrend({ factory, date }: { factory: string; date: 
   }
   const nameOf = (code: string) => options.find(item => item.code === code)?.name ?? code;
 
-  return <details className="card chart-card span-all collapsible" open>
-    <summary className="card-title"><h3>품목 실적 추이 · 비교</h3><div className="card-title-side" onClick={event => event.preventDefault()}>
+  return <article className="card chart-card span-all">
+    <header className="card-title"><h3>품목 실적 추이 · 비교</h3><div className="card-title-side">
       <label className="check-toggle"><input type="checkbox" checked={compareMode} onChange={event => setCompareMode(event.target.checked)}/>두 품목 비교</label>
       {merged.length > 0 && <button type="button" className="csv-button" onClick={() => downloadCsv(`item_trend_${codesKey}`, merged, compareMode ? ["month", ...codes] : ["month", "actual", "prevYear"], compareMode ? { month: "월", ...Object.fromEntries(codes.map(code => [code, nameOf(code)])) } : { month: "월", actual: "실적(ton)", prevYear: "전년 동월(ton)" })}><TrendingUp size={13}/>CSV</button>}
       <span>최근 13개월 · ton</span>
-    </div></summary>
-    <div className="collapsible-body">
+    </div></header>
+    <div>
       <div className="item-picker">
         <label><span>{compareMode ? "품목 A" : "품목"}</span><select value={primary} onChange={event => setPrimary(event.target.value)}>{options.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
         {compareMode && <label><span>품목 B</span><select value={secondary} onChange={event => setSecondary(event.target.value)}>{options.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>}
@@ -113,7 +113,7 @@ export function ProductionItemTrend({ factory, date }: { factory: string; date: 
         </ResponsiveContainer></div>
       </>}
     </div>
-  </details>;
+  </article>;
 }
 
 function messageOf(error: unknown) {
