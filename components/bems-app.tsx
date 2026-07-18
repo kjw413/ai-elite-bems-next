@@ -51,6 +51,27 @@ const screenFallback: Record<DataScreen, AnyData> = {
   prediction: demo.predictions,
 };
 const isDataScreen = (screen: Screen): screen is DataScreen => screen !== "report" && screen !== "admin";
+
+// API가 200을 돌려줘도 실데이터가 비어 있는 상태(예: DB 동기화 전, 빈 테이블)를 감지한다.
+// 이때는 화면을 비워 두는 대신 예시 데이터로 폴백해 UI를 확인할 수 있게 한다.
+// 생산 실적처럼 일부만 채워진 부분 적재 상태에서도, 각 화면의 '주 콘텐츠'가 비면 폴백한다.
+function isEmptyPayload(screen: Screen, data: AnyData): boolean {
+  switch (screen) {
+    case "dashboard":
+      // 생산량 KPI는 production_daily에서 오므로 제외하고, 에너지 원단위 지표로 판정.
+      return !(data?.metrics ?? []).some((m: AnyData) => m?.id !== "production" && m?.value != null);
+    case "energy":
+      return !(data?.daily?.length);
+    case "intensity":
+      return !(data?.monthly ?? []).some((m: AnyData) => m?.current != null || m?.previous != null);
+    case "production":
+      return !((data?.summary?.actual ?? 0) > 0);
+    case "prediction":
+      return !(data?.latest?.length);
+    default:
+      return false;
+  }
+}
 const intensityMetrics: { id: IntensityMetric; label: string }[] = [{ id: "power", label: "전력" }, { id: "fuel", label: "연료" }, { id: "water", label: "용수" }];
 const intensityUnits: Record<IntensityMetric, string> = { power: "kWh/ton", fuel: "Nm³/ton", water: "ton/ton" };
 
@@ -370,6 +391,8 @@ export function BemsApp() {
     return {from:`${from.getFullYear()}-${String(from.getMonth()+1).padStart(2,"0")}-${String(from.getDate()).padStart(2,"0")}`,to:today};
   });
   const [data,setData]=useState<AnyData>(demo.dashboard), [session,setSession]=useState<AnyData>(demo.session), [sessionLive,setSessionLive]=useState(false), [live,setLive]=useState(false), [loading,setLoading]=useState(true);
+  // 예시 데이터를 쓰게 된 사유 — "offline"(API 연결 실패) / "empty"(실데이터 없음) / ""(실데이터).
+  const [demoReason,setDemoReason]=useState<"offline"|"empty"|"">("offline");
   const fallback=useMemo(()=>{
     if (!isDataScreen(screen)) return {};
     const selected=screenFallback[screen];
@@ -386,12 +409,22 @@ export function BemsApp() {
       ...(screen==="production"?{mode:productionMode,...(productionMode==="range"?{date_from:productionRange.from,date_to:productionRange.to}:{})}:{}),
       ...(screen==="energy"&&energyMode==="range"?{date_from:energyRange.from,date_to:energyRange.to}:{}),
     });
-    apiGet(`${endpoint[screen]}?${suffix}`,fallback,controller.signal).then(r=>{setData(r.data);setLive(r.live);setLoading(false)}).catch(()=>{});
+    apiGet(`${endpoint[screen]}?${suffix}`,fallback,controller.signal).then(r=>{
+      if (r.live && isEmptyPayload(screen, r.data)) {
+        // 200이지만 실데이터가 비어 있으면 예시 데이터로 폴백한다.
+        setData(fallback); setLive(false); setDemoReason("empty");
+      } else {
+        setData(r.data); setLive(r.live); setDemoReason(r.live ? "" : "offline");
+      }
+      setLoading(false);
+    }).catch(()=>{});
     return()=>controller.abort();
   },[screen,factory,date,intensityMetric,intensityMode,intensityRange,productionMode,productionRange,energyMode,energyRange,fallback]);
   const [title,subtitle]=titles[screen];
   const statusLive=isDataScreen(screen)?live:sessionLive;
   const statusTitle=isDataScreen(screen)?(live?"Local DB":"예시 데이터"):(sessionLive?"BEMS API":"API 연결 실패");
-  const statusDetail=isDataScreen(screen)?(live?"MySQL 연결됨":"API 연결 실패"):(sessionLive?"권한 확인됨":"세션 확인 실패");
-  return <div className="app-shell"><aside className={mobile?"open":""} aria-label="주 메뉴"><div className="brand"><div><Bolt size={21}/></div><span>AI ELITE<strong>BEMS NEXT</strong></span><button type="button" className="close" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}><X/></button></div><nav>{menus.map(item=>{const Icon=item.icon;return <button type="button" key={item.id} className={screen===item.id?"active":""} aria-current={screen===item.id?"page":undefined} onClick={()=>{setScreen(item.id);setMobile(false)}}><Icon size={19}/><span>{item.label}</span><ChevronRight size={15}/></button>})}</nav><div className="side-status" role="status" aria-live="polite"><Database size={17}/><div><b>{statusTitle}</b><span>{statusDetail}</span></div><i className={statusLive?"on":""}/></div><footer>v1.0 · Internal Network</footer></aside>{mobile&&<button type="button" className="scrim" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}/>}<main><header className="topbar"><button type="button" className="menu" aria-label="메뉴 열기" onClick={()=>setMobile(true)}><Menu/></button><div className="heading"><h1>{title}</h1><p>{subtitle}</p></div><div className="filters"><label><Building2 size={16}/><select aria-label="공장 선택" value={factory} onChange={e=>setFactory(e.target.value)}>{factories.map(f=><option key={f}>{f}</option>)}</select></label><label><CalendarDays size={16}/><input type="date" aria-label="기준일 선택" value={date} onChange={e=>setDate(e.target.value)}/></label><button type="button" className="theme-toggle" aria-label="화면 테마 전환" title={theme==="dark"?"라이트 모드로 전환":"다크 모드로 전환"} onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}</button><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&isDataScreen(screen)&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>API 연결 실패 · 예시 데이터 표시 중</strong><p>현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다.</p></div></section>}{screen==="dashboard"&&<Dashboard data={data} factory={factory} date={date}/>} {screen==="energy"&&<Energy data={data} mode={energyMode} onModeChange={setEnergyMode} rangeFrom={energyRange.from} rangeTo={energyRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setEnergyRange({from:to,to}); } else { setEnergyRange({from,to}); } }}/>} {screen==="intensity"&&<Intensity data={data} metric={intensityMetric} onMetricChange={setIntensityMetric} mode={intensityMode} onModeChange={setIntensityMode} rangeFrom={intensityRange.from} rangeTo={intensityRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setIntensityRange({from:to,to}); } else { setIntensityRange({from,to}); } }}/>} {screen==="production"&&<Production data={data} factory={factory} date={date} mode={productionMode} onModeChange={setProductionMode} rangeFrom={productionRange.from} rangeTo={productionRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setProductionRange({from:to,to}); } else { setProductionRange({from,to}); } }}/>} {screen==="prediction"&&<Prediction data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="report"&&<ReportScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="admin"&&<AdminScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>}</>}</div></main></div>;
+  const statusDetail=isDataScreen(screen)
+    ? (live?"MySQL 연결됨":(demoReason==="empty"?"실데이터 없음":"API 연결 실패"))
+    : (sessionLive?"권한 확인됨":"세션 확인 실패");
+  return <div className="app-shell"><aside className={mobile?"open":""} aria-label="주 메뉴"><div className="brand"><div><Bolt size={21}/></div><span>AI ELITE<strong>BEMS NEXT</strong></span><button type="button" className="close" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}><X/></button></div><nav>{menus.map(item=>{const Icon=item.icon;return <button type="button" key={item.id} className={screen===item.id?"active":""} aria-current={screen===item.id?"page":undefined} onClick={()=>{setScreen(item.id);setMobile(false)}}><Icon size={19}/><span>{item.label}</span><ChevronRight size={15}/></button>})}</nav><div className="side-status" role="status" aria-live="polite"><Database size={17}/><div><b>{statusTitle}</b><span>{statusDetail}</span></div><i className={statusLive?"on":""}/></div><footer>v1.0 · Internal Network</footer></aside>{mobile&&<button type="button" className="scrim" aria-label="메뉴 닫기" onClick={()=>setMobile(false)}/>}<main><header className="topbar"><button type="button" className="menu" aria-label="메뉴 열기" onClick={()=>setMobile(true)}><Menu/></button><div className="heading"><h1>{title}</h1><p>{subtitle}</p></div><div className="filters"><label><Building2 size={16}/><select aria-label="공장 선택" value={factory} onChange={e=>setFactory(e.target.value)}>{factories.map(f=><option key={f}>{f}</option>)}</select></label><label><CalendarDays size={16}/><input type="date" aria-label="기준일 선택" value={date} onChange={e=>setDate(e.target.value)}/></label><button type="button" className="theme-toggle" aria-label="화면 테마 전환" title={theme==="dark"?"라이트 모드로 전환":"다크 모드로 전환"} onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}</button><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&isDataScreen(screen)&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>{demoReason==="empty"?"실데이터 없음 · 예시 데이터 표시 중":"API 연결 실패 · 예시 데이터 표시 중"}</strong><p>{demoReason==="empty"?"조회 조건에 해당하는 실데이터가 없어 예시 데이터를 표시합니다. 데이터 동기화 후 실측값이 표시됩니다.":"현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다."}</p></div></section>}{screen==="dashboard"&&<Dashboard data={data} factory={factory} date={date}/>} {screen==="energy"&&<Energy data={data} mode={energyMode} onModeChange={setEnergyMode} rangeFrom={energyRange.from} rangeTo={energyRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setEnergyRange({from:to,to}); } else { setEnergyRange({from,to}); } }}/>} {screen==="intensity"&&<Intensity data={data} metric={intensityMetric} onMetricChange={setIntensityMetric} mode={intensityMode} onModeChange={setIntensityMode} rangeFrom={intensityRange.from} rangeTo={intensityRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setIntensityRange({from:to,to}); } else { setIntensityRange({from,to}); } }}/>} {screen==="production"&&<Production data={data} factory={factory} date={date} mode={productionMode} onModeChange={setProductionMode} rangeFrom={productionRange.from} rangeTo={productionRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setProductionRange({from:to,to}); } else { setProductionRange({from,to}); } }}/>} {screen==="prediction"&&<Prediction data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="report"&&<ReportScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="admin"&&<AdminScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>}</>}</div></main></div>;
 }
