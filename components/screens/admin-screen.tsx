@@ -6,7 +6,7 @@ import { apiRequest, isAbortError, query } from "@/lib/bems-api";
 import { factories } from "@/lib/bems-data";
 
 type AnyRow = Record<string, unknown>;
-type AdminTab = "events" | "targets" | "data" | "predictions";
+type AdminTab = "events" | "targets" | "data" | "predictions" | "mail";
 
 function messageOf(error: unknown) {
   return error instanceof Error ? error.message : "요청을 처리하지 못했습니다.";
@@ -248,10 +248,15 @@ const mailPeriods = [
 ] as const;
 type MailPeriod = (typeof mailPeriods)[number]["id"];
 
-// legacy 대시보드 '📧 메일 송부'의 이식 — 관리자 전용 탭에만 배치되어 viewer에게는
-// 노출되지 않으며, 서버(/mail/send)에서도 관리자 IP를 재검사한다.
-function MailCard({ date }: { date: string }) {
+type MailPreview = { label: string; subject: string; refDate: string; recordCount: number; html: string };
+
+// legacy 대시보드 '📧 메일 송부'의 이식 — 관리자 전용 '메일 리포트' 탭. viewer에게는
+// 탭 자체가 노출되지 않으며, 서버(/mail/preview·/mail/send)도 관리자 IP를 재검사한다.
+// 발송 전 실제 HTML 본문을 iframe으로 미리보고 발송할 수 있다.
+function MailPanel({ date }: { date: string }) {
   const [period, setPeriod] = useState<MailPeriod>("daily");
+  const [preview, setPreview] = useState<MailPreview | null>(null);
+  const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -260,6 +265,23 @@ function MailCard({ date }: { date: string }) {
     weekly: "직전 완결 주 (월~일, 전주비)",
     monthly: "직전 완결 월 (전년 동월비·YTD)",
   };
+
+  // 주기·기준일이 바뀌면 이전 미리보기를 지워 오래된 본문 발송을 막는다.
+  useEffect(() => { setPreview(null); setNotice(""); setError(""); }, [period, date]);
+
+  async function loadPreview() {
+    if (loading) return;
+    setLoading(true); setError(""); setNotice("");
+    try {
+      const result = await apiRequest<MailPreview>(`/mail/preview?${query({ period, ...(period === "daily" ? { date } : {}) })}`);
+      setPreview(result);
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function send() {
     if (sending) return;
     const label = mailPeriods.find(item => item.id === period)?.label ?? period;
@@ -277,14 +299,26 @@ function MailCard({ date }: { date: string }) {
       setSending(false);
     }
   }
-  return <article className="card admin-form">
-    <header><div><span className="eyebrow">MAIL REPORT</span><h3>에너지 리포트 메일 발송</h3></div><Mail size={22}/></header>
-    <p className="panel-copy">tools/mail 파이프라인으로 HTML 리포트를 생성해 .env의 MAIL_RECIPIENTS에게 즉시 발송합니다. {help[period]}</p>
-    <div className="segmented" role="group" aria-label="메일 발송 주기">{mailPeriods.map(item => <button type="button" key={item.id} className={period === item.id ? "active" : ""} aria-pressed={period === item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>
-    {error && <div className="form-message error">{error}</div>}
-    {notice && <div className="form-message success">{notice}</div>}
-    <button type="button" className="primary-button" disabled={sending} onClick={() => void send()}><Mail size={16}/>{sending ? "발송 중..." : "발송"}</button>
-  </article>;
+
+  return <div className="screen-stack">
+    <article className="card admin-form">
+      <header><div><span className="eyebrow">MAIL REPORT</span><h3>에너지 리포트 메일</h3></div><Mail size={22}/></header>
+      <p className="panel-copy">tools/mail 파이프라인으로 HTML 리포트를 생성합니다. 발송 전 본문을 미리보고, .env의 MAIL_RECIPIENTS에게 발송하세요. · {help[period]}</p>
+      <div className="mail-controls">
+        <div className="segmented" role="group" aria-label="메일 발송 주기">{mailPeriods.map(item => <button type="button" key={item.id} className={period === item.id ? "active" : ""} aria-pressed={period === item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>
+        <button type="button" className="secondary-button" disabled={loading} onClick={() => void loadPreview()}><RefreshCw size={15} className={loading ? "spin" : ""}/>{loading ? "생성 중..." : preview ? "미리보기 새로고침" : "미리보기 생성"}</button>
+        <button type="button" className="primary-button" disabled={sending} onClick={() => void send()}><Mail size={16}/>{sending ? "발송 중..." : "발송"}</button>
+      </div>
+      {error && <div className="form-message error">{error}</div>}
+      {notice && <div className="form-message success">{notice}</div>}
+    </article>
+    <article className="card mail-preview">
+      <header className="panel-header"><div><span className="eyebrow">HTML PREVIEW</span><h3>{preview ? `${preview.label} · ${preview.subject}` : "본문 미리보기"}</h3></div>{preview && <span className="preview-meta">기준 {preview.refDate} · 공장 {preview.recordCount}개</span>}</header>
+      {preview
+        ? <iframe className="mail-frame" title="메일 본문 미리보기" sandbox="" srcDoc={preview.html}/>
+        : <div className="mail-frame-empty">{loading ? "리포트 본문을 생성하는 중입니다." : "‘미리보기 생성’을 눌러 발송될 HTML 본문을 확인하세요."}</div>}
+    </article>
+  </div>;
 }
 
 type UploadPreview = {
@@ -302,7 +336,7 @@ type SyncStatus = {
   production: AnyRow;
 };
 
-function DataPanel({ date }: { date: string }) {
+function DataPanel() {
   const [audit, setAudit] = useState<{ changes: AnyRow[]; uploads: AnyRow[] }>({ changes: [], uploads: [] });
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -438,7 +472,6 @@ function DataPanel({ date }: { date: string }) {
       {preview.success && <div className="table-wrap"><table><thead><tr><th>공장</th><th>기간</th><th>일자 수</th><th>신규</th><th>덮어쓰기</th></tr></thead><tbody>{preview.summary.map((row, index) => <tr key={index}><td>{display(row["공장"])}</td><td>{display(row["기간"])}</td><td>{display(row["일자 수"])}</td><td>{display(row["신규"])}</td><td>{display(row["덮어쓰기"])}</td></tr>)}</tbody></table></div>}
       {preview.errors.length > 0 && <div className="table-wrap"><table><thead><tr><th>시트</th><th>행</th><th>컬럼</th><th>사유</th><th>값</th></tr></thead><tbody>{preview.errors.slice(0, 50).map((row, index) => <tr key={index}><td>{display(row["시트"])}</td><td>{display(row["행"])}</td><td>{display(row["컬럼"])}</td><td>{display(row["사유"])}</td><td>{display(row["값"])}</td></tr>)}</tbody></table>{preview.errors.length > 50 && <div className="empty-row">외 {preview.errors.length - 50}건의 오류가 더 있습니다.</div>}</div>}
     </article>}
-    <MailCard date={date}/>
     <div className="admin-grid equal">
       <article className="card admin-list"><header className="panel-header"><div><span className="eyebrow">UPLOAD HISTORY</span><h3>최근 업로드</h3></div><button type="button" className="secondary-button" onClick={() => void load()}><RefreshCw size={15}/></button></header>{loading ? <div className="loading inline-loading"><RefreshCw className="spin"/></div> : <div className="table-wrap"><table><thead><tr><th>파일</th><th>일시</th><th>행</th><th>상태</th></tr></thead><tbody>{audit.uploads.map((row, index) => <tr key={String(row.id ?? index)}><td>{display(row.filename)}</td><td>{display(row.uploadedAt)}</td><td>{display(row.rows)}</td><td>{display(row.status)}</td></tr>)}</tbody></table></div>}</article>
       <article className="card admin-list"><header className="panel-header"><div><span className="eyebrow">AUDIT LOG</span><h3>최근 데이터 변경</h3></div><History size={20}/></header>{loading ? <div className="loading inline-loading"><RefreshCw className="spin"/></div> : <div className="table-wrap"><table><thead><tr><th>일시</th><th>공장</th><th>필드</th><th>이전</th><th>변경</th></tr></thead><tbody>{audit.changes.map((row, index) => <tr key={String(row.id ?? index)}><td>{display(row.time)}</td><td>{display(row.factory)}</td><td>{display(row.field)}</td><td>{display(row.before)}</td><td>{display(row.after)}</td></tr>)}</tbody></table></div>}</article>
@@ -622,17 +655,18 @@ function RetrainCard() {
 }
 
 export function AdminScreen({ factory, date, isAdmin }: { factory: string; date: string; isAdmin: boolean }) {
-  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "data", "predictions"] : ["events", "targets"], [isAdmin]);
+  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "data", "predictions", "mail"] : ["events", "targets"], [isAdmin]);
   const [tab, setTab] = useState<AdminTab>("events");
   useEffect(() => { if (!allowedTabs.includes(tab)) setTab("events"); }, [allowedTabs, tab]);
-  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", data: "데이터·동기화", predictions: "예측·모델 운영" };
+  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", data: "데이터·동기화", predictions: "예측·모델 운영", mail: "메일 리포트" };
 
   return <section className="screen-stack">
     {!isAdmin && <div className="permission-banner"><ShieldAlert size={21}/><div><strong>조회 사용자 모드</strong><p>이벤트와 절감 목표는 열람만 가능하며 모든 변경 작업은 서버에서 차단됩니다.</p></div></div>}
     <div className="admin-tabs" role="tablist">{allowedTabs.map(item => <button type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{labels[item]}</button>)}</div>
     {tab === "events" && <EventsPanel factory={factory} date={date} isAdmin={isAdmin}/>}
     {tab === "targets" && <TargetsPanel factory={factory} date={date} isAdmin={isAdmin}/>}
-    {tab === "data" && isAdmin && <DataPanel date={date}/>}
+    {tab === "data" && isAdmin && <DataPanel/>}
     {tab === "predictions" && isAdmin && <PredictionOpsPanel factory={factory} date={date}/>}
+    {tab === "mail" && isAdmin && <MailPanel date={date}/>}
   </section>;
 }

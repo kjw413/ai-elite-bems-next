@@ -155,9 +155,9 @@ export function buildIssues(rows: AnyData[]): Issue[] {
   return issues.sort((a, b) => b.sev - a.sev).slice(0, 5);
 }
 
-export function IssuesCard({ rows }: { rows: AnyData[] }) {
+export function IssuesCard({ rows, className = "" }: { rows: AnyData[]; className?: string }) {
   const issues = buildIssues(rows);
-  return <article className="card issues-card">
+  return <article className={`card issues-card ${className}`}>
     <header className="card-title"><h3>월간 주요 이슈</h3><div className="card-title-side"><BellRing size={16}/><span>당월 vs 전년 동기</span></div></header>
     {issues.length === 0
       ? <div className="issues-empty">✅ 주요 이상 항목이 없습니다.</div>

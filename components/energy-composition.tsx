@@ -43,10 +43,10 @@ function Donut({ rows, def }: { rows: AnyData[]; def: (typeof donutDefs)[number]
   </div>;
 }
 
-export function EnergyComposition({ rows, label }: { rows: AnyData[]; label?: string }) {
+export function EnergyComposition({ rows, label, className = "span-all" }: { rows: AnyData[]; label?: string; className?: string }) {
   if (!rows?.length) return null;
   const legendFactories = rows.map(row => String(row.factory));
-  return <article className="card chart-card span-all">
+  return <article className={`card chart-card ${className}`}>
     <header className="card-title">
       <h3>공장별 에너지 사용 비율</h3>
       <div className="card-title-side"><span>{label ?? "당해 누계"}</span></div>

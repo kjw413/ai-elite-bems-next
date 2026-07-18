@@ -57,11 +57,11 @@
 }
 
 /* ── 2026-07-17 기능 격차 반영: 7일 방향 비교·메일 발송·전년대비 테이블 ── */
-/* 생산량·에너지원 상징색 (2026-07-18 사용자 지정: 생산 연노랑, 전력 진노랑~주황,
-   연료 빨강, 용수 하늘색, 폐수 회색 — 생산색은 legacy 메일 리포트와 동일 #a4d65e).
+/* 생산량·에너지원 상징색 (2026-07-18 사용자 지정: 생산 연초록, 전력 진노랑~주황,
+   연료 빨강, 용수 하늘색, 폐수 회색 — 생산색은 2026-07-18 사용자 피드백으로 연초록 #7bc96f).
    전력은 사용자 지정 범위 안에서 주황(#f97316)으로 확정 — 라임과의 CVD 분리 확보. */
-:root{--chart-production:#a4d65e;--chart-power:#f97316;--chart-fuel:#dc2626;--chart-water:#0ea5e9;--chart-wastewater:#6b7280}
-:root[data-theme="dark"]{--chart-production:#a4d65e;--chart-power:#f97316;--chart-fuel:#ef4444;--chart-water:#38bdf8;--chart-wastewater:#9ca3af}
+:root{--chart-production:#7bc96f;--chart-power:#f97316;--chart-fuel:#dc2626;--chart-water:#0ea5e9;--chart-wastewater:#6b7280}
+:root[data-theme="dark"]{--chart-production:#7bc96f;--chart-power:#f97316;--chart-fuel:#ef4444;--chart-water:#38bdf8;--chart-wastewater:#9ca3af}
 .quad-caption{margin:0 0 14px;font-size:12px;color:var(--muted)}
 .quad-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 @media(max-width:960px){.quad-grid{grid-template-columns:1fr}}
@@ -126,3 +126,36 @@
 .monitor-kpis span{display:block;font-size:10.5px;color:var(--muted)}
 .monitor-kpis b{font-size:15px}
 @media(max-width:760px){.monitor-kpis{grid-template-columns:1fr 1fr}}
+
+/* ── 2026-07-18 세부 개선: 접이식 카드(에너지·원단위 기본 접힘)·나란히 배치 ── */
+.collapsible{padding:0;align-self:start}
+.collapsible>summary{padding:16px 18px;cursor:pointer;list-style:none;margin:0}
+.collapsible>summary::-webkit-details-marker{display:none}
+.collapsible>summary::after{content:"▾";margin-left:8px;color:var(--muted);font-size:11px;transition:transform .15s}
+.collapsible[open]>summary::after{transform:rotate(180deg)}
+.collapsible>summary:hover{background:#fafbfe}
+[data-theme="dark"] .collapsible>summary:hover{background:#182444}
+.collapsible>summary h3{display:inline-block}
+.collapsible-body{padding:0 18px 18px}
+/* 대시보드: 월간 주요 이슈 + 공장별 도넛을 한 행에 (공간 절약) */
+.dash-pair{display:grid;grid-template-columns:1fr 2fr;gap:16px;grid-column:1/-1}
+@media(max-width:1050px){.dash-pair{grid-template-columns:1fr}}
+.dash-pair>*{margin:0}
+
+/* ── 품목 실적 추이·비교 섹션 ── */
+.item-picker{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.item-picker label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
+.item-picker select{height:36px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);padding:0 10px;font-size:12px;min-width:180px}
+.item-latest{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:12px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:var(--soft,#f7f9fc)}
+.item-latest div{display:flex;flex-direction:column;gap:3px}
+.item-latest span{font-size:10.5px;color:var(--muted)}
+.item-latest b{font-size:16px}
+
+/* ── 관리자 메일 리포트 서브페이지 ── */
+.mail-controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:6px 0 4px}
+.mail-controls .segmented{margin-bottom:0}
+.mail-preview{padding:0;overflow:hidden}
+.mail-preview .panel-header{padding:16px 18px}
+.preview-meta{font-size:11px;color:var(--muted)}
+.mail-frame{width:100%;height:640px;border:0;border-top:1px solid var(--line);background:#fff;display:block}
+.mail-frame-empty{height:200px;display:grid;place-content:center;color:var(--muted);font-size:13px;border-top:1px solid var(--line)}

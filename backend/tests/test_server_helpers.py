@@ -670,6 +670,23 @@ class ServerHelperTests(unittest.TestCase):
         )
         self.assertEqual(len(healthy), 2)
 
+    def test_shift_month_handles_year_boundaries(self) -> None:
+        self.assertEqual(server.shift_month(2026, 7, -12), (2025, 7))
+        self.assertEqual(server.shift_month(2026, 1, -1), (2025, 12))
+        self.assertEqual(server.shift_month(2025, 12, 1), (2026, 1))
+        self.assertEqual(server.shift_month(2026, 7, -24), (2024, 7))
+
+    def test_item_trend_requires_item_codes(self) -> None:
+        with self.assertRaises(server.HTTPException) as raised:
+            server.production_item_trend(items="  , ", factory="전사")
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_mail_preview_replaces_cid_with_data_uri(self) -> None:
+        image = SimpleNamespace(cid="chart1", data=b"\x89PNG", mime_subtype="png")
+        html = server.inline_images_to_data_uris('<img src="cid:chart1">', [image])
+        self.assertNotIn("cid:chart1", html)
+        self.assertIn("data:image/png;base64,", html)
+
     def test_mail_period_normalization(self) -> None:
         self.assertEqual(server.normalize_mail_period(" Daily "), "daily")
         self.assertEqual(server.normalize_mail_period("weekly"), "weekly")

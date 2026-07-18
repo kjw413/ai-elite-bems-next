@@ -95,7 +95,15 @@ export const demo = {
     }),
     yoyCumulative: { months: 7, lastMonth: 7, current: 419.6, previous: 433.1, change: -3.1 },
     summary: { mtd: { current: 412.8, previous: 426.4, change: -3.2 }, ytd: { current: 419.6, previous: 433.1, change: -3.1 } },
-    monthly: Array.from({ length: 12 }, (_, i) => ({ month: `${i + 1}월`, current: i < 7 ? 438 - i * 4 : null, previous: 451 - i * 4, target: 437 - i * 4 })),
+    monthly: Array.from({ length: 12 }, (_, i) => {
+      const current = i < 7 ? 438 - i * 4 : null;
+      const previous = 451 - i * 4;
+      const ton = 1200 + i * 40;
+      const prevTon = 1160 + i * 40;
+      return { month: `${i + 1}월`, current, previous, target: 437 - i * 4,
+        currentUsage: current == null ? 0 : Math.round(current * ton), currentTon: current == null ? 0 : ton,
+        previousUsage: Math.round(previous * prevTon), previousTon: prevTon };
+    }),
     matrix: [{ factory: "남양주", current: 398, previous: 415, change: -4.1 }, { factory: "김해", current: 424, previous: 434, change: -2.2 }, { factory: "광주", current: 437, previous: 431, change: 1.3 }, { factory: "논산", current: 409, previous: 424, change: -3.4 }, { factory: "경산", current: 402, previous: 413, change: -2.7 }],
   },
   production: {
