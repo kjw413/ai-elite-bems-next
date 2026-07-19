@@ -105,10 +105,10 @@ export function ProductionItemTrend({ factory, date }: { factory: string; date: 
           <div><span>전년 동월 대비</span><b className={(result[0].latest.yoy ?? 0) >= 0 ? "good" : "bad"}>{changeText(result[0].latest.yoy)}</b></div>
         </div>}
         <div className="chart"><ResponsiveContainer width="100%" height="100%">
-          <LineChart data={merged}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="month" tick={{ fontSize: 11 }}/><YAxis tick={{ fontSize: 11 }}/><Tooltip {...tooltipStyle} formatter={(value: unknown) => numberText(value)}/><Legend/>
+          <LineChart data={merged}><CartesianGrid vertical={false}/><XAxis dataKey="month" tick={{ fontSize: 11 }}/><YAxis tick={{ fontSize: 11 }}/><Tooltip {...tooltipStyle} formatter={(value: unknown) => numberText(value)}/><Legend/>
             {compareMode
-              ? codes.map((code, index) => <Line key={code} type="linear" dataKey={code} name={nameOf(code)} stroke={compareColors[index]} strokeWidth={2.5} dot={{ r: 2.5 }} connectNulls/>)
-              : <><Line type="linear" dataKey="prevYear" name="전년 동월" stroke="var(--chart-previous)" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls/><Line type="linear" dataKey="actual" name="실적" stroke="var(--chart-production)" strokeWidth={3} dot={{ r: 2.5 }} connectNulls/></>}
+              ? codes.map((code, index) => <Line key={code} type="linear" dataKey={code} name={nameOf(code)} stroke={compareColors[index]} strokeWidth={2} dot={{ r: 3, fill: compareColors[index], stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>)
+              : <><Line type="linear" dataKey="prevYear" name="전년 동월" stroke="var(--chart-previous)" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls/><Line type="linear" dataKey="actual" name="실적" stroke="var(--chart-production)" strokeWidth={2} dot={{ r: 3, fill: "var(--chart-production)", stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/></>}
           </LineChart>
         </ResponsiveContainer></div>
       </>}

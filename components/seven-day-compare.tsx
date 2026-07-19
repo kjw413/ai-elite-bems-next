@@ -127,13 +127,13 @@ function Quadrant({ trend, metric }: { trend: AnyData[]; metric: (typeof usageMe
     <div className="chart quad-chart">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows} margin={{ top: 18, right: 12, bottom: 0, left: -18 }}>
-          <CartesianGrid strokeDasharray="3 3"/>
+          <CartesianGrid vertical={false}/>
           <XAxis dataKey="date" tick={{ fontSize: 11 }}/>
           <YAxis tick={{ fontSize: 11 }} domain={["auto", "auto"]}/>
           <Tooltip content={<QuadTooltip unit={metric.unit}/>}/>
           <Legend wrapperStyle={{ fontSize: 11 }}/>
-          <Line type="linear" dataKey="prodIdx" name="생산량 지수" stroke={PROD_COLOR} strokeWidth={2} dot={{ r: 3 }} connectNulls/>
-          <Line type="linear" dataKey="usageIdx" name="사용량 지수" stroke={metric.color} strokeWidth={2} dot={{ r: 3 }} connectNulls/>
+          <Line type="linear" dataKey="prodIdx" name="생산량 지수" stroke={PROD_COLOR} strokeWidth={2} dot={{ r: 3, fill: PROD_COLOR, stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>
+          <Line type="linear" dataKey="usageIdx" name="사용량 지수" stroke={metric.color} strokeWidth={2} dot={{ r: 3, fill: metric.color, stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>
           <Scatter dataKey="goodY" name="생산↑ 사용↓" fill={GOOD_COLOR} shape="diamond" legendType="diamond"/>
           <Scatter dataKey="warnY" name="생산↓ 사용↑" fill={WARN_COLOR} shape="diamond" legendType="diamond"/>
         </ComposedChart>

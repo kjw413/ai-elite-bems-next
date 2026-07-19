@@ -66,7 +66,7 @@ function ModeChart({ rows, mode, def }: { rows: AnyData[]; mode: YoyMode; def: M
     <div className="chart quad-chart">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: -14 }}>
-          <CartesianGrid strokeDasharray="3 3"/>
+          <CartesianGrid vertical={false}/>
           <XAxis dataKey="factory" tick={{ fontSize: 11 }}/>
           <YAxis tick={{ fontSize: 11 }}/>
           <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid var(--line)", background: "var(--card)", fontSize: 12 }}
@@ -77,8 +77,8 @@ function ModeChart({ rows, mode, def }: { rows: AnyData[]; mode: YoyMode; def: M
               return change == null ? name : `${name} · 전년 동기 대비 ${change > 0 ? "+" : ""}${change.toFixed(1)}%`;
             }}/>
           <Legend wrapperStyle={{ fontSize: 11 }}/>
-          <Bar dataKey="previous" name="전년" fill="var(--chart-previous)" radius={[3, 3, 0, 0]}/>
-          <Bar dataKey="current" name="금년" fill={def.color} radius={[3, 3, 0, 0]}/>
+          <Bar dataKey="previous" name="전년" fill="var(--chart-previous)" radius={[4, 4, 0, 0]} maxBarSize={22}/>
+          <Bar dataKey="current" name="금년" fill={def.color} radius={[4, 4, 0, 0]} maxBarSize={22}/>
         </BarChart>
       </ResponsiveContainer>
     </div>
