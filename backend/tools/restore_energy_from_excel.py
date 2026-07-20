@@ -61,7 +61,7 @@ def _resolve_source(cli_source: str | None) -> Path | None:
     sampled = os.getenv("SAMPLED_DB_DIR")
     if sampled:
         candidates.append(Path(sampled) / "RawDB_에너지.xlsx")
-    candidates.append(Path(r"E:\Sampled DB") / "RawDB_에너지.xlsx")
+    candidates.append(Path(r"E:\DB_MIS") / "RawDB_에너지.xlsx")
     candidates.append(Path.home() / "Downloads" / "Sampled DB" / "Sampled DB" / "RawDB_에너지.xlsx")
     for candidate in candidates:
         if candidate.exists():

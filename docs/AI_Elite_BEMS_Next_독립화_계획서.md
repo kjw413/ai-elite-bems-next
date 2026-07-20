@@ -28,7 +28,7 @@
 - `legacy/.env` — DB·OpenAI·기상청 키 (→ `new/` 전용 `.env`로 이관)
 - `legacy/app/predictive model/**` — v5.3 모델 `.pkl`, 레지스트리 JSON, 재학습 상태
 - 휴일 캘린더·기상 관측소 데이터 스토어
-- `E:\Sampled DB\*.xlsx` — RPA 산출 원본 (legacy 폴더 밖이므로 그대로 사용)
+- `E:\DB_MIS\*.xlsx` — RPA 산출 원본 (legacy 폴더 밖이므로 그대로 사용, 구명: `E:\Sampled DB`)
 
 ### 1.3 운영 흐름 의존 (가장 위험한 숨은 의존)
 

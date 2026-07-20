@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
 
-SAMPLED_DB_DIR = Path(os.getenv("SAMPLED_DB_DIR", r"E:\Sampled DB")).expanduser()
+SAMPLED_DB_DIR = Path(os.getenv("SAMPLED_DB_DIR", r"E:\DB_MIS")).expanduser()
 
 
 def sampled_db_path(filename: str, env_name: str | None = None) -> Path:

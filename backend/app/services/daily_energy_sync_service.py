@@ -1,7 +1,7 @@
 # 이 파일은 일일 에너지 데이터(생산량/전력/연료/용수/폐수)를 사전 정의된
 # 학습 소스 엑셀에서 자동으로 가져와 energy_daily 테이블에 UPSERT하는 서비스입니다.
 #
-# 동기화 대상: v5_common.PATH_ENERGY_SOURCE  (예: E:\Sampled DB\RawDB_에너지.xlsx)
+# 동기화 대상: v5_common.PATH_ENERGY_SOURCE  (예: E:\DB_MIS\RawDB_에너지.xlsx)
 # 트리거 시점: app.main 의 매 Streamlit rerun (auto_sync_once).
 #   - 무거운 동기화는 RawDB 파일 mtime이 변경됐을 때만 실행됨 (sync_daily_energy_from_source 내부 mtime 비교).
 #   - mtime 동일 시에는 stat + JSON 1회만 읽고 즉시 return (수 ms).
