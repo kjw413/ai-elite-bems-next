@@ -745,6 +745,25 @@ def session(request: Request) -> dict[str, str]:
     }
 
 
+@app.get("/api/v1/settings/page-visibility")
+def get_page_visibility() -> dict[str, bool]:
+    """조회 사용자 사이드바에 노출할 페이지 여부 — 모든 세션(admin·viewer)이 조회 가능."""
+    service = import_core("app.services.page_visibility_service")
+    return json_safe(service.get_visibility())
+
+
+class PageVisibilityRequest(BaseModel):
+    pages: dict[str, bool]
+
+
+@app.put("/api/v1/settings/page-visibility")
+def update_page_visibility(payload: PageVisibilityRequest, request: Request) -> dict[str, bool]:
+    """페이지 노출 설정 저장 (관리자 전용)."""
+    require_admin(request)
+    service = import_core("app.services.page_visibility_service")
+    return json_safe(service.set_visibility(payload.pages))
+
+
 def aggregate_period(
     factory: str,
     date_from: date,

@@ -72,7 +72,7 @@
           <td style="padding:20px 28px 20px 28px;">
             <div style="font-size:16px; font-weight:700; color:#111827; margin-bottom:5px;">
               <span style="display:inline-block; width:5px; height:17px; background:#059669; border-radius:3px; vertical-align:middle; margin-right:8px;"></span>
-              2. 생산량↓ · 사용량↑ (vs 직전주 동일 요일)
+              2. 생산량↓·사용량↑ / 생산량↑·원단위↑ (vs 직전주 동일 요일)
             </div>
             <div style="font-size:11px; color:#64748b; margin:0 0 12px 13px;">
             </div>
@@ -87,6 +87,7 @@
                   <th align="center" style="padding:7px; border:1px solid #fed7aa;">판정</th>
                   <th align="right" style="padding:7px; border:1px solid #fed7aa;">생산량 전주비</th>
                   <th align="right" style="padding:7px; border:1px solid #fed7aa;">사용량 전주비</th>
+                  <th align="right" style="padding:7px; border:1px solid #fed7aa;">원단위 전주비</th>
                 </tr>
               </thead>
               <tbody>
@@ -95,17 +96,18 @@
                   <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.date }}</td>
                   <td align="center" style="padding:7px; border:1px solid #ffedd5; font-weight:700;">{{ item.factory }}</td>
                   <td align="center" style="padding:7px; border:1px solid #ffedd5;">{{ item.energy }}</td>
-                  <td align="center" style="padding:7px; border:1px solid #ffedd5; color:#b91c1c; font-weight:700;">생산↓ 사용↑</td>
+                  <td align="center" style="padding:7px; border:1px solid #ffedd5; color:#b91c1c; font-weight:700;">{{ item.label }}</td>
                   <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.production_delta }}</td>
                   <td align="right" style="padding:7px; border:1px solid #ffedd5; color:#dc2626; font-weight:700;">{{ item.usage_delta }}</td>
+                  <td align="right" style="padding:7px; border:1px solid #ffedd5; color:{{ item.intensity_delta_color }}; font-weight:700;">{{ item.intensity_delta }}</td>
                 </tr>
                 {% endfor %}
               </tbody>
             </table>
             {% else %}
             <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-left:5px solid #059669; border-radius:8px; padding:12px 15px;">
-              <div style="font-size:14px; font-weight:700; color:#065f46;">생산↓·사용↑ 조합 없음</div>
-              <div style="font-size:11px; color:#047857; margin-top:3px;">사업장별 생산량·사용량 방향에서 역행 신호가 발견되지 않았습니다.</div>
+              <div style="font-size:14px; font-weight:700; color:#065f46;">역행 조합 없음</div>
+              <div style="font-size:11px; color:#047857; margin-top:3px;">사업장별 생산량·사용량·원단위 방향에서 역행 신호(생산↓·사용↑, 생산↑·원단위↑)가 발견되지 않았습니다.</div>
             </div>
             {% endif %}
           </td>

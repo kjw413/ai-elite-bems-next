@@ -184,3 +184,16 @@ CREATE TABLE IF NOT EXISTS event_annotation (
     INDEX idx_event_target_date (target, event_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 10. 페이지 노출 설정 테이블 — 조회 사용자(viewer) 사이드바에 보여줄 화면을
+--     관리자가 체크박스로 제어(예: 예측 모델 안정화 전까지 숨김, 데모·테스트용 범위 조정).
+--     page_key는 프런트 lib/bems-pages.ts의 PageId와 1:1 대응. 행이 없는 키는
+--     기본 노출(True)로 간주한다. 관리자 화면에는 이 설정과 무관하게 항상 모두 보인다.
+CREATE TABLE IF NOT EXISTS page_visibility (
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    page_key           VARCHAR(40)  NOT NULL,
+    visible_to_viewer  TINYINT(1)   NOT NULL DEFAULT 1,
+    updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    changed_by         TEXT,
+    UNIQUE KEY uq_page_visibility (page_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+

@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, CloudSun, Database, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
+import { BrainCircuit, CloudSun, Database, Eye, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
 import { apiRequest, isAbortError, query } from "@/lib/bems-api";
 import { factories } from "@/lib/bems-data";
+import { PAGE_DEFS } from "@/lib/bems-pages";
 
 type AnyRow = Record<string, unknown>;
-type AdminTab = "events" | "targets" | "data" | "predictions" | "mail";
+type AdminTab = "events" | "targets" | "data" | "predictions" | "mail" | "visibility";
 
 function messageOf(error: unknown) {
   return error instanceof Error ? error.message : "요청을 처리하지 못했습니다.";
@@ -654,11 +655,74 @@ function RetrainCard() {
   </article>;
 }
 
+// 조회 사용자 사이드바에 보여줄 페이지를 관리자가 체크박스로 제어 — 예측 모델처럼
+// 아직 안정화되지 않은 화면을 숨기거나, 데모·테스트 목적으로 노출 범위를 조정할 때 쓴다.
+// 관리자 화면에는 이 설정과 무관하게 항상 모든 메뉴가 보인다(BemsApp 사이드바 로직).
+function PageVisibilityPanel() {
+  const [visibility, setVisibility] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setVisibility(await apiRequest<Record<string, boolean>>("/settings/page-visibility"));
+    } catch (requestError) {
+      if (!isAbortError(requestError)) setError(messageOf(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  function toggle(id: string) {
+    setNotice("");
+    setVisibility(current => ({ ...current, [id]: !(current[id] ?? true) }));
+  }
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      setVisibility(await apiRequest<Record<string, boolean>>("/settings/page-visibility", {
+        method: "PUT",
+        body: JSON.stringify({ pages: visibility }),
+      }));
+      setNotice("페이지 노출 설정을 저장했습니다. 조회 사용자 화면에는 새로고침 후 반영됩니다.");
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <div className="screen-stack">
+    <article className="card admin-form">
+      <header><div><span className="eyebrow">VIEWER ACCESS</span><h3>조회 사용자에게 보여줄 페이지</h3></div><Eye size={22}/></header>
+      <p className="panel-copy">체크를 해제하면 조회 사용자(관리자 IP 외) 사이드바에서 해당 메뉴가 사라집니다. 관리자 화면에는 이 설정과 무관하게 항상 모든 메뉴가 보입니다.</p>
+      {loading ? <div className="loading inline-loading"><RefreshCw className="spin"/>불러오는 중입니다.</div> : <div className="visibility-grid">
+        {PAGE_DEFS.map(item => { const Icon = item.icon; return <label key={item.id} className="visibility-item">
+          <input type="checkbox" checked={visibility[item.id] !== false} onChange={() => toggle(item.id)}/>
+          <Icon size={16}/>{item.label}
+        </label>; })}
+      </div>}
+      <button type="button" className="primary-button" disabled={saving || loading} onClick={() => void save()}><Save size={16}/>{saving ? "저장 중..." : "저장"}</button>
+      {error && <div className="form-message error">{error}</div>}
+      {notice && <div className="form-message success">{notice}</div>}
+    </article>
+  </div>;
+}
+
 export function AdminScreen({ factory, date, isAdmin }: { factory: string; date: string; isAdmin: boolean }) {
-  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "data", "predictions", "mail"] : ["events", "targets"], [isAdmin]);
+  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "data", "predictions", "mail", "visibility"] : ["events", "targets"], [isAdmin]);
   const [tab, setTab] = useState<AdminTab>("events");
   useEffect(() => { if (!allowedTabs.includes(tab)) setTab("events"); }, [allowedTabs, tab]);
-  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", data: "데이터·동기화", predictions: "예측·모델 운영", mail: "메일 리포트" };
+  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", data: "데이터·동기화", predictions: "예측·모델 운영", mail: "메일 리포트", visibility: "페이지 노출 설정" };
 
   return <section className="screen-stack">
     {!isAdmin && <div className="permission-banner"><ShieldAlert size={21}/><div><strong>조회 사용자 모드</strong><p>이벤트와 절감 목표는 열람만 가능하며 모든 변경 작업은 서버에서 차단됩니다.</p></div></div>}
@@ -668,5 +732,6 @@ export function AdminScreen({ factory, date, isAdmin }: { factory: string; date:
     {tab === "data" && isAdmin && <DataPanel/>}
     {tab === "predictions" && isAdmin && <PredictionOpsPanel factory={factory} date={date}/>}
     {tab === "mail" && isAdmin && <MailPanel date={date}/>}
+    {tab === "visibility" && isAdmin && <PageVisibilityPanel/>}
   </section>;
 }

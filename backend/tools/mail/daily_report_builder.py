@@ -11,7 +11,8 @@ Daily Energy Alert Report Builder
      용수·폐수/용수). 각 셀은 기준일 실적과 전주 동일 요일 대비 증감률.
   2) 즉시 점검 대상
      - 최근 7일 중앙값의 1%를 유효 변화 기준으로 사용
-     - 생산량 감소 + 에너지 사용량 증가 조합만 경고 테이블로 요약.
+     - 두 가지 역행 조합만 경고 테이블로 요약: 생산량 감소+사용량 증가,
+       생산량 증가+원단위 증가(고정부하 분담 감소로는 설명되지 않는 비효율).
        폐수/용수는 사용량이 아닌 비율이므로 비교 대상에서 제외.
 
 주간/월간 메일은 period_report_builder.py가 본 모듈의 공용 집계 함수 +
@@ -728,8 +729,17 @@ def _daily_direction_signal(
     usage_prev: Optional[float],
     prod_base: Optional[float],
     usage_base: Optional[float],
+    intensity_curr: Optional[float] = None,
+    intensity_prev: Optional[float] = None,
+    intensity_base: Optional[float] = None,
 ) -> dict:
-    """생산량과 에너지 사용량 방향 조합을 대시보드와 동일한 라벨로 변환."""
+    """생산량·사용량·원단위 방향 조합을 대시보드와 동일한 라벨로 변환.
+
+    경고(warn) 조합은 두 가지: "생산↓ 사용↑"(사용량 역행)과
+    "생산↑ 원단위↑"(생산이 늘었는데도 원단위가 함께 오르는, 고정부하로는
+    설명되지 않는 비효율). intensity_* 인자를 넘기지 않으면 후자는 항상
+    비활성(0)으로 취급돼 기존 호출부와 호환된다.
+    """
     if any(v is None for v in (prod_curr, prod_prev, usage_curr, usage_prev)):
         return {
             "label": "데이터 없음", "badge": "-", "tone": "missing",
@@ -738,10 +748,13 @@ def _daily_direction_signal(
 
     p_dir = _daily_trend_direction(prod_curr, prod_prev, prod_base)
     u_dir = _daily_trend_direction(usage_curr, usage_prev, usage_base)
+    i_dir = _daily_trend_direction(intensity_curr, intensity_prev, intensity_base)
     if p_dir > 0 and u_dir < 0:
         label, badge, tone = "생산↑ 사용↓", "개선", "good"
     elif p_dir < 0 and u_dir > 0:
         label, badge, tone = "생산↓ 사용↑", "주의", "warn"
+    elif p_dir > 0 and i_dir > 0:
+        label, badge, tone = "생산↑ 원단위↑", "주의", "warn"
     elif p_dir > 0 and u_dir > 0:
         label, badge, tone = "동반 증가", "동행", "neutral"
     elif p_dir < 0 and u_dir < 0:
@@ -764,12 +777,15 @@ def _daily_direction_signal(
 def _build_daily_factory_rows(
     rows: List[dict], ref_date: date, prev_date: date
 ) -> Tuple[List[dict], List[dict], int]:
-    """사업장(전사 제외)의 생산량↔사용량 방향 경고를 생성 — 섹션2 전용.
+    """사업장(전사 제외)의 생산량↔사용량·원단위 방향 경고를 생성 — 섹션2 전용.
 
-    생산이 줄었는데 에너지 사용량이 오르면 "생산↓ 사용↑"(주의)로 표시한다.
+    생산이 줄었는데 에너지 사용량이 오르면 "생산↓ 사용↑"(주의)로,
+    생산이 늘었는데도 원단위가 함께 오르면(고정부하 분담 감소로는 설명되지
+    않는 비효율) "생산↑ 원단위↑"(주의)로 표시한다.
     prev_date는 기준일의 전주 동일
     요일(ref_date-7일)이며 호출부(build_daily_report)에서 계산해 전달받는다.
-    7일 중앙값 기준선(prod_base/usage_base)은 달력 기준 최근 7일을 그대로 쓴다.
+    7일 중앙값 기준선(prod_base/usage_base/intensity_base)은 달력 기준 최근
+    7일을 그대로 쓴다.
     """
     history_dates = [ref_date - timedelta(days=i) for i in range(6, -1, -1)]
     factory_rows: List[dict] = []
@@ -792,14 +808,22 @@ def _build_daily_factory_rows(
             usage_curr = _metric_value(curr, col)
             usage_prev = _metric_value(prev, col)
             usage_base = _median_nonzero([_metric_value(history[d], col) for d in history_dates])
+            unit_col = metric["unit_col"]
+            intensity_curr = _metric_value(curr, unit_col)
+            intensity_prev = _metric_value(prev, unit_col)
+            intensity_base = _median_nonzero([_metric_value(history[d], unit_col) for d in history_dates])
             signal = _daily_direction_signal(
                 prod_curr, prod_prev, usage_curr, usage_prev, prod_base, usage_base,
+                intensity_curr, intensity_prev, intensity_base,
             )
             usage_delta, usage_color, usage_pct = _pct_delta(usage_curr, usage_prev)
+            intensity_delta, intensity_color, intensity_pct = _pct_delta(intensity_curr, intensity_prev)
             signal.update({
                 "energy": metric["label"].replace(" 원단위", ""),
                 "usage_delta": usage_delta,
                 "usage_delta_color": usage_color,
+                "intensity_delta": intensity_delta,
+                "intensity_delta_color": intensity_color,
                 "production_delta": prod_delta,
             })
             signals.append(signal)
@@ -808,8 +832,11 @@ def _build_daily_factory_rows(
                     "date": ref_date.strftime("%Y-%m-%d"),
                     "factory": factory_label,
                     "energy": metric["label"].replace(" 원단위", ""),
+                    "label": signal["label"],
                     "production_delta": prod_delta,
                     "usage_delta": usage_delta,
+                    "intensity_delta": intensity_delta,
+                    "intensity_delta_color": intensity_color,
                 })
             elif signal["tone"] == "good":
                 good_count += 1
