@@ -181,7 +181,7 @@ nav button:focus-visible{outline-offset:-2px}
 @media(prefers-reduced-motion:reduce){.spin{animation:none}nav button::before,.data-toggle>summary::before{transition:none}}
 
 /* ── 2026-07-20 범례 on/off 토글·시간축 데이터 표 전치 ── */
-.chart-legend{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.chart-legend{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:10px}
 .legend-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);border-radius:20px;padding:4px 10px 4px 8px;font-size:11px;color:var(--text);cursor:pointer;line-height:1.3}
 .legend-chip i{width:10px;height:10px;border-radius:3px;flex:none}
 .legend-chip.off{color:var(--muted);opacity:.6;text-decoration:line-through}

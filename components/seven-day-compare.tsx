@@ -143,12 +143,6 @@ function Quadrant({ trend, metric }: { trend: AnyData[]; metric: (typeof usageMe
       {goodDays > 0 && <i className="quad-chip good">생산↑ 사용↓ {goodDays}일</i>}
       {warnDays > 0 && <i className="quad-chip warn">생산↓ 사용↑ {warnDays}일</i>}
     </div>
-    <ToggleLegend items={[
-      { key: "prodIdx", label: "생산량 지수", color: PROD_COLOR },
-      { key: "usageIdx", label: "사용량 지수", color: metric.color },
-      { key: "goodY", label: "생산↑ 사용↓", color: GOOD_COLOR },
-      { key: "warnY", label: "생산↓ 사용↑", color: WARN_COLOR },
-    ]} hidden={legend.hidden} onToggle={legend.toggle}/>
     <div className="chart quad-chart">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows} margin={{ top: 18, right: 12, bottom: 0, left: -18 }}>
@@ -163,6 +157,12 @@ function Quadrant({ trend, metric }: { trend: AnyData[]; metric: (typeof usageMe
         </ComposedChart>
       </ResponsiveContainer>
     </div>
+    <ToggleLegend items={[
+      { key: "prodIdx", label: "생산량 지수", color: PROD_COLOR },
+      { key: "usageIdx", label: "사용량 지수", color: metric.color },
+      { key: "goodY", label: "생산↑ 사용↓", color: GOOD_COLOR },
+      { key: "warnY", label: "생산↓ 사용↑", color: WARN_COLOR },
+    ]} hidden={legend.hidden} onToggle={legend.toggle}/>
     <details className="quad-details">
       <summary>데이터 테이블</summary>
       <PivotTable periods={rows.map(row => row.date)} rows={pivotRows} totalLabel={`${rows.length}일 요약`}/>

@@ -1376,6 +1376,18 @@ def production(
     wip_mix = import_core("app.services.production_correction_service").get_wip_mix(
         factory, period_from, period_to,
     )
+    # 광주 전용 — 유틸리티가 실제로 소비되는 총 생산량(완제품+재공품 환산, ton).
+    # 자사 완제품 실적(daily_output의 cat2 합)만으로는 탈지분유·생크림 등
+    # 판매용 반제품 생산이 빠져 원단위 분모(accounted_kg)와 어긋나 보인다 —
+    # 같은 정의를 트렌드 차트에도 노출해 실질 생산량을 비교할 수 있게 한다.
+    wip_daily_kg: dict[date, float] = {}
+    if factory == "광주":
+        wip_frame = import_core("app.services.production_correction_service").get_wip_daily("광주")
+        for row in _table_records(wip_frame):
+            row_date = normalize_date(row.get("date"))
+            kg = optional_scalar(row.get("total_wip_kg"))
+            if row_date is not None and kg is not None and period_from <= row_date <= period_to:
+                wip_daily_kg[row_date] = wip_daily_kg.get(row_date, 0.0) + kg
     top_rows = fetch_all(
         """
         SELECT item_name name, SUM(plan) plan, SUM(actual) actual
@@ -1396,12 +1408,19 @@ def production(
     burnup: list[dict[str, Any]] = []
     if mode == "year":
         monthly_map = {int(row["month_no"]): row for row in daily if row.get("month_no") is not None}
+        wip_monthly_ton: dict[int, float] = {}
+        for wip_date, kg in wip_daily_kg.items():
+            wip_monthly_ton[wip_date.month] = wip_monthly_ton.get(wip_date.month, 0.0) + kg / 1000
         for month in range(1, 13):
             row = monthly_map.get(month, {})
-            daily_output.append({
+            entry = {
                 "date": f"{month}월",
                 **{key: round(scalar(row.get(key)), 3) for key in cat2_keys},
-            })
+            }
+            if wip_monthly_ton:
+                cat2_total = sum(scalar(row.get(key)) for key in cat2_keys)
+                entry["utilityProd"] = round(cat2_total + wip_monthly_ton.get(month, 0.0), 3)
+            daily_output.append(entry)
         # 연간 Burn-up — 월별 계획 누계 vs 실적 누계 (legacy _render_annual_burnup)
         monthly_plan_rows = fetch_all(
             """
@@ -1432,10 +1451,14 @@ def production(
             row_date = normalize_date(row.get("date"))
             if row_date is None:
                 continue
-            daily_output.append({
+            entry = {
                 "date": row_date.strftime("%m.%d") if mode == "month" else row_date.isoformat(),
                 **{key: round(scalar(row.get(key)), 3) for key in cat2_keys},
-            })
+            }
+            if wip_daily_kg:
+                cat2_total = sum(scalar(row.get(key)) for key in cat2_keys)
+                entry["utilityProd"] = round(cat2_total + wip_daily_kg.get(row_date, 0.0) / 1000, 3)
+            daily_output.append(entry)
 
     top_items = []
     for row in top_rows:

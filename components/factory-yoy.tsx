@@ -65,7 +65,6 @@ function ModeChart({ rows, mode, def }: { rows: AnyData[]; mode: YoyMode; def: M
     <div className="quad-head" style={{ borderColor: def.color }}>
       <b>{def.label}</b><small>[{def.unit}]</small>
     </div>
-    <ToggleLegend items={[{ key: "previous", label: "전년", color: "var(--chart-previous)" }, { key: "current", label: "금년", color: def.color }]} hidden={legend.hidden} onToggle={legend.toggle}/>
     <div className="chart quad-chart">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: -14 }}>
@@ -84,6 +83,7 @@ function ModeChart({ rows, mode, def }: { rows: AnyData[]; mode: YoyMode; def: M
         </BarChart>
       </ResponsiveContainer>
     </div>
+    <ToggleLegend items={[{ key: "previous", label: "전년", color: "var(--chart-previous)" }, { key: "current", label: "금년", color: def.color }]} hidden={legend.hidden} onToggle={legend.toggle}/>
   </div>;
 }
 

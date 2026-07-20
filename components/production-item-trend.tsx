@@ -109,7 +109,6 @@ export function ProductionItemTrend({ factory, date }: { factory: string; date: 
           <div><span>전월 대비</span><b className={(result[0].latest.mom ?? 0) >= 0 ? "good" : "bad"}>{changeText(result[0].latest.mom)}</b></div>
           <div><span>전년 동월 대비</span><b className={(result[0].latest.yoy ?? 0) >= 0 ? "good" : "bad"}>{changeText(result[0].latest.yoy)}</b></div>
         </div>}
-        <ToggleLegend items={seriesItems} hidden={seriesLegend.hidden} onToggle={seriesLegend.toggle}/>
         <div className="chart"><ResponsiveContainer width="100%" height="100%">
           <LineChart data={merged}><CartesianGrid vertical={false}/><XAxis dataKey="month" tick={{ fontSize: 11 }}/><YAxis tick={{ fontSize: 11 }}/><Tooltip {...tooltipStyle} formatter={(value: unknown) => numberText(value)}/>
             {compareMode
@@ -117,6 +116,7 @@ export function ProductionItemTrend({ factory, date }: { factory: string; date: 
               : <>{!seriesLegend.isHidden("prevYear") && <Line type="linear" dataKey="prevYear" name="전년 동월" stroke="var(--chart-previous)" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls/>}{!seriesLegend.isHidden("actual") && <Line type="linear" dataKey="actual" name="실적" stroke="var(--chart-production)" strokeWidth={2} dot={{ r: 3, fill: "var(--chart-production)", stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>}</>}
           </LineChart>
         </ResponsiveContainer></div>
+        <ToggleLegend items={seriesItems} hidden={seriesLegend.hidden} onToggle={seriesLegend.toggle}/>
       </>}
     </div>
   </article>;
