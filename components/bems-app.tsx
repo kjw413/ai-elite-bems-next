@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Activity, Bolt, BrainCircuit, Building2, CalendarDays, ChevronRight, Database, Download, Factory, Gauge, Menu, Moon, PackageCheck, RefreshCw, ShieldCheck, Sun, X } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiGet, query } from "@/lib/bems-api";
 import { downloadCsv } from "@/lib/bems-csv";
 import { demo, factories, factoryColors } from "@/lib/bems-data";
@@ -17,6 +17,8 @@ import { FactoryYoy, IssuesCard } from "@/components/factory-yoy";
 import { FeatureImportance } from "@/components/feature-importance";
 import { PredictionMonitoring } from "@/components/prediction-monitoring";
 import { ProductionItemTrend } from "@/components/production-item-trend";
+import { PivotTable, type PivotRow } from "@/components/pivot-table";
+import { ToggleLegend, useSeriesToggle, type LegendItem } from "@/components/toggle-legend";
 
 type Screen = PageId;
 type DataScreen = Exclude<Screen, "report" | "admin">;
@@ -102,12 +104,16 @@ function Dashboard({ data, factory, date }: { data: AnyData; factory: string; da
     ...row,
     band: row.lower != null && row.upper != null ? [row.lower, row.upper] : null,
   }));
+  const trendLegend = useSeriesToggle();
+  const trendItems: LegendItem[] = [{ key: "band", label: "P05~P95", color: palette.band }, { key: "predicted", label: "AI 예측", color: palette.predicted }, { key: "actual", label: "실제", color: palette.actual }];
+  const powerYoyLegend = useSeriesToggle();
+  const powerYoyItems: LegendItem[] = [{ key: "previous", label: "전년", color: palette.previous }, { key: "current", label: "금년", color: palette.actual }];
   return <>
     <section className="kpi-grid">{data.metrics?.map((m: AnyData) => <Kpi key={m.id} label={m.label} value={m.value} unit={m.unit} change={m.change} goodWhen={m.id === "production" ? "up" : "down"} icon={m.id === "production" ? Factory : Bolt}/>)}</section>
     <section className={`alert ${data.alert?.level ?? "normal"}`}><BrainCircuit size={22}/><div><strong>{data.alert?.title}</strong><p>{data.alert?.description}</p></div></section>
-    <section className="content-grid"><article className="card chart-card wide"><CardTitle title="최근 7일 전력 사용량" meta="MWh · AI P05~P95 정상범주"><CsvButton filename={`7day_trend_${factory}_${date}`} rows={data.trend} columns={["date","actual","predicted","lower","upper"]} labels={{date:"일자",actual:"실제(MWh)",predicted:"AI 예측(MWh)",lower:"P05(MWh)",upper:"P95(MWh)"}}/></CardTitle><Chart><AreaChart data={trend}><defs><linearGradient id="band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={palette.band} stopOpacity={.22}/><stop offset="1" stopColor={palette.band} stopOpacity={.02}/></linearGradient></defs><CartesianGrid vertical={false}/><XAxis dataKey="date"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Area type="linear" dataKey="band" name="P05~P95" stroke="none" fill="url(#band)" connectNulls={false}/><Line type="linear" dataKey="predicted" name="AI 예측" stroke={palette.predicted} strokeDasharray="5 4" strokeWidth={2} dot={seriesDot(palette.predicted)} activeDot={{ r: 5 }}/><Line type="linear" dataKey="actual" name="실제" stroke={palette.actual} strokeWidth={2} dot={seriesDot(palette.actual)} activeDot={{ r: 5 }}/></AreaChart></Chart></article>
+    <section className="content-grid"><article className="card chart-card wide"><CardTitle title="최근 7일 전력 사용량" meta="MWh · AI P05~P95 정상범주"><CsvButton filename={`7day_trend_${factory}_${date}`} rows={data.trend} columns={["date","actual","predicted","lower","upper"]} labels={{date:"일자",actual:"실제(MWh)",predicted:"AI 예측(MWh)",lower:"P05(MWh)",upper:"P95(MWh)"}}/></CardTitle><ToggleLegend items={trendItems} hidden={trendLegend.hidden} onToggle={trendLegend.toggle}/><Chart><AreaChart data={trend}><defs><linearGradient id="band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={palette.band} stopOpacity={.22}/><stop offset="1" stopColor={palette.band} stopOpacity={.02}/></linearGradient></defs><CartesianGrid vertical={false}/><XAxis dataKey="date"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!trendLegend.isHidden("band") && <Area type="linear" dataKey="band" name="P05~P95" stroke="none" fill="url(#band)" connectNulls={false}/>}{!trendLegend.isHidden("predicted") && <Line type="linear" dataKey="predicted" name="AI 예측" stroke={palette.predicted} strokeDasharray="5 4" strokeWidth={2} dot={seriesDot(palette.predicted)} activeDot={{ r: 5 }}/>}{!trendLegend.isHidden("actual") && <Line type="linear" dataKey="actual" name="실제" stroke={palette.actual} strokeWidth={2} dot={seriesDot(palette.actual)} activeDot={{ r: 5 }}/>}</AreaChart></Chart></article>
     <article className="card chart-card"><CardTitle title="공장별 전력 원단위" meta="낮을수록 효율적"/><Chart><BarChart data={data.factoryComparison} layout="vertical"><CartesianGrid horizontal={false}/><XAxis type="number"/><YAxis dataKey="factory" type="category" width={58}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="value" name="kWh/ton" fill={palette.target} radius={[0,4,4,0]} maxBarSize={18}/></BarChart></Chart></article>
-    <article className="card chart-card"><CardTitle title="월별 전년 비교" meta="kWh/ton"><CsvButton filename={`yoy_power_${factory}_${date}`} rows={data.yoy} columns={["month","previous","current"]} labels={{month:"월","previous":"전년(kWh/ton)",current:"금년(kWh/ton)"}}/></CardTitle><Chart><LineChart data={data.yoy}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Line dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)}/><Line dataKey="current" name="금년" stroke={palette.actual} strokeWidth={2} dot={seriesDot(palette.actual)} activeDot={{ r: 5 }}/></LineChart></Chart></article>
+    <article className="card chart-card"><CardTitle title="월별 전년 비교" meta="kWh/ton"><CsvButton filename={`yoy_power_${factory}_${date}`} rows={data.yoy} columns={["month","previous","current"]} labels={{month:"월","previous":"전년(kWh/ton)",current:"금년(kWh/ton)"}}/></CardTitle><ToggleLegend items={powerYoyItems} hidden={powerYoyLegend.hidden} onToggle={powerYoyLegend.toggle}/><Chart><LineChart data={data.yoy}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!powerYoyLegend.isHidden("previous") && <Line dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)}/>}{!powerYoyLegend.isHidden("current") && <Line dataKey="current" name="금년" stroke={palette.actual} strokeWidth={2} dot={seriesDot(palette.actual)} activeDot={{ r: 5 }}/>}</LineChart></Chart></article>
     <article className="card events"><CardTitle title="최근 현장 이벤트" meta={`${data.events?.length ?? 0}건`}/>{data.events?.map((event: AnyData) => <div className="event" key={event.id}><time>{event.date}</time><span>{event.factory}</span><div><b>{event.tag}</b><p>{event.note}</p></div></div>)}</article>
     <SevenDayCompare trend={data.trend ?? []} factory={factory} date={date}/>
     <FactoryYoy rows={data.yoyFactories ?? []} period={data.yoyPeriod} factory={factory} date={date}/>
@@ -180,6 +186,27 @@ function Energy({ data, mode, onModeChange, rangeFrom, rangeTo, onRangeChange }:
   }));
   const wasteRatioRows = (data.factories ?? []).map((r: AnyData) => ({ factory: r.factory, water: r.water, wastewater: r.wastewater, ratio: r.water > 0 ? Math.round(r.wastewater / r.water * 100) / 100 : null }));
   const isWater = metric === "water" || metric === "wastewater";
+  // 일별 사용 추이 — 범례 on/off(끄면 autoscale) + 전치 데이터 표(시간을 열로, 지표를 행으로).
+  const dailyLegend = useSeriesToggle();
+  const dailySeriesForTable = comparing ? byFactoryRows : (data.daily ?? []);
+  const dailyPeriods = dailySeriesForTable.map((r: AnyData) => r.date);
+  const dailyRowDefs: LegendItem[] = comparing
+    ? compareNames.map(name => ({ key: name, label: name, color: factoryColors[name] }))
+    : metric === "power"
+    ? [
+        { key: "power", label: "전체 전력", color: energyMetricColors.power },
+        { key: "freezing", label: "냉동", color: palette.actual },
+        { key: "compressor", label: "공압", color: palette.target },
+        { key: "other", label: "기타", color: palette.previous },
+      ]
+    : [{ key: metric, label: energyMetricLabels[metric], color: energyMetricColors[metric] }];
+  const dailyPivotRows: PivotRow[] = dailyRowDefs.map(def => {
+    const rowValues = dailySeriesForTable.map((r: AnyData) => (typeof r[def.key] === "number" ? r[def.key] : null));
+    const total = rowValues.reduce((acc: number, v: number | null) => acc + (v ?? 0), 0);
+    return { key: def.key, label: def.label, values: rowValues, total };
+  });
+  const showDailyLegend = dailyRowDefs.length > 1;
+  const yoyLegend = useSeriesToggle();
   return <><div className="segmented" role="group" aria-label="에너지 지표 선택">{Object.entries(energyMetricLabels).map(([id,label])=><button type="button" className={metric===id?"active":""} aria-pressed={metric===id} onClick={()=>setMetric(id)} key={id}>{label}</button>)}</div>
     <div className="mode-row">
       <div className="segmented" role="group" aria-label="사용량 조회 방식">{energyModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
@@ -194,17 +221,26 @@ function Energy({ data, mode, onModeChange, rangeFrom, rangeTo, onRangeChange }:
     <section className="content-grid">
       <article className="card chart-card wide"><CardTitle title={comparing ? "일별 사용 추이 · 공장별 비교" : metric === "power" ? "일별 사용 추이 · 설비 분해" : "일별 사용 추이"} meta={units[metric]}>{comparing
         ? <CsvButton filename={`energy_daily_factories_${metric}`} rows={byFactoryRows} columns={["date", ...compareNames]} labels={{date:"일자",...Object.fromEntries(compareNames.map(name=>[name,`${name}(${units[metric]})`]))}}/>
-        : <CsvButton filename={`energy_daily_${metric}`} rows={data.daily} columns={["date","power","freezing","compressor","other","fuel","water","wastewater"]} labels={{date:"일자",power:"전력(MWh)",freezing:"냉동(MWh)",compressor:"공압(MWh)",other:"기타(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/>}</CardTitle><Chart>{comparing
-        ? <LineChart data={byFactoryRows}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/>{compareNames.map(name => <Line key={name} type="linear" dataKey={name} name={name} stroke={factoryColors[name]} strokeWidth={2} dot={false} activeDot={{ r: 5 }} connectNulls={false}/>)}</LineChart>
+        : <CsvButton filename={`energy_daily_${metric}`} rows={data.daily} columns={["date","power","freezing","compressor","other","fuel","water","wastewater"]} labels={{date:"일자",power:"전력(MWh)",freezing:"냉동(MWh)",compressor:"공압(MWh)",other:"기타(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/>}</CardTitle>
+        {showDailyLegend && <ToggleLegend items={dailyRowDefs} hidden={dailyLegend.hidden} onToggle={dailyLegend.toggle}/>}
+        <Chart>{comparing
+        ? <LineChart data={byFactoryRows}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{compareNames.map(name => !dailyLegend.isHidden(name) && <Line key={name} type="linear" dataKey={name} name={name} stroke={factoryColors[name]} strokeWidth={2} dot={false} activeDot={{ r: 5 }} connectNulls={false}/>)}</LineChart>
         : metric === "power"
-        ? <ComposedChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Area type="linear" dataKey="power" name="전체 전력" stroke={energyMetricColors.power} strokeWidth={2} fill={energyMetricColors.power} fillOpacity={0.1}/><Line type="linear" dataKey="freezing" name="냉동" stroke={palette.actual} strokeWidth={2} dot={false}/><Line type="linear" dataKey="compressor" name="공압" stroke={palette.target} strokeWidth={2} dot={false}/><Line type="linear" dataKey="other" name="기타" stroke={palette.previous} strokeWidth={2} strokeDasharray="4 3" dot={false}/></ComposedChart>
-        : <AreaChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Area type="linear" dataKey={metric} stroke={energyMetricColors[metric]} strokeWidth={2} fill={energyMetricColors[metric]} fillOpacity={0.1}/></AreaChart>}</Chart></article>
+        ? <ComposedChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!dailyLegend.isHidden("power") && <Area type="linear" dataKey="power" name="전체 전력" stroke={energyMetricColors.power} strokeWidth={2} fill={energyMetricColors.power} fillOpacity={0.1}/>}{!dailyLegend.isHidden("freezing") && <Line type="linear" dataKey="freezing" name="냉동" stroke={palette.actual} strokeWidth={2} dot={false}/>}{!dailyLegend.isHidden("compressor") && <Line type="linear" dataKey="compressor" name="공압" stroke={palette.target} strokeWidth={2} dot={false}/>}{!dailyLegend.isHidden("other") && <Line type="linear" dataKey="other" name="기타" stroke={palette.previous} strokeWidth={2} strokeDasharray="4 3" dot={false}/>}</ComposedChart>
+        : <AreaChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Area type="linear" dataKey={metric} stroke={energyMetricColors[metric]} strokeWidth={2} fill={energyMetricColors[metric]} fillOpacity={0.1}/></AreaChart>}</Chart>
+        <DataToggle><PivotTable periods={dailyPeriods} rows={dailyPivotRows} totalLabel="누계"/></DataToggle></article>
       <article className="card list"><CardTitle title="설비 구성" meta={summaryMeta}/>{data.equipment?.map((r:AnyData)=><div className="progress" key={r.name}><div><span>{r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{width:`${r.value}%`}}/></i></div>)}</article>
-      <article className="card chart-card wide"><CardTitle title={`전년대비 ${energyMetricLabels[metric]} 사용량`} meta={`${data.yoyYear ?? ""}년 vs 전년 · ${yoyUnit}`}><CsvButton filename={`energy_yoy_${metric}_${data.yoyYear ?? ""}`} rows={yoyCsvRows} columns={["month","previous","current","diff","diffPct"]} labels={{month:"월",previous:`전년(${yoyUnit})`,current:`금년(${yoyUnit})`,diff:`증감량(${yoyUnit})`,diffPct:"증감률(%)"}}/></CardTitle><Chart><LineChart data={yoyTable.rows}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/><Line type="linear" dataKey="current" name="금년" stroke={energyMetricColors[metric]} strokeWidth={2} dot={seriesDot(energyMetricColors[metric])} activeDot={{ r: 5 }} connectNulls/></LineChart></Chart>
-        <DataToggle><div className="table-wrap yoy-table"><table><thead><tr><th>월</th><th>전년 실적</th><th>금년 실적</th><th>증감량</th><th>증감률(%)</th></tr></thead><tbody>
-          {yoyTable.rows.map(row => <tr key={row.month}><td>{row.month}</td><td>{row.previous == null ? "-" : fmt(row.previous)}</td><td>{row.current == null ? "-" : fmt(row.current)}</td><td>{row.diff == null ? "-" : fmt(row.diff)}</td><td className={row.diffPct == null ? "" : row.diffPct > 0 ? "bad" : "good"}>{row.diffPct == null ? "-" : `${row.diffPct > 0 ? "+" : ""}${fmt(row.diffPct)}`}</td></tr>)}
-          {yoyTable.total && <tr className="total-row"><td>{yoyTable.total.month}</td><td>{fmt(yoyTable.total.previous)}</td><td>{fmt(yoyTable.total.current)}</td><td>{fmt(yoyTable.total.diff)}</td><td className={yoyTable.total.diffPct == null ? "" : yoyTable.total.diffPct > 0 ? "bad" : "good"}>{yoyTable.total.diffPct == null ? "-" : `${yoyTable.total.diffPct > 0 ? "+" : ""}${fmt(yoyTable.total.diffPct)}`}</td></tr>}
-        </tbody></table></div></DataToggle></article>
+      <article className="card chart-card wide"><CardTitle title={`전년대비 ${energyMetricLabels[metric]} 사용량`} meta={`${data.yoyYear ?? ""}년 vs 전년 · ${yoyUnit}`}><CsvButton filename={`energy_yoy_${metric}_${data.yoyYear ?? ""}`} rows={yoyCsvRows} columns={["month","previous","current","diff","diffPct"]} labels={{month:"월",previous:`전년(${yoyUnit})`,current:`금년(${yoyUnit})`,diff:`증감량(${yoyUnit})`,diffPct:"증감률(%)"}}/></CardTitle>
+        <ToggleLegend items={[{key:"previous",label:"전년",color:palette.previous},{key:"current",label:"금년",color:energyMetricColors[metric]}]} hidden={yoyLegend.hidden} onToggle={yoyLegend.toggle}/>
+        <Chart><LineChart data={yoyTable.rows}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!yoyLegend.isHidden("previous") && <Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/>}{!yoyLegend.isHidden("current") && <Line type="linear" dataKey="current" name="금년" stroke={energyMetricColors[metric]} strokeWidth={2} dot={seriesDot(energyMetricColors[metric])} activeDot={{ r: 5 }} connectNulls/>}</LineChart></Chart>
+        <DataToggle><PivotTable periods={yoyTable.rows.map(row => row.month)} totalLabel={yoyTable.total?.month ?? "누계"} rows={[
+          { key: "previous", label: `전년 실적(${yoyUnit})`, values: yoyTable.rows.map(row => row.previous), total: yoyTable.total?.previous ?? null },
+          { key: "current", label: `금년 실적(${yoyUnit})`, values: yoyTable.rows.map(row => row.current), total: yoyTable.total?.current ?? null },
+          { key: "diff", label: `증감량(${yoyUnit})`, values: yoyTable.rows.map(row => row.diff), total: yoyTable.total?.diff ?? null },
+          { key: "diffPct", label: "증감률(%)", values: yoyTable.rows.map(row => row.diffPct), total: yoyTable.total?.diffPct ?? null,
+            format: value => value == null ? "-" : `${Number(value) > 0 ? "+" : ""}${fmt(Number(value))}`,
+            className: value => value == null ? undefined : Number(value) > 0 ? "bad" : "good" },
+        ]}/></DataToggle></article>
       {isWater
         ? <article className="card chart-card"><CardTitle title="공장별 폐수/용수 비율" meta={`${summaryMeta} · 낮을수록 양호`}><CsvButton filename={`wastewater_ratio_${data.dateFrom ?? ""}`} rows={wasteRatioRows} columns={["factory","water","wastewater","ratio"]} labels={{factory:"공장",water:"용수(천 ton)",wastewater:"폐수(천 ton)",ratio:"폐수/용수"}}/></CardTitle><Chart><BarChart data={wasteRatioRows}><CartesianGrid vertical={false}/><XAxis dataKey="factory"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="ratio" name="폐수/용수 비율" fill={energyMetricColors.wastewater} radius={[4,4,0,0]} maxBarSize={22}/></BarChart></Chart></article>
         : <article className="card table-card"><CardTitle title="공장별 사용량" meta={`${summaryMeta} 누계`}><CsvButton filename="energy_factories" rows={data.factories} columns={["factory","power","fuel","water","wastewater"]} labels={{factory:"공장",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><DataTable rows={data.factories} columns={["factory",metric]} labels={{factory:"공장",[metric]:units[metric]}}/></article>}
@@ -220,7 +256,9 @@ function Intensity({ data, metric, onMetricChange, mode, onModeChange, rangeFrom
   const periodLabel = data.dateFrom && data.dateTo ? `${data.dateFrom} ~ ${data.dateTo}` : "";
   const [showCumulative, setShowCumulative] = useState(false);
   const metricColor = energyMetricColors[metric] ?? palette.actual;
-  const dailySeries = data.daily ?? [];
+  // 주말·공휴일 등 생산 실적이 없는 날은 value가 null로 내려온다 — 그 날짜 자체를
+  // 배열에서 제거해 x축에 빈 구간이 생기지 않고 실적 있는 날끼리 바로 이어지게 한다.
+  const dailySeries = (data.daily ?? []).filter((row: AnyData) => row.value != null);
   // 연간 '누계 추이 보기' (legacy 규칙, 원단위 페이지) — 각 월을 1월부터의 가중
   // 누계 원단위(Σ사용량 ÷ Σ생산톤)로 재계산한다. 단순 월 원단위 평균과 다르다.
   const monthlyBase = data.monthly ?? [];
@@ -243,6 +281,13 @@ function Intensity({ data, metric, onMetricChange, mode, onModeChange, rangeFrom
     change: row.current != null && row.previous > 0 ? Math.round((row.current / row.previous - 1) * 1000) / 10 : null,
   }));
   const cumulative = data.yoyCumulative;
+  // 일별 원단위 표의 누계는 단순 평균이 아니라 가중 누계(Σ사용량÷Σ생산톤) — 서버가
+  // 각 날짜에 실어 보내는 usage/productionTon 원자료로 클라이언트가 재계산한다.
+  const dailyUsageTotal = dailySeries.reduce((acc: number, row: AnyData) => acc + (Number(row.usage) || 0), 0);
+  const dailyTonTotal = dailySeries.reduce((acc: number, row: AnyData) => acc + (Number(row.productionTon) || 0), 0);
+  const dailyWeightedTotal = dailyTonTotal > 0 ? Math.round(dailyUsageTotal / dailyTonTotal * 100) / 100 : null;
+  const monthlyLegend = useSeriesToggle();
+  const showMonthlyTotal = Boolean(cumulative) && !showCumulative;
   return <><div className="segmented" role="group" aria-label="원단위 지표 선택">{intensityMetrics.map(item=><button type="button" key={item.id} className={metric===item.id?"active":""} aria-pressed={metric===item.id} onClick={()=>onMetricChange(item.id)}>{item.label}</button>)}</div>
     <div className="mode-row">
       <div className="segmented" role="group" aria-label="원단위 일별 조회 방식">{energyModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
@@ -254,12 +299,20 @@ function Intensity({ data, metric, onMetricChange, mode, onModeChange, rangeFrom
     </div>
     <section className="kpi-grid compact"><Kpi label="MTD 원단위" value={data.summary?.mtd?.current} unit={data.unit} change={data.summary?.mtd?.change} icon={Gauge}/><Kpi label="YTD 원단위" value={data.summary?.ytd?.current} unit={data.unit} change={data.summary?.ytd?.change} icon={CalendarDays}/><Kpi label="절감 목표" value={data.targetPct} unit="%" icon={ShieldCheck}/></section>
     <section className="content-grid">
-      <article className="card chart-card span-all"><CardTitle title="일별 원단위 추이" meta={`${data.unit} · 생산 실적 있는 날만 표시`}><CsvButton filename={`intensity_daily_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={dailySeries} columns={["date","value"]} labels={{date:"일자",value:`원단위(${data.unit})`}}/></CardTitle><Chart><LineChart data={dailySeries}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Line type="linear" dataKey="value" name={`원단위(${data.unit})`} stroke={metricColor} strokeWidth={2} connectNulls={false} dot={seriesDot(metricColor)} activeDot={{ r: 5 }}/></LineChart></Chart></article>
-      <article className="card chart-card wide"><CardTitle title={`${data.year}년 원단위 추이${showCumulative ? " · 누계" : ""}`} meta={data.unit}><label className="check-toggle"><input type="checkbox" checked={showCumulative} onChange={event => setShowCumulative(event.target.checked)}/>누계 추이 보기</label><CsvButton filename={`intensity_monthly_${metric}_${data.year}`} rows={monthlySeries} columns={["month","previous","target","current"]} labels={{month:"월",previous:`전년(${data.unit})`,target:`목표(${data.unit})`,current:`금년(${data.unit})`}}/></CardTitle><Chart><LineChart data={monthlySeries}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/><Line type="linear" dataKey="target" name="목표" stroke={palette.target} strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls/><Line type="linear" dataKey="current" name="금년" stroke={metricColor} strokeWidth={2} dot={seriesDot(metricColor)} activeDot={{ r: 5 }} connectNulls/></LineChart></Chart>
-        <DataToggle><div className="table-wrap yoy-table"><table><thead><tr><th>월</th><th>전년</th><th>금년</th><th>증감률(%)</th></tr></thead><tbody>
-          {yoyRows.map((row: AnyData) => <tr key={row.month}><td>{row.month}</td><td>{row.previous == null ? "-" : fmt(row.previous, 2)}</td><td>{row.current == null ? "-" : fmt(row.current, 2)}</td><td className={row.change == null ? "" : row.change > 0 ? "bad" : "good"}>{row.change == null ? "-" : `${row.change > 0 ? "+" : ""}${fmt(row.change)}`}</td></tr>)}
-          {cumulative && !showCumulative && <tr className="total-row"><td>누계 (1~{cumulative.lastMonth}월) · 가중</td><td>{cumulative.previous == null ? "-" : fmt(cumulative.previous, 2)}</td><td>{cumulative.current == null ? "-" : fmt(cumulative.current, 2)}</td><td className={cumulative.change == null ? "" : cumulative.change > 0 ? "bad" : "good"}>{cumulative.change == null ? "-" : `${cumulative.change > 0 ? "+" : ""}${fmt(cumulative.change)}`}</td></tr>}
-        </tbody></table></div><p className="quad-caption">누계 추이 보기는 각 월을 1월부터의 가중 평균(Σ사용량 ÷ Σ생산톤)으로 다시 그립니다.</p></DataToggle></article>
+      <article className="card chart-card span-all"><CardTitle title="일별 원단위 추이" meta={`${data.unit} · 생산 실적 있는 날만 표시`}><CsvButton filename={`intensity_daily_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={dailySeries} columns={["date","value"]} labels={{date:"일자",value:`원단위(${data.unit})`}}/></CardTitle><Chart><LineChart data={dailySeries}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Line type="linear" dataKey="value" name={`원단위(${data.unit})`} stroke={metricColor} strokeWidth={2} connectNulls={false} dot={seriesDot(metricColor)} activeDot={{ r: 5 }}/></LineChart></Chart>
+        <DataToggle><PivotTable periods={dailySeries.map((row: AnyData) => row.date)} totalLabel={`가중 누계(${data.unit})`} rows={[
+          { key: "value", label: `원단위(${data.unit})`, values: dailySeries.map((row: AnyData) => row.value), total: dailyWeightedTotal, format: value => value == null ? "-" : fmt(Number(value), 2) },
+        ]}/></DataToggle></article>
+      <article className="card chart-card wide"><CardTitle title={`${data.year}년 원단위 추이${showCumulative ? " · 누계" : ""}`} meta={data.unit}><label className="check-toggle"><input type="checkbox" checked={showCumulative} onChange={event => setShowCumulative(event.target.checked)}/>누계 추이 보기</label><CsvButton filename={`intensity_monthly_${metric}_${data.year}`} rows={monthlySeries} columns={["month","previous","target","current"]} labels={{month:"월",previous:`전년(${data.unit})`,target:`목표(${data.unit})`,current:`금년(${data.unit})`}}/></CardTitle>
+        <ToggleLegend items={[{key:"previous",label:"전년",color:palette.previous},{key:"target",label:"목표",color:palette.target},{key:"current",label:"금년",color:metricColor}]} hidden={monthlyLegend.hidden} onToggle={monthlyLegend.toggle}/>
+        <Chart><LineChart data={monthlySeries}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!monthlyLegend.isHidden("previous") && <Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/>}{!monthlyLegend.isHidden("target") && <Line type="linear" dataKey="target" name="목표" stroke={palette.target} strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls/>}{!monthlyLegend.isHidden("current") && <Line type="linear" dataKey="current" name="금년" stroke={metricColor} strokeWidth={2} dot={seriesDot(metricColor)} activeDot={{ r: 5 }} connectNulls/>}</LineChart></Chart>
+        <DataToggle><PivotTable periods={yoyRows.map((row: AnyData) => row.month)} totalLabel={showMonthlyTotal ? `누계(1~${cumulative.lastMonth}월)·가중` : "-"} rows={[
+          { key: "previous", label: "전년", values: yoyRows.map((row: AnyData) => row.previous), total: showMonthlyTotal ? cumulative.previous : null, format: value => value == null ? "-" : fmt(Number(value), 2) },
+          { key: "current", label: "금년", values: yoyRows.map((row: AnyData) => row.current), total: showMonthlyTotal ? cumulative.current : null, format: value => value == null ? "-" : fmt(Number(value), 2) },
+          { key: "change", label: "증감률(%)", values: yoyRows.map((row: AnyData) => row.change), total: showMonthlyTotal ? cumulative.change : null,
+            format: value => value == null ? "-" : `${Number(value) > 0 ? "+" : ""}${fmt(Number(value))}`,
+            className: value => value == null ? undefined : Number(value) > 0 ? "bad" : "good" },
+        ]}/><p className="quad-caption">누계 추이 보기는 각 월을 1월부터의 가중 평균(Σ사용량 ÷ Σ생산톤)으로 다시 그립니다.</p></DataToggle></article>
       <article className="card table-card"><CardTitle title="공장 효율 매트릭스" meta="MTD 기준"><CsvButton filename={`intensity_matrix_${metric}`} rows={data.matrix} columns={["factory","current","previous","change"]} labels={{factory:"공장",current:`금년(${data.unit})`,previous:`전년(${data.unit})`,change:"증감률(%)"}}/></CardTitle><DataTable rows={data.matrix} columns={["factory","current","previous","change"]} labels={{factory:"공장",current:"금년",previous:"전년",change:"증감률(%)"}}/></article>
     </section></>;
 }
@@ -280,6 +333,17 @@ function Production({ data, factory, date, mode, onModeChange, rangeFrom, rangeT
   const activeRankTab = gapAvailable ? rankTab : "top";
   const rankRows: AnyData[] = activeRankTab === "top" ? data.topItems ?? [] : activeRankTab === "under" ? data.underItems ?? [] : data.overItems ?? [];
   const rankTitle = activeRankTab === "top" ? "주요 품목 계획 대비 실적" : activeRankTab === "under" ? "계획 미달 Top" : "계획 초과 Top";
+  const burnupLegend = useSeriesToggle();
+  const monthlyYoyLegend = useSeriesToggle();
+  // 상단 필터로 선택한 공장이 실제로 생산하지 않는 제품유형(예: 광주는 IC·MY 미생산)은
+  // 범례·차트·데이터 표 어디에도 노출하지 않는다 — 전 기간 값이 전부 0/공백이면 제외.
+  const cat2ActiveKeys = (["IC", "MY", "FM", "SN", "ETC"] as const).filter(key => (data.daily ?? []).some((row: AnyData) => Number(row[key]) > 0));
+  const productionLegend = useSeriesToggle();
+  const productionPivotRows: PivotRow[] = cat2ActiveKeys.map(key => {
+    const rowValues = (data.daily ?? []).map((row: AnyData) => (typeof row[key] === "number" ? row[key] : null));
+    const total = rowValues.reduce((acc: number, v: number | null) => acc + (v ?? 0), 0);
+    return { key, label: cat2Labels[key] ?? key, values: rowValues, total };
+  });
   return <>
     <div className="mode-row">
       <div className="segmented" role="group" aria-label="생산실적 조회 모드">{productionModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
@@ -298,10 +362,18 @@ function Production({ data, factory, date, mode, onModeChange, rangeFrom, rangeT
     </section>
     {(data.insights?.length ?? 0) > 0 && <section className="card insight-list">{data.insights.map((message: string, index: number) => <p key={index}>{message}</p>)}</section>}
     <section className="content-grid">
-      {mode === "year" && (data.burnup?.length ?? 0) > 0 && <article className="card chart-card wide"><CardTitle title="연간 Burn-up" meta="월별 누적 실적 vs 계획 누계 (ton)"/><Chart><LineChart data={data.burnup}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Line type="linear" dataKey="cumPlan" name="누적 계획" stroke={palette.previous} strokeDasharray="6 4" strokeWidth={2} dot={false}/><Line type="linear" dataKey="cumActual" name="누적 실적" stroke={palette.actual} strokeWidth={2} dot={seriesDot(palette.actual)} activeDot={{ r: 5 }} connectNulls={false}/></LineChart></Chart></article>}
-      {mode === "year" && (data.monthlyYoy?.length ?? 0) > 0 && <article className="card chart-card"><CardTitle title="월별 생산량 전년비" meta="ton"><CsvButton filename={`production_monthly_yoy_${(data.dateFrom ?? "").slice(0,4)}`} rows={data.monthlyYoy} columns={["month","previous","current"]} labels={{month:"월",previous:"전년(ton)",current:"금년(ton)"}}/></CardTitle><Chart><BarChart data={data.monthlyYoy}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend/><Bar dataKey="previous" name="전년" fill={palette.previous} radius={[4,4,0,0]} maxBarSize={22}/><Bar dataKey="current" name="금년" fill="var(--chart-production)" radius={[4,4,0,0]} maxBarSize={22}/></BarChart></Chart></article>}
-      <article className="card chart-card span-all"><CardTitle title={trendTitle} meta="ton"><CsvButton filename={`production_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={data.daily} columns={csvColumns} labels={csvLabels}/></CardTitle><Chart><BarChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Legend formatter={(value: string) => cat2Labels[value] ?? value}/><Bar dataKey="IC" stackId="a" fill={palette.cat2.IC} stroke="var(--card)" strokeWidth={1} maxBarSize={22}/><Bar dataKey="MY" stackId="a" fill={palette.cat2.MY} stroke="var(--card)" strokeWidth={1} maxBarSize={22}/><Bar dataKey="FM" stackId="a" fill={palette.cat2.FM} stroke="var(--card)" strokeWidth={1} maxBarSize={22}/><Bar dataKey="SN" stackId="a" fill={palette.cat2.SN} stroke="var(--card)" strokeWidth={1} maxBarSize={22}/><Bar dataKey="ETC" stackId="a" fill={palette.cat2.ETC} stroke="var(--card)" strokeWidth={1} maxBarSize={22} radius={[4,4,0,0]}/></BarChart></Chart>
-        <DataToggle><DataTable rows={data.daily} columns={csvColumns} labels={csvLabels}/></DataToggle></article>
+      {mode === "year" && ((data.burnup?.length ?? 0) > 0 || (data.monthlyYoy?.length ?? 0) > 0) && <div className="quad-grid span-all">
+        {(data.burnup?.length ?? 0) > 0 && <article className="card chart-card"><CardTitle title="연간 Burn-up" meta="월별 누적 실적 vs 계획 누계 (ton)"/>
+          <ToggleLegend items={[{key:"cumPlan",label:"누적 계획",color:palette.previous},{key:"cumActual",label:"누적 실적",color:palette.actual}]} hidden={burnupLegend.hidden} onToggle={burnupLegend.toggle}/>
+          <Chart><LineChart data={data.burnup}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!burnupLegend.isHidden("cumPlan") && <Line type="linear" dataKey="cumPlan" name="누적 계획" stroke={palette.previous} strokeDasharray="6 4" strokeWidth={2} dot={false}/>}{!burnupLegend.isHidden("cumActual") && <Line type="linear" dataKey="cumActual" name="누적 실적" stroke={palette.actual} strokeWidth={2} dot={seriesDot(palette.actual)} activeDot={{ r: 5 }} connectNulls={false}/>}</LineChart></Chart></article>}
+        {(data.monthlyYoy?.length ?? 0) > 0 && <article className="card chart-card"><CardTitle title="월별 생산량 전년비" meta="ton"><CsvButton filename={`production_monthly_yoy_${(data.dateFrom ?? "").slice(0,4)}`} rows={data.monthlyYoy} columns={["month","previous","current"]} labels={{month:"월",previous:"전년(ton)",current:"금년(ton)"}}/></CardTitle>
+          <ToggleLegend items={[{key:"previous",label:"전년",color:palette.previous},{key:"current",label:"금년",color:"var(--chart-production)"}]} hidden={monthlyYoyLegend.hidden} onToggle={monthlyYoyLegend.toggle}/>
+          <Chart><BarChart data={data.monthlyYoy}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!monthlyYoyLegend.isHidden("previous") && <Bar dataKey="previous" name="전년" fill={palette.previous} radius={[4,4,0,0]} maxBarSize={22}/>}{!monthlyYoyLegend.isHidden("current") && <Bar dataKey="current" name="금년" fill="var(--chart-production)" radius={[4,4,0,0]} maxBarSize={22}/>}</BarChart></Chart></article>}
+      </div>}
+      <article className="card chart-card span-all"><CardTitle title={trendTitle} meta="ton"><CsvButton filename={`production_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={data.daily} columns={csvColumns} labels={csvLabels}/></CardTitle>
+        <ToggleLegend items={cat2ActiveKeys.map(key => ({ key, label: cat2Labels[key] ?? key, color: palette.cat2[key] }))} hidden={productionLegend.hidden} onToggle={productionLegend.toggle}/>
+        <Chart><BarChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{cat2ActiveKeys.filter(key => !productionLegend.isHidden(key)).map((key, index, visible) => <Bar key={key} dataKey={key} stackId="a" fill={palette.cat2[key]} stroke="var(--card)" strokeWidth={1} maxBarSize={22} radius={index === visible.length - 1 ? [4,4,0,0] : undefined}/>)}</BarChart></Chart>
+        <DataToggle><PivotTable periods={(data.daily ?? []).map((row: AnyData) => row.date)} rows={productionPivotRows} totalLabel="누계(ton)"/></DataToggle></article>
       <article className="card table-card"><CardTitle title={rankTitle} meta={`${s.items ?? 0}개 품목`}><CsvButton filename={`item_ranking_${activeRankTab}_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={rankRows} columns={activeRankTab === "top" ? ["name", "plan", "actual", "rate"] : ["name", "plan", "actual", "variance", "rate"]} labels={{ name: "품목", plan: "계획(ton)", actual: "실적(ton)", variance: "편차(ton)", rate: "달성률(%)" }}/></CardTitle>
         {gapAvailable && <div className="segmented" role="group" aria-label="품목 순위 구분">{([["top","실적 Top"],["under","미달 Top"],["over","초과 Top"]] as const).map(([id,label]) => <button type="button" key={id} className={activeRankTab === id ? "active" : ""} aria-pressed={activeRankTab === id} onClick={() => setRankTab(id)}>{label}</button>)}</div>}
         {activeRankTab === "top"
@@ -311,7 +383,12 @@ function Production({ data, factory, date, mode, onModeChange, rangeFrom, rangeT
               {rankRows.length === 0 && <tr><td colSpan={5}>{activeRankTab === "under" ? "계획 대비 미달 품목이 없습니다." : "계획 대비 초과 품목이 없습니다."}</td></tr>}
             </tbody></table></div>}
       </article>
-      <article className="card list"><CardTitle title="제품 믹스" meta="구성비"/>{data.mix?.map((r: AnyData) => <div className="progress" key={r.name}><div><span>{cat2Labels[r.name] ?? r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{ width: `${r.value}%` }}/></i></div>)}</article>
+      <article className="card list"><CardTitle title="제품 믹스" meta="구성비"/>{data.mix?.map((r: AnyData) => <div className="progress" key={r.name}><div><span>{cat2Labels[r.name] ?? r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{ width: `${r.value}%` }}/></i></div>)}
+        {(data.wipMix?.length ?? 0) > 0 && <div className="sub-section">
+          <p className="quad-caption">재공품 믹스 · 판매용 반제품(탈지분유·살균유 등) 구성비</p>
+          {data.wipMix.map((r: AnyData) => <div className="progress" key={r.name}><div><span>{r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{ width: `${r.value}%`, background: "linear-gradient(90deg,var(--chart-amber),#b45309)" }}/></i></div>)}
+        </div>}
+      </article>
       <ProductionItemTrend factory={factory} date={date}/>
     </section>
   </>;

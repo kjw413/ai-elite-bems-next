@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { BellRing, Download } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { downloadCsv } from "@/lib/bems-csv";
+import { ToggleLegend, useSeriesToggle } from "@/components/toggle-legend";
 
 type AnyData = Record<string, any>;
 type YoyMode = "intensity" | "usage" | "production";
@@ -59,10 +60,12 @@ function ModeChart({ rows, mode, def }: { rows: AnyData[]; mode: YoyMode; def: M
     const { current, previous } = pairOf(entry, mode, def.key);
     return { factory: entry.factory, previous, current, change: changePct(current, previous) };
   });
+  const legend = useSeriesToggle();
   return <div className="quad-cell">
     <div className="quad-head" style={{ borderColor: def.color }}>
       <b>{def.label}</b><small>[{def.unit}]</small>
     </div>
+    <ToggleLegend items={[{ key: "previous", label: "전년", color: "var(--chart-previous)" }, { key: "current", label: "금년", color: def.color }]} hidden={legend.hidden} onToggle={legend.toggle}/>
     <div className="chart quad-chart">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: -14 }}>
@@ -76,9 +79,8 @@ function ModeChart({ rows, mode, def }: { rows: AnyData[]; mode: YoyMode; def: M
               const change = chartData.find(item => item.factory === name)?.change;
               return change == null ? name : `${name} · 전년 동기 대비 ${change > 0 ? "+" : ""}${change.toFixed(1)}%`;
             }}/>
-          <Legend wrapperStyle={{ fontSize: 11 }}/>
-          <Bar dataKey="previous" name="전년" fill="var(--chart-previous)" radius={[4, 4, 0, 0]} maxBarSize={22}/>
-          <Bar dataKey="current" name="금년" fill={def.color} radius={[4, 4, 0, 0]} maxBarSize={22}/>
+          {!legend.isHidden("previous") && <Bar dataKey="previous" name="전년" fill="var(--chart-previous)" radius={[4, 4, 0, 0]} maxBarSize={22}/>}
+          {!legend.isHidden("current") && <Bar dataKey="current" name="금년" fill={def.color} radius={[4, 4, 0, 0]} maxBarSize={22}/>}
         </BarChart>
       </ResponsiveContainer>
     </div>

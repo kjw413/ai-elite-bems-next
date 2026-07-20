@@ -188,6 +188,48 @@ async def _lifespan(_: FastAPI):
 
 
 app = FastAPI(title="AI Elite BEMS API", version="1.3.0", docs_url="/api/docs", redoc_url=None, lifespan=_lifespan)
+
+
+class RejectUntrustedUnsafeOrigins:
+    """Reject cross-origin state changes before they reach an API handler.
+
+    Implemented as a raw ASGI middleware, not `@app.middleware("http")`
+    (Starlette's BaseHTTPMiddleware). BaseHTTPMiddleware runs the downstream app in a
+    separate task via call_next(); when an unhandled exception occurs downstream, that
+    task boundary can swallow the response our own `@app.exception_handler(Exception)`
+    already built — including the Access-Control-Allow-Origin header CORSMiddleware
+    added to it — so the client sees a bare, header-less response. A pure ASGI
+    middleware just forwards `send` directly, so nothing downstream gets lost, no
+    matter where CORSMiddleware sits relative to this one. (2026-07: this was the
+    actual cause behind an admin panel button raising a plain "Failed to fetch" in the
+    browser for what was really a normal, readable 500 JSON error underneath.)
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope, receive=receive)
+        method = request.method.upper()
+        preflight_method = request.headers.get("access-control-request-method", "").upper()
+        unsafe_methods = {"POST", "PUT", "PATCH", "DELETE"}
+        is_unsafe = method in unsafe_methods
+        is_unsafe_preflight = method == "OPTIONS" and preflight_method in unsafe_methods
+        origin = request.headers.get("origin")
+        if (is_unsafe or is_unsafe_preflight) and origin and _canonical_origin(origin) not in ALLOWED_ORIGINS:
+            response = JSONResponse(status_code=403, content={"detail": "허용되지 않은 Origin입니다."})
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(RejectUntrustedUnsafeOrigins)
+# CORSMiddleware registered last (= outermost in the ASGI stack), matching the
+# conventional recommendation so Access-Control-Allow-Origin is applied as close to
+# the client as possible.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(ALLOWED_ORIGINS),
@@ -195,21 +237,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Accept"],
 )
-
-
-@app.middleware("http")
-async def reject_untrusted_unsafe_origins(request: Request, call_next):
-    """Reject cross-origin state changes before they reach an API handler."""
-    method = request.method.upper()
-    preflight_method = request.headers.get("access-control-request-method", "").upper()
-    unsafe_methods = {"POST", "PUT", "PATCH", "DELETE"}
-    is_unsafe = method in unsafe_methods
-    is_unsafe_preflight = method == "OPTIONS" and preflight_method in unsafe_methods
-    origin = request.headers.get("origin")
-    if (is_unsafe or is_unsafe_preflight) and origin:
-        if _canonical_origin(origin) not in ALLOWED_ORIGINS:
-            return JSONResponse(status_code=403, content={"detail": "허용되지 않은 Origin입니다."})
-    return await call_next(request)
 
 
 FACTORY_MEMBERS = {
@@ -724,9 +751,22 @@ def actual_production_daily_kg(
 
 
 @app.exception_handler(Exception)
-async def unhandled_error(_: Request, exc: Exception):
+async def unhandled_error(request: Request, exc: Exception):
+    """Catch-all 500. Starlette wires bare-`Exception` handlers into
+    ServerErrorMiddleware — the true outermost ASGI layer, outside our own
+    CORSMiddleware — so a response built here bypasses CORSMiddleware entirely and
+    reaches the browser with no Access-Control-Allow-Origin header. The browser then
+    reports a CORS-blocked "Failed to fetch" instead of surfacing this JSON body, so we
+    add the same header CORSMiddleware would have added for an allowed Origin.
+    """
     logger.error("Unhandled API exception.", exc_info=(type(exc), exc, exc.__traceback__))
-    return JSONResponse(status_code=500, content={"detail": "내부 서버 오류가 발생했습니다."})
+    response = JSONResponse(status_code=500, content={"detail": "내부 서버 오류가 발생했습니다."})
+    origin = request.headers.get("origin")
+    canonical = _canonical_origin(origin) if origin else None
+    if canonical and canonical in ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    return response
 
 
 @app.get("/api/v1/health")
@@ -1331,6 +1371,11 @@ def production(
         (period_from, period_to, *values),
     )
     mix_total = sum(scalar(row["value"]) for row in mix_rows) or 1
+    # 광주 전용 — 자사 완제품(production_daily)에는 안 잡히는 외부판매 재공품
+    # (탈지분유·살균유 등)의 품목별 구성비. 신뢰 대상 밖 공장은 빈 리스트.
+    wip_mix = import_core("app.services.production_correction_service").get_wip_mix(
+        factory, period_from, period_to,
+    )
     top_rows = fetch_all(
         """
         SELECT item_name name, SUM(plan) plan, SUM(actual) actual
@@ -1510,6 +1555,7 @@ def production(
         "daily": daily_output,
         "burnup": burnup,
         "mix": [{"name": row["name"], "value": round(scalar(row["value"]) / mix_total * 100, 1)} for row in mix_rows],
+        "wipMix": wip_mix,
         "topItems": top_items,
         "underItems": under_items,
         "overItems": over_items,
@@ -1814,8 +1860,10 @@ def generate_missing_history(payload: HistoryBackfillRequest, request: Request) 
         raise HTTPException(status_code=400, detail="시작일은 종료일보다 늦을 수 없습니다.")
     if (payload.date_to - payload.date_from).days > 92:
         raise HTTPException(status_code=400, detail="한 번에 최대 93일까지 생성할 수 있습니다.")
-    service = import_core("app.services.usage_prediction_v5_service")
     factory = None if payload.factory in (None, "", "전사", "전체") else payload.factory
+    if factory is not None and factory not in FACTORY_MEMBERS and factory not in PREDICTION_FACTORIES:
+        raise HTTPException(status_code=400, detail="v5.3 모델 학습 대상 공장이 아닙니다. (경산은 예측 미지원)")
+    service = import_core("app.services.usage_prediction_v5_service")
     result = service.generate_missing_prediction_history(factory, payload.date_from, payload.date_to)
     return json_safe(result)
 

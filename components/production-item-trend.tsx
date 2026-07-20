@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw, TrendingUp } from "lucide-react";
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiRequest, isAbortError, query } from "@/lib/bems-api";
 import { downloadCsv } from "@/lib/bems-csv";
+import { ToggleLegend, useSeriesToggle, type LegendItem } from "@/components/toggle-legend";
 
 type AnyData = Record<string, any>;
 type ItemOption = { code: string; name: string; actual: number };
@@ -83,6 +84,10 @@ export function ProductionItemTrend({ factory, date }: { factory: string; date: 
     });
   }
   const nameOf = (code: string) => options.find(item => item.code === code)?.name ?? code;
+  const seriesLegend = useSeriesToggle();
+  const seriesItems: LegendItem[] = compareMode
+    ? codes.map((code, index) => ({ key: code, label: nameOf(code), color: compareColors[index] }))
+    : [{ key: "prevYear", label: "전년 동월", color: "var(--chart-previous)" }, { key: "actual", label: "실적", color: "var(--chart-production)" }];
 
   return <article className="card chart-card span-all">
     <header className="card-title"><h3>품목 실적 추이 · 비교</h3><div className="card-title-side">
@@ -104,11 +109,12 @@ export function ProductionItemTrend({ factory, date }: { factory: string; date: 
           <div><span>전월 대비</span><b className={(result[0].latest.mom ?? 0) >= 0 ? "good" : "bad"}>{changeText(result[0].latest.mom)}</b></div>
           <div><span>전년 동월 대비</span><b className={(result[0].latest.yoy ?? 0) >= 0 ? "good" : "bad"}>{changeText(result[0].latest.yoy)}</b></div>
         </div>}
+        <ToggleLegend items={seriesItems} hidden={seriesLegend.hidden} onToggle={seriesLegend.toggle}/>
         <div className="chart"><ResponsiveContainer width="100%" height="100%">
-          <LineChart data={merged}><CartesianGrid vertical={false}/><XAxis dataKey="month" tick={{ fontSize: 11 }}/><YAxis tick={{ fontSize: 11 }}/><Tooltip {...tooltipStyle} formatter={(value: unknown) => numberText(value)}/><Legend/>
+          <LineChart data={merged}><CartesianGrid vertical={false}/><XAxis dataKey="month" tick={{ fontSize: 11 }}/><YAxis tick={{ fontSize: 11 }}/><Tooltip {...tooltipStyle} formatter={(value: unknown) => numberText(value)}/>
             {compareMode
-              ? codes.map((code, index) => <Line key={code} type="linear" dataKey={code} name={nameOf(code)} stroke={compareColors[index]} strokeWidth={2} dot={{ r: 3, fill: compareColors[index], stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>)
-              : <><Line type="linear" dataKey="prevYear" name="전년 동월" stroke="var(--chart-previous)" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls/><Line type="linear" dataKey="actual" name="실적" stroke="var(--chart-production)" strokeWidth={2} dot={{ r: 3, fill: "var(--chart-production)", stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/></>}
+              ? codes.map((code, index) => !seriesLegend.isHidden(code) && <Line key={code} type="linear" dataKey={code} name={nameOf(code)} stroke={compareColors[index]} strokeWidth={2} dot={{ r: 3, fill: compareColors[index], stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>)
+              : <>{!seriesLegend.isHidden("prevYear") && <Line type="linear" dataKey="prevYear" name="전년 동월" stroke="var(--chart-previous)" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls/>}{!seriesLegend.isHidden("actual") && <Line type="linear" dataKey="actual" name="실적" stroke="var(--chart-production)" strokeWidth={2} dot={{ r: 3, fill: "var(--chart-production)", stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>}</>}
           </LineChart>
         </ResponsiveContainer></div>
       </>}

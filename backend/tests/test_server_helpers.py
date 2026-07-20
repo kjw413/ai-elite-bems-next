@@ -87,14 +87,22 @@ class ServerHelperTests(unittest.TestCase):
         )
 
     def test_untrusted_unsafe_origin_is_rejected(self) -> None:
-        async def call_next(_: server.Request):
+        async def inner_app(scope, receive, send):
             raise AssertionError("blocked request reached the handler")
 
-        response = asyncio.run(server.reject_untrusted_unsafe_origins(
-            self._request("DELETE", "http://evil.example:3000"),
-            call_next,
-        ))
-        self.assertEqual(response.status_code, 403)
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        messages: list[dict] = []
+
+        async def send(message):
+            messages.append(message)
+
+        middleware = server.RejectUntrustedUnsafeOrigins(inner_app)
+        scope = self._request("DELETE", "http://evil.example:3000").scope
+        asyncio.run(middleware(scope, receive, send))
+        start = next(m for m in messages if m["type"] == "http.response.start")
+        self.assertEqual(start["status"], 403)
 
     def test_operational_production_uses_physical_factory_members(self) -> None:
         records = [

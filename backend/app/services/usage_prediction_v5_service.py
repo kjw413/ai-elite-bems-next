@@ -1482,7 +1482,16 @@ def _history_key_set(df: pd.DataFrame) -> set[tuple[str, date, str]]:
 
 def _resolve_history_base_factories(factory: str | None) -> list[str]:
     if factory is None:
-        return list(FACTORY_PHYSICAL_DISPLAY_ORDER)
+        # 전사/전체 범위에서는 활성 모델이 학습하지 않은 신규 공장(예: 경산)을
+        # 조용히 제외한다 — 없으면 predict_v5가 "Factory not found in model"으로
+        # 배치 전체를 실패시킨다. 특정 공장을 직접 지정한 호출은 server.py의
+        # PREDICTION_FACTORIES 검사가 먼저 걸러내므로 여기까지 오지 않는다.
+        physical = list(FACTORY_PHYSICAL_DISPLAY_ORDER)
+        try:
+            trained = set(get_active_model().keys())
+        except Exception:
+            return physical
+        return [f for f in physical if f in trained]
     if _is_aggregate_factory(factory):
         return list(_resolve_factory_members(factory))
     if factory in STATION_MAP:

@@ -39,6 +39,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -72,15 +73,10 @@ WIP_TRUSTED_FACTORIES: set[str] = {"광주"}
 
 # 광주(F30) 재공품 → 믹스 환산계수.
 # Why: 광주공장만 일부 재공품(예: 260014 탈지분유 = 분말 형태)이 자사 중간제품이 아니라
-#   외부로 그대로 판매되며, 수분을 제거한 후 무게로 실적이 기록된다. 그대로 합산하면
-#   energy_daily.mix_prod_kg(=수분 포함 믹스 톤) 단위와 불일치 → 광주 wip_kg 가 과소 집계되어
-#   `accounted_kg` 가 실제보다 작아지고 residual(외주 잔차) 이 과대 추정되는 정합성 오류 발생.
-# How to apply: 시트명(`광주`) 기준으로 ItemCode 별 가중치를 곱한 뒤 행합산한다.
-#   값이 1.0 인 품목은 이미 믹스 무게로 기록돼 환산이 필요 없다.
-#   여기에 없는 ItemCode 는 기본 1.0 으로 처리.
-# 외탁 제외(2026-07-09): 광주 260014(탈지분유)·260016(생크림 냉동)은 raw 의
-#   Job_Number 가 숫자로만 구성된 경우 외탁(임가공) 생산분으로, 자공장 에너지를
-#   사용하지 않는다. 이 제외는 상류 RPA 빌더
+#   외부로 그대로 판매되며, 수분을 제거한 후 무게로 실적이 기록된다. 따라서 그대로 합산하면
+#   생산량이(mix-kg) 과소 집계되기 때문에, ItemCode 별 가중치를 곱한 뒤 행합산한다.
+# 외탁 제외(2026-07-09): 광주 260014(탈지분유)·260016(생크림 냉동)은 Job_Number가 숫자로만
+#   구성된 경우 외탁 생산분으로, 자공장 에너지를 사용하지 않는다. 이 제외는 상류 RPA 빌더
 #   (E:\AI-Elite_MIS_RPA\mis_rpa\wip_refactoring.py 의 OUTSOURCED_EXCLUDE_ITEMCODES)가
 #   DB_재공품.xlsx 적재 시점에 실적량 0 처리로 수행하므로, 이 모듈은 파일 값을
 #   그대로 신뢰하면 된다 (Job 단위 정보는 요약본에 없음).
@@ -242,6 +238,121 @@ def get_wip_daily(factory: str) -> pd.DataFrame:
     if f not in WIP_TRUSTED_FACTORIES:
         return pd.DataFrame(columns=["date", "total_wip_kg"])
     return wb.get(f, pd.DataFrame(columns=["date", "total_wip_kg"])).copy()
+
+
+# 광주 재공품 품목명 — WIP_MIX_CONVERSION의 ItemCode와 짝을 이루는 표시 라벨.
+# '재공품 믹스' 카드(생산실적 분석 > 제품 믹스)에서 품목별 구성비를 보여줄 때 쓴다.
+WIP_ITEM_LABELS: dict[str, dict[str, str]] = {
+    "광주": {
+        "260014": "탈지분유", "260016": "생크림(냉동)", "260039": "살균유",
+        "260042": "유크림믹스", "260047": "생크림(냉장)",
+        "260351": "살균탈지유(수)", "260352": "살균탈지유",
+    },
+}
+
+# ── 품목별 detail 캐시 (믹스 % 계산 전용) ──────────────────────
+# _load_wip_workbook()은 로드 즉시 날짜별로 합산해 품목 detail을 버리므로,
+# '재공품 믹스' 계산에는 별도로 품목별 long-format을 보존하는 캐시가 필요하다.
+# 같은 파일을 다시 읽는 이중 비용이 있지만 mtime 캐시라 최초 1회 + 파일 변경 시에만 발생한다.
+_WIP_ITEM_CACHE: dict[str, pd.DataFrame] = {}
+_WIP_ITEM_CACHE_MTIME: float | None = None
+_WIP_ITEM_LOCK = threading.Lock()
+
+
+def _load_wip_workbook_items() -> dict[str, pd.DataFrame]:
+    """공장별 (date, item_code, kg) long-format — 믹스 환산계수 적용 후 값.
+
+    믹스 환산표(WIP_MIX_CONVERSION)가 없는 공장은 품목별 구성비 계산 대상이
+    아니므로(신뢰 whitelist 밖) 건너뛴다.
+    """
+    global _WIP_ITEM_CACHE, _WIP_ITEM_CACHE_MTIME
+
+    src = Path(PATH_WIP_SUMMARY)
+    if not src.exists():
+        return {}
+
+    mtime = src.stat().st_mtime
+    if _WIP_ITEM_CACHE and _WIP_ITEM_CACHE_MTIME == mtime:
+        return _WIP_ITEM_CACHE
+
+    with _WIP_ITEM_LOCK:
+        if _WIP_ITEM_CACHE and _WIP_ITEM_CACHE_MTIME == mtime:
+            return _WIP_ITEM_CACHE
+        try:
+            sheets = pd.read_excel(src, sheet_name=None, engine="openpyxl")
+        except Exception as exc:
+            logger.error(f"[wip-items] 워크북 로드 실패: {exc}")
+            return {}
+
+        out: dict[str, pd.DataFrame] = {}
+        for name, df in sheets.items():
+            if df is None or df.empty:
+                continue
+            factory_key = str(name).strip()
+            factor_map = WIP_MIX_CONVERSION.get(factory_key)
+            if not factor_map:
+                continue
+            cols = list(df.columns)
+            df2 = df.rename(columns={cols[0]: "date"})
+            df2["date"] = pd.to_datetime(df2["date"], errors="coerce")
+            df2 = df2.dropna(subset=["date"])
+            item_cols = [c for c in df2.columns if c != "date"]
+            target_cols = [c for c in item_cols if str(c).strip() in factor_map]
+            if not target_cols:
+                continue
+            num = df2[target_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+            long_rows = [
+                pd.DataFrame({
+                    "date": df2["date"].values,
+                    "item_code": str(col).strip(),
+                    "kg": (num[col] * float(factor_map[str(col).strip()])).values,
+                })
+                for col in target_cols
+            ]
+            out[factory_key.upper()] = pd.concat(long_rows, ignore_index=True)
+
+        _WIP_ITEM_CACHE = out
+        _WIP_ITEM_CACHE_MTIME = mtime
+        return out
+
+
+def get_wip_mix(
+    factory: str,
+    date_from: str | pd.Timestamp,
+    date_to: str | pd.Timestamp,
+) -> list[dict[str, Any]]:
+    """신뢰 공장의 기간 내 재공품 품목별 구성비(%) — 믹스 환산(kg) 기준.
+
+    광주 전용(WIP_TRUSTED_FACTORIES) — 자사 완제품 실적(production_daily)에는
+    잡히지 않는 외부판매 재공품(탈지분유·살균유 등)의 품목별 비중을 '제품 믹스'
+    카드 옆에 보조 지표로 보여주기 위함. 신뢰 대상이 아니거나 기간 내 실적이
+    없으면 빈 리스트를 반환한다.
+    """
+    f = factory.upper()
+    if f not in WIP_TRUSTED_FACTORIES:
+        return []
+    items = _load_wip_workbook_items()
+    df = items.get(f)
+    if df is None or df.empty:
+        return []
+    df_from = pd.to_datetime(date_from).date()
+    df_to = pd.to_datetime(date_to).date()
+    mask = (df["date"].dt.date >= df_from) & (df["date"].dt.date <= df_to)
+    scoped = df.loc[mask]
+    if scoped.empty:
+        return []
+    totals = scoped.groupby("item_code")["kg"].sum()
+    totals = totals[totals > 0]
+    grand_total = float(totals.sum())
+    if grand_total <= 0:
+        return []
+    labels = WIP_ITEM_LABELS.get(f, {})
+    rows = [
+        {"name": labels.get(code, code), "value": round(float(kg) / grand_total * 100, 1)}
+        for code, kg in totals.items()
+    ]
+    rows.sort(key=lambda r: r["value"], reverse=True)
+    return rows
 
 
 # ── 핵심 보정 API ────────────────────────────────────────────
@@ -470,7 +581,9 @@ __all__ = [
     "ProductionBreakdown",
     "WIP_TRUSTED_FACTORIES",
     "WIP_MIX_CONVERSION",
+    "WIP_ITEM_LABELS",
     "get_wip_daily",
+    "get_wip_mix",
     "get_breakdown",
     "get_breakdown_daily",
     "build_breakdown_caption",

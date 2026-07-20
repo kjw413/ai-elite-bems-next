@@ -1,8 +1,10 @@
 "use client";
 
 import { Download } from "lucide-react";
-import { CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, ComposedChart, Line, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { downloadCsv } from "@/lib/bems-csv";
+import { ToggleLegend, useSeriesToggle } from "@/components/toggle-legend";
+import { PivotTable, type PivotRow } from "@/components/pivot-table";
 
 type AnyData = Record<string, any>;
 
@@ -58,6 +60,11 @@ export function signalLabel(prodDir: number, usageDir: number): { label: string;
 
 const changeText = (value: number | null) => value == null ? "-" : `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 const numberText = (value: number | null, digits = 1) => value == null ? "-" : value.toLocaleString("ko-KR", { maximumFractionDigits: digits });
+// 데이터 표 전치용 — 생산·사용량 지수는 합계가 아니라 기간 평균이 의미 있는 요약값이다.
+const avgOf = (values: (number | null)[]) => {
+  const nums = values.filter((value): value is number => value != null);
+  return nums.length ? Math.round(nums.reduce((acc, value) => acc + value, 0) / nums.length) : null;
+};
 
 type QuadRow = {
   date: string;
@@ -116,6 +123,18 @@ function Quadrant({ trend, metric }: { trend: AnyData[]; metric: (typeof usageMe
   const rows = buildQuadRows(trend, metric.key);
   const warnDays = rows.filter(row => row.tone === "warn").length;
   const goodDays = rows.filter(row => row.tone === "good").length;
+  const legend = useSeriesToggle();
+  const pivotRows: PivotRow[] = [
+    { key: "production", label: "생산량(ton)", values: rows.map(row => row.production), total: rows.reduce((acc, row) => acc + (row.production ?? 0), 0) },
+    { key: "usage", label: `사용량(${metric.unit})`, values: rows.map(row => row.usage), total: rows.reduce((acc, row) => acc + (row.usage ?? 0), 0) },
+    { key: "prodIdx", label: "생산 지수", values: rows.map(row => row.prodIdx), total: avgOf(rows.map(row => row.prodIdx)), format: value => value == null ? "-" : numberText(Number(value), 0) },
+    { key: "usageIdx", label: "사용 지수", values: rows.map(row => row.usageIdx), total: avgOf(rows.map(row => row.usageIdx)), format: value => value == null ? "-" : numberText(Number(value), 0) },
+    { key: "signal", label: "신호", values: rows.map(row => row.signal), total: null, format: (value, index) => {
+      if (index === -1) return "-";
+      const tone = rows[index]?.tone;
+      return tone ? <i className={`quad-chip ${tone}`}>{String(value ?? "-")}</i> : String(value ?? "-");
+    } },
+  ];
   return <div className="quad-cell">
     <div className="quad-head" style={{ borderColor: metric.color }}>
       <span aria-hidden>{metric.icon}</span>
@@ -124,6 +143,12 @@ function Quadrant({ trend, metric }: { trend: AnyData[]; metric: (typeof usageMe
       {goodDays > 0 && <i className="quad-chip good">생산↑ 사용↓ {goodDays}일</i>}
       {warnDays > 0 && <i className="quad-chip warn">생산↓ 사용↑ {warnDays}일</i>}
     </div>
+    <ToggleLegend items={[
+      { key: "prodIdx", label: "생산량 지수", color: PROD_COLOR },
+      { key: "usageIdx", label: "사용량 지수", color: metric.color },
+      { key: "goodY", label: "생산↑ 사용↓", color: GOOD_COLOR },
+      { key: "warnY", label: "생산↓ 사용↑", color: WARN_COLOR },
+    ]} hidden={legend.hidden} onToggle={legend.toggle}/>
     <div className="chart quad-chart">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows} margin={{ top: 18, right: 12, bottom: 0, left: -18 }}>
@@ -131,24 +156,16 @@ function Quadrant({ trend, metric }: { trend: AnyData[]; metric: (typeof usageMe
           <XAxis dataKey="date" tick={{ fontSize: 11 }}/>
           <YAxis tick={{ fontSize: 11 }} domain={["auto", "auto"]}/>
           <Tooltip content={<QuadTooltip unit={metric.unit}/>}/>
-          <Legend wrapperStyle={{ fontSize: 11 }}/>
-          <Line type="linear" dataKey="prodIdx" name="생산량 지수" stroke={PROD_COLOR} strokeWidth={2} dot={{ r: 3, fill: PROD_COLOR, stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>
-          <Line type="linear" dataKey="usageIdx" name="사용량 지수" stroke={metric.color} strokeWidth={2} dot={{ r: 3, fill: metric.color, stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>
-          <Scatter dataKey="goodY" name="생산↑ 사용↓" fill={GOOD_COLOR} shape="diamond" legendType="diamond"/>
-          <Scatter dataKey="warnY" name="생산↓ 사용↑" fill={WARN_COLOR} shape="diamond" legendType="diamond"/>
+          {!legend.isHidden("prodIdx") && <Line type="linear" dataKey="prodIdx" name="생산량 지수" stroke={PROD_COLOR} strokeWidth={2} dot={{ r: 3, fill: PROD_COLOR, stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>}
+          {!legend.isHidden("usageIdx") && <Line type="linear" dataKey="usageIdx" name="사용량 지수" stroke={metric.color} strokeWidth={2} dot={{ r: 3, fill: metric.color, stroke: "var(--card)", strokeWidth: 2 }} activeDot={{ r: 5 }} connectNulls/>}
+          {!legend.isHidden("goodY") && <Scatter dataKey="goodY" name="생산↑ 사용↓" fill={GOOD_COLOR} shape="diamond" legendType="diamond"/>}
+          {!legend.isHidden("warnY") && <Scatter dataKey="warnY" name="생산↓ 사용↑" fill={WARN_COLOR} shape="diamond" legendType="diamond"/>}
         </ComposedChart>
       </ResponsiveContainer>
     </div>
     <details className="quad-details">
       <summary>데이터 테이블</summary>
-      <div className="table-wrap"><table>
-        <thead><tr><th>날짜</th><th>생산량(ton)</th><th>사용량({metric.unit})</th><th>생산 지수</th><th>사용 지수</th><th>신호</th></tr></thead>
-        <tbody>{rows.map(row => <tr key={row.date}>
-          <td>{row.date}</td><td>{numberText(row.production)}</td><td>{numberText(row.usage)}</td>
-          <td>{numberText(row.prodIdx, 0)}</td><td>{numberText(row.usageIdx, 0)}</td>
-          <td>{row.tone ? <i className={`quad-chip ${row.tone}`}>{row.signal}</i> : row.signal}</td>
-        </tr>)}</tbody>
-      </table></div>
+      <PivotTable periods={rows.map(row => row.date)} rows={pivotRows} totalLabel={`${rows.length}일 요약`}/>
     </details>
   </div>;
 }
