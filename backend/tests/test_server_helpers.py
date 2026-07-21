@@ -446,9 +446,16 @@ class ServerHelperTests(unittest.TestCase):
 
     def test_production_period_resolution_per_mode(self) -> None:
         base = date(2026, 7, 15)
+        # 월별 모드는 base가 그 달의 며칠이든 항상 1일~말일 전체를 반환한다
+        # (base.day=15를 골랐어도 31일까지 보여야 한다 — 2026-07-21 버그 수정).
         self.assertEqual(
             server.resolve_production_period("month", base, None, None),
-            (date(2026, 7, 1), base),
+            (date(2026, 7, 1), date(2026, 7, 31)),
+        )
+        # 실적 데이터가 그 달 말일 전에 끊겨 있으면(max_date) 그 날짜까지로 제한한다.
+        self.assertEqual(
+            server.resolve_production_period("month", base, None, None, date(2026, 7, 20)),
+            (date(2026, 7, 1), date(2026, 7, 20)),
         )
         self.assertEqual(
             server.resolve_production_period("year", base, None, None),
@@ -463,6 +470,29 @@ class ServerHelperTests(unittest.TestCase):
             server.resolve_production_period("range", base, None, None),
             (base - server.timedelta(days=30), base),
         )
+
+    def test_production_month_mode_shows_full_month_regardless_of_selected_day(self) -> None:
+        """31일짜리 달에서 말일이 아닌 날을 골라도 daily에 31일 전부 나와야 한다."""
+        with (
+            patch.object(server, "fetch_one", side_effect=[
+                {"max_date": date(2026, 7, 31)},
+                {"actual": 310.0, "items": 3},
+                {"plan": 1200.0},
+            ]),
+            patch.object(server, "fetch_all", side_effect=[
+                [{"date": date(2026, 7, day), "IC": 10.0, "MY": 0, "FM": 0, "SN": 0, "ETC": 0}
+                 for day in range(1, 32)],                       # 일별 실적 31행
+                [{"name": "IC", "value": 310.0}],                # 제품 믹스
+                [{"name": "품목", "plan": 10.0, "actual": 9.0}], # 품목 순위
+                [],                                              # 미달/초과 gap
+                [],                                              # 제품유형 계획
+            ]),
+        ):
+            # 기준일로 15일(말일이 아님)을 고른다 — 예전엔 이 경우 16~31일이 잘렸다.
+            result = server.production(factory="전사", requested_date=date(2026, 7, 15), mode="month")
+        self.assertEqual(len(result["daily"]), 31)
+        self.assertEqual(result["daily"][0]["date"], "07.01")
+        self.assertEqual(result["daily"][30]["date"], "07.31")
 
     def test_production_range_rejects_inverted_or_excessive_period(self) -> None:
         base = date(2026, 7, 15)

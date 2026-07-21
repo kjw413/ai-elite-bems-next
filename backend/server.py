@@ -396,10 +396,20 @@ def resolve_production_period(
     base: date,
     date_from: date | None,
     date_to: date | None,
+    max_date: date | None = None,
 ) -> tuple[date, date]:
-    """조회 모드별 기간 확정 (월별/기간별/연간). 잘못된 범위는 400."""
+    """조회 모드별 기간 확정 (월별/기간별/연간). 잘못된 범위는 400.
+
+    월별 모드는 base(기준일)가 그 달의 며칠이든 항상 1일~말일 전체를 반환한다.
+    실적 데이터가 그 달 말일 전에 끊겨 있으면(= max_date) 거기까지로만 제한한다.
+    (2026-07-21 버그 수정: 이전엔 period_to를 base로 반환해, 예컨대 7/15을 기준일로
+    고르면 7/16~7/31 실적이 있어도 표시되지 않았다 — 어떤 날짜를 골랐든 그 달의
+    실적이 있는 데까지는 전부 보여야 하므로 base.day와 무관하게 계산한다.)
+    """
     if mode == "month":
-        return base.replace(day=1), base
+        month_end = date(base.year, base.month, calendar.monthrange(base.year, base.month)[1])
+        period_to = min(month_end, max_date) if max_date is not None else month_end
+        return base.replace(day=1), period_to
     if mode == "year":
         return date(base.year, 1, 1), date(base.year, 12, 31)
     # range 모드 — 기본값은 기준일 포함 최근 31일
@@ -1314,7 +1324,7 @@ def production(
         resolve_production_period(mode, date_to, date_from, date_to)
     max_row = fetch_one("SELECT MAX(date) max_date FROM production_daily") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
-    period_from, period_to = resolve_production_period(mode, base, date_from, date_to)
+    period_from, period_to = resolve_production_period(mode, base, date_from, date_to, normalize_date(max_row.get("max_date")))
     # 계획 대비 지표는 완전한 월들로 구성된 기간에서만 유효 (legacy 규칙)
     plan_allowed = mode != "range" or is_complete_month_span(period_from, period_to)
     codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
@@ -1623,13 +1633,13 @@ def production_item_trend(
     factory: str = "전사",
     requested_date: date | None = Query(None, alias="date"),
 ) -> dict[str, Any]:
-    """단일 품목 월별 추이(전월비·전년동월비) 또는 두 품목 비교 — 최근 13개월.
+    """단일 품목 월별 추이(전월비·전년동월비) 또는 여러 품목(최대 5개) 비교 — 최근 13개월.
 
     전년 동월비 계산을 위해 25개월 범위를 조회해 (y-1, m) 값을 함께 붙인다.
     """
-    codes_selected = [code.strip() for code in items.split(",") if code.strip()][:2]
+    codes_selected = [code.strip() for code in items.split(",") if code.strip()][:5]
     if not codes_selected:
-        raise HTTPException(status_code=400, detail="items에 품목 코드를 1~2개 지정하세요.")
+        raise HTTPException(status_code=400, detail="items에 품목 코드를 1~5개 지정하세요.")
     max_row = fetch_one("SELECT MAX(date) max_date FROM production_daily") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
     months = [shift_month(base.year, base.month, offset) for offset in range(-12, 1)]

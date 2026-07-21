@@ -192,3 +192,15 @@ nav button:focus-visible{outline-offset:-2px}
 .pivot-table .pivot-total{font-weight:700;border-left:2px solid var(--line);background:var(--soft,#f7f9fc)}
 .pivot-table th.pivot-total{background:var(--soft,#f7f9fc)}
 .sub-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+/* 품목 실적 추이 · 비교 — 검색 + 체크박스 다중 선택(최대 5개) */
+.item-multiselect{border:1px solid var(--line);border-radius:10px;overflow:hidden;max-width:420px;margin-bottom:10px}
+.item-multiselect-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--soft,#f7f9fc)}
+.item-multiselect-head input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:12px;color:var(--text)}
+.item-multiselect-head span{font-size:10.5px;color:var(--muted);white-space:nowrap;font-family:var(--mono)}
+.item-option-list{max-height:170px;overflow:auto}
+.item-option{display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:12px;cursor:pointer}
+.item-option:hover{background:var(--soft,#f7f9fc)}
+.item-option input{accent-color:var(--accent);flex:none}
+.item-option.disabled{opacity:.4;cursor:not-allowed}
+.item-option-list .panel-copy{padding:10px}
+.legend-chip svg{opacity:.6}
