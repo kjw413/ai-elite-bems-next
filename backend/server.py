@@ -785,6 +785,52 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "database": "mysql", **json_safe(row or {})}
 
 
+@app.get("/api/v1/data-status")
+def data_status() -> dict[str, Any]:
+    """원본별 최신 보유 일자와 지연 일수 — 현업 화면 상단 신선도 배지용.
+
+    지금까지 동기화 상태는 관리자 탭에만 있어, 현업은 지금 보는 숫자가 어제까지인지
+    사흘 전까지인지 알 방법이 없었다. 지연 판정 기준(2일)은 주말/공휴일에 생산이
+    없어 하루 비는 것이 정상이기 때문이다.
+    """
+    energy = fetch_one("SELECT MAX(date) max_date, MAX(updated_at) updated_at FROM energy_daily") or {}
+    production = fetch_one("SELECT MAX(date) max_date, MAX(updated_at) updated_at FROM production_daily") or {}
+    today = date.today()
+
+    def entry(row: dict[str, Any]) -> dict[str, Any]:
+        last_date = normalize_date(row.get("max_date"))
+        lag = (today - last_date).days if last_date else None
+        return {
+            "lastDate": last_date,
+            "lagDays": lag,
+            "stale": lag is not None and lag > 2,
+            "updatedAt": row.get("updated_at"),
+        }
+
+    # 공장별 최신 일자 — 전체 최신일에 못 미치는 공장은 그 날짜 집계·메일에서 통째로
+    # 빠지는데, 화면에는 조용히 사라져 "실적이 안 뜬다"로 보인다. 명시적으로 알린다.
+    energy_max = normalize_date(energy.get("max_date"))
+    factory_rows = fetch_all("SELECT factory, MAX(date) max_date FROM energy_daily GROUP BY factory")
+    lagging = []
+    for row in factory_rows:
+        factory_last = normalize_date(row.get("max_date"))
+        if energy_max is None or factory_last is None or factory_last >= energy_max:
+            continue
+        lagging.append({
+            "factory": str(row.get("factory")),
+            "lastDate": factory_last,
+            "behindDays": (energy_max - factory_last).days,
+        })
+    lagging.sort(key=lambda item: item["behindDays"], reverse=True)
+
+    return json_safe({
+        "energy": entry(energy),
+        "production": entry(production),
+        "laggingFactories": lagging,
+        "today": today,
+    })
+
+
 @app.get("/api/v1/session")
 def session(request: Request) -> dict[str, str]:
     client_ip = request.client.host if request.client else "unknown"
@@ -1030,22 +1076,14 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
         "SELECT id, event_date, factory, target, tag, severity, note FROM event_annotation WHERE 1=1" + event_clause + " ORDER BY event_date DESC, id DESC LIMIT 5",
         tuple(event_values),
     )
-    alert_clause, alert_values = factory_clause(factory)
-    alert_row = fetch_one(
-        "SELECT COUNT(*) count FROM prediction_log WHERE pred_date BETWEEN %s AND %s AND band_status IN ('over','under')" + alert_clause,
-        (base - timedelta(days=6), base, *alert_values),
-    ) or {"count": 0}
-    alert_count = int(alert_row.get("count") or 0)
+    # 단순 이탈 COUNT가 아니라 판정 규칙(단발/반복/지속편차)을 적용한다 —
+    # 90% 밴드에서는 정상이어도 10%가 이탈해 상시 경고가 되기 때문.
+    alert_banner = band_alert_banner(band_rule_evaluation(factory, base))
     return json_safe({
         "baseDate": base.isoformat(),
         "factory": factory,
         "updatedAt": max_row.get("updated_at") or datetime.now(),
-        "alert": {
-            "level": "warning" if alert_count else "normal",
-            "title": f"AI 정상범주 이탈 {alert_count}건" if alert_count else "AI 이상 신호 없음",
-            "description": "최근 7일 예측 밴드 기준입니다. 상세 원인은 AI 예측 화면에서 확인하세요.",
-            "count": alert_count,
-        },
+        "alert": alert_banner,
         "metrics": metrics,
         "trend": trend,
         "yoy": yoy,
@@ -1163,7 +1201,108 @@ def energy(
         "factories": list(combined.values()),
         "yoyYear": base.year,
         "yoy": build_energy_yoy(yoy_rows, base.year),
+        "coverage": period_coverage(factory, window_from, window_to),
     })
+
+
+# 보관유형(production_daily.category1) — 냉동설비 부하와 직접 연결되는 유일한 생산 축.
+STORAGE_TYPES = ("냉동", "냉장", "상온")
+STORAGE_KEYS = {"냉동": "frozen", "냉장": "chilled", "상온": "ambient"}
+# 상온 제품은 냉동설비를 쓰지 않으므로 냉동 원단위 분모에서 제외한다.
+STORAGE_COLD_TYPES = ("냉동", "냉장")
+
+
+def build_storage_load(factory: str, date_from: date, date_to: date) -> dict[str, Any]:
+    """보관유형별 생산량과 냉동설비 전력을 하나의 일별 시계열로 묶는다.
+
+    category1(냉동/냉장/상온)은 지금까지 어느 화면에서도 쓰이지 않던 축인데,
+    냉동설비 전력이 전체 전력의 큰 비중을 차지하므로 '냉동 전력이 왜 늘었나'를
+    제품 믹스로 설명할 수 있는 유일한 연결고리다.
+
+    분모는 완제품(production_daily) 기준이다 — 광주 판매용 재공품은 보관유형이
+    분류돼 있지 않아 여기에 합산하지 않는다(전체 원단위 분모와 다른 점).
+    """
+    energy_clause, energy_values = factory_clause(factory)
+    energy_rows = fetch_all(
+        """
+        SELECT date, SUM(freezing_power_kwh) freezing, SUM(total_power_kwh) total_power
+        FROM energy_daily WHERE date BETWEEN %s AND %s
+        """ + energy_clause + " GROUP BY date ORDER BY date",
+        (date_from, date_to, *energy_values),
+    )
+    codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
+    placeholders = ",".join(["%s"] * len(codes))
+    production_rows = fetch_all(
+        f"""
+        SELECT date, category1, SUM(actual_qty)/1000 ton
+        FROM production_daily WHERE date BETWEEN %s AND %s AND factory IN ({placeholders})
+        GROUP BY date, category1
+        """,
+        (date_from, date_to, *codes),
+    )
+
+    by_date: dict[date, dict[str, float]] = {}
+    for row in energy_rows:
+        row_date = normalize_date(row.get("date"))
+        if row_date is None:
+            continue
+        bucket = by_date.setdefault(row_date, {})
+        bucket["freezing"] = scalar(row.get("freezing"))
+        bucket["totalPower"] = scalar(row.get("total_power"))
+    for row in production_rows:
+        row_date = normalize_date(row.get("date"))
+        storage_type = str(row.get("category1") or "").strip()
+        if row_date is None or storage_type not in STORAGE_TYPES:
+            continue
+        by_date.setdefault(row_date, {})[STORAGE_KEYS[storage_type]] = scalar(row.get("ton"))
+
+    daily: list[dict[str, Any]] = []
+    total_freezing = total_power = 0.0
+    totals = {key: 0.0 for key in STORAGE_KEYS.values()}
+    for row_date in sorted(by_date):
+        bucket = by_date[row_date]
+        freezing_kwh = float(bucket.get("freezing") or 0.0)
+        cold_ton = sum(float(bucket.get(STORAGE_KEYS[name]) or 0.0) for name in STORAGE_COLD_TYPES)
+        total_freezing += freezing_kwh
+        total_power += float(bucket.get("totalPower") or 0.0)
+        for key in totals:
+            totals[key] += float(bucket.get(key) or 0.0)
+        daily.append({
+            "date": row_date.strftime("%m.%d"),
+            "freezing": round(freezing_kwh / 1000, 2),
+            **{key: round(float(bucket.get(key) or 0.0), 1) for key in STORAGE_KEYS.values()},
+            "coldTon": round(cold_ton, 1),
+            "intensity": round(freezing_kwh / cold_ton, 1) if cold_ton > 0 else None,
+        })
+
+    cold_total = totals["frozen"] + totals["chilled"]
+    mix_total = sum(totals.values())
+    return {
+        "daily": daily,
+        "summary": {
+            "freezingMwh": round(total_freezing / 1000, 1),
+            "freezingShare": round(total_freezing / total_power * 100, 1) if total_power > 0 else None,
+            "coldTon": round(cold_total, 1),
+            "intensity": round(total_freezing / cold_total, 1) if cold_total > 0 else None,
+            **{key: round(value, 1) for key, value in totals.items()},
+            "mix": {
+                key: round(value / mix_total * 100, 1) if mix_total > 0 else None
+                for key, value in totals.items()
+            },
+        },
+    }
+
+
+def period_coverage(factory: str, date_from: date, date_to: date) -> dict[str, Any]:
+    """선택 기간의 데이터 결측일 — 부분 결측을 완전한 집계로 오인하지 않게 한다."""
+    clause, values = factory_clause(factory)
+    row = fetch_one(
+        "SELECT COUNT(DISTINCT date) days FROM energy_daily WHERE date BETWEEN %s AND %s" + clause,
+        (date_from, date_to, *values),
+    ) or {}
+    expected = (date_to - date_from).days + 1
+    present = int(row.get("days") or 0)
+    return {"expectedDays": expected, "presentDays": present, "missingDays": max(0, expected - present)}
 
 
 @app.get("/api/v1/intensity")
@@ -1291,6 +1430,36 @@ def intensity_analysis(
             "change": rate_change(cur, prv) if prv else None,
         })
 
+    # 원단위 변동 원인분해 — 원단위는 사용량÷생산량이라 악화 원인이 둘 중 어느 쪽인지
+    # 값 자체로는 알 수 없다. 2요인 정확 분해로 잔차 없이 나눈다.
+    usage_key = {"total_power_kwh": "power", "fuel_nm3": "fuel", "water_ton": "water"}[usage_col]
+
+    def build_bridge(start: date, prev_start: date) -> dict[str, Any] | None:
+        current_totals = aggregate_period(factory, start, base, actual_records=actual_records)
+        previous_totals = aggregate_period(factory, prev_start, prev_base, actual_records=actual_records)
+        usage_curr, ton_curr = current_totals[usage_key], current_totals["production"] / 1000
+        usage_prev, ton_prev = previous_totals[usage_key], previous_totals["production"] / 1000
+        if ton_curr <= 0 or ton_prev <= 0 or usage_prev <= 0:
+            return None
+        # ΔI = (U₁-U₀)/P₁ + U₀·(1/P₁ - 1/P₀) — 두 항의 합이 정확히 ΔI가 되어 잔차가 없다.
+        usage_effect = (usage_curr - usage_prev) / ton_curr
+        production_effect = usage_prev * (1 / ton_curr - 1 / ton_prev)
+        return {
+            "previous": round(usage_prev / ton_prev, 2),
+            "current": round(usage_curr / ton_curr, 2),
+            "usageEffect": round(usage_effect, 2),
+            "productionEffect": round(production_effect, 2),
+            "usagePrev": round(usage_prev, 1), "usageCurr": round(usage_curr, 1),
+            "usageChange": rate_change(usage_curr, usage_prev),
+            "tonPrev": round(ton_prev, 1), "tonCurr": round(ton_curr, 1),
+            "tonChange": rate_change(ton_curr, ton_prev),
+        }
+
+    bridge = {
+        "mtd": build_bridge(base.replace(day=1), prev_base.replace(day=1)),
+        "ytd": build_bridge(base.replace(month=1, day=1), prev_base.replace(month=1, day=1)),
+    }
+
     return json_safe({
         "baseDate": base,
         "metric": metric,
@@ -1305,6 +1474,9 @@ def intensity_analysis(
         "monthly": monthly,
         "yoyCumulative": weighted_intensity_yoy(monthly_usage, monthly_production, base.year),
         "matrix": matrix,
+        "bridge": bridge,
+        "storage": build_storage_load(factory, window_from, window_to),
+        "coverage": period_coverage(factory, window_from, window_to),
     })
 
 
@@ -1415,23 +1587,35 @@ def production(
 
     cat2_keys = ("IC", "MY", "FM", "SN", "ETC")
     daily_output = []
-    burnup: list[dict[str, Any]] = []
+    monthly_plan_actual: list[dict[str, Any]] = []
     if mode == "year":
         monthly_map = {int(row["month_no"]): row for row in daily if row.get("month_no") is not None}
+        # 전년 동월의 제품유형별 실적 — 유형별 전년비를 같은 차트에서 보기 위해 함께 싣는다.
+        previous_rows = fetch_all(
+            "SELECT MONTH(date) month_no," + cat2_select +
+            " FROM production_daily WHERE date BETWEEN %s AND %s"
+            + clause + " GROUP BY month_no ORDER BY month_no",
+            (date(base.year - 1, 1, 1), date(base.year - 1, 12, 31), *values),
+        )
+        previous_map = {int(row["month_no"]): row for row in previous_rows if row.get("month_no") is not None}
         wip_monthly_ton: dict[int, float] = {}
         for wip_date, kg in wip_daily_kg.items():
             wip_monthly_ton[wip_date.month] = wip_monthly_ton.get(wip_date.month, 0.0) + kg / 1000
         for month in range(1, 13):
             row = monthly_map.get(month, {})
+            previous_row = previous_map.get(month, {})
             entry = {
                 "date": f"{month}월",
                 **{key: round(scalar(row.get(key)), 3) for key in cat2_keys},
+                **{f"prev{key}": round(scalar(previous_row.get(key)), 3) for key in cat2_keys},
             }
             if wip_monthly_ton:
                 cat2_total = sum(scalar(row.get(key)) for key in cat2_keys)
                 entry["utilityProd"] = round(cat2_total + wip_monthly_ton.get(month, 0.0), 3)
             daily_output.append(entry)
-        # 연간 Burn-up — 월별 계획 누계 vs 실적 누계 (legacy _render_annual_burnup)
+        # 월별 계획 대비 실적 — 생산계획은 주 단위로 수립·집계되므로 연 누계(Burn-up)보다
+        # 월 단위 달성률이 현장의 계획 관리 주기와 맞는다. 진행 중인 달은 월 전체가 아니라
+        # 기준일까지의 실적이라 달성률이 낮게 보이므로 partial 플래그로 구분한다.
         monthly_plan_rows = fetch_all(
             """
             SELECT m, SUM(planned_qty) plan FROM (
@@ -1441,18 +1625,19 @@ def production(
             (period_from, period_to, *values),
         )
         monthly_plan = {int(row["m"]): scalar(row.get("plan")) for row in monthly_plan_rows}
-        # 실적선은 마지막 실적 월까지만 그린다 (미래 월로 평탄하게 이어지지 않도록 None)
         last_actual_month = max(monthly_map) if monthly_map else 0
-        cum_plan = 0.0
-        cum_actual = 0.0
         for month in range(1, 13):
-            cum_plan += monthly_plan.get(month, 0.0)
+            plan_value = monthly_plan.get(month, 0.0)
             row = monthly_map.get(month, {})
-            cum_actual += sum(scalar(row.get(key)) for key in cat2_keys)
-            burnup.append({
+            actual_value = sum(scalar(row.get(key)) for key in cat2_keys)
+            measured = month <= last_actual_month
+            monthly_plan_actual.append({
                 "month": f"{month}월",
-                "cumPlan": round(cum_plan, 1),
-                "cumActual": round(cum_actual, 1) if month <= last_actual_month else None,
+                "plan": round(plan_value, 1) if plan_value > 0 else None,
+                # 실적은 마지막 실적 월까지만 — 미래 월을 0으로 두면 달성률 0%로 오독된다.
+                "actual": round(actual_value, 1) if measured else None,
+                "rate": round(actual_value / plan_value * 100, 1) if (measured and plan_value > 0) else None,
+                "partial": measured and month == base.month,
             })
     else:
         # 월별·기간별 모두 기간 전체를 그대로 반환한다 — 과거 [-14:] 절단은
@@ -1586,7 +1771,7 @@ def production(
         "planAllowed": plan_allowed,
         "summary": summary_output,
         "daily": daily_output,
-        "burnup": burnup,
+        "monthlyPlan": monthly_plan_actual,
         "mix": [{"name": row["name"], "value": round(scalar(row["value"]) / mix_total * 100, 1)} for row in mix_rows],
         "wipMix": wip_mix,
         "topItems": top_items,
@@ -1828,6 +2013,147 @@ def aggregate_prediction_rows(
     return output[:limit]
 
 
+# 사용자 화면 용어 — 통계 용어(run rule/CUSUM) 대신 현업이 바로 읽히는 말을 쓴다.
+BAND_SIGNAL_LABELS = {
+    "alert": "반복 이탈",   # run rule 통과: 연속 2일 이상 또는 최근 7일 내 3회 이상
+    "watch": "단발 이탈",   # 하루만 벗어남 — 90% 밴드에서는 통계적으로 흔함
+    "drift": "지속 편차",   # 밴드 안이지만 여러 날 계속 한쪽으로 치우침(CUSUM)
+}
+
+
+def band_rule_evaluation(
+    factory: str,
+    base: date,
+    window_days: int = 30,
+    recent_days: int = 7,
+) -> dict[str, Any]:
+    """정상범주 이탈에 판정 규칙을 적용한 결과.
+
+    P05~P95는 90% 구간이라 정상 상태에서도 하루 판정의 10%는 밴드를 벗어난다.
+    단일일 이탈을 그대로 경보하면 배너가 상시 경고가 되어 아무도 안 보게 되므로
+    (알람 피로), anomaly_rules_service의 단발/반복/지속편차 판정을 그대로 쓴다.
+
+    판정은 반드시 물리 공장 시계열 단위로 수행한다 — 집계 후 판정하면 한 공장의
+    연속 이탈이 다른 공장 값에 상쇄돼 묻힌다. 조회창은 recent_days보다 길게 잡아
+    창 경계에 걸친 연속 이탈과 편차 누적을 인지하게 한다.
+    """
+    empty = {"alertCount": 0, "watchCount": 0, "driftCount": 0, "signals": [], "flags": []}
+    clause, values = factory_clause(factory)
+    rows = fetch_all(
+        """
+        SELECT factory, target, pred_date, band_status, band_position, actual_value, pred_value
+        FROM prediction_log WHERE pred_date BETWEEN %s AND %s
+        """ + clause + " ORDER BY factory, target, pred_date",
+        (base - timedelta(days=window_days - 1), base, *values),
+    )
+    if not rows:
+        return empty
+    try:
+        import pandas as pd
+
+        service = import_core("app.services.anomaly_rules_service")
+        result = service.evaluate_band_rules(pd.DataFrame(rows), base, recent_days=recent_days)
+    except Exception as exc:
+        # 판정 실패가 화면 전체를 막지 않도록 — 신호 없음으로 강등하고 로그만 남긴다.
+        logger.error("Band rule evaluation failed.", exc_info=(type(exc), exc, exc.__traceback__))
+        return empty
+
+    row_flags = result.get("row_flags")
+    flags: list[dict[str, Any]] = []
+    if row_flags is not None and not row_flags.empty:
+        for row in row_flags.to_dict("records"):
+            flag_date = normalize_date(row.get("pred_date"))
+            if flag_date is None:
+                continue
+            flags.append({
+                "factory": str(row.get("factory")),
+                "target": str(row.get("target")),
+                "date": flag_date,
+                "severity": str(row.get("severity")),
+                "rules": str(row.get("rules") or ""),
+            })
+
+    # 같은 (공장, 지표)의 연속 이탈은 날짜마다 한 건씩 잡히므로 시리즈 단위로 묶는다 —
+    # "남양주1 연료"가 4줄 반복되면 목록만 길어지고 조치 대상 수를 오해하게 된다.
+    signals: list[dict[str, Any]] = []
+    latest_alert: dict[tuple[str, str], dict[str, Any]] = {}
+    for flag in flags:
+        if flag["severity"] != "alert":
+            continue
+        key = (flag["factory"], flag["target"])
+        existing = latest_alert.get(key)
+        if existing is None or flag["date"] > existing["date"]:
+            latest_alert[key] = {
+                "kind": "alert",
+                "label": BAND_SIGNAL_LABELS["alert"],
+                "factory": flag["factory"],
+                "target": flag["target"],
+                "date": flag["date"],
+                "detail": flag["rules"],
+            }
+    signals.extend(latest_alert.values())
+    for drift in result.get("drift_signals", []):
+        bias = drift.get("mean_bias_pct")
+        direction = "높음" if drift.get("direction") == "over" else "낮음"
+        detail = f"{drift.get('days', 0)}일 연속 예측보다 {direction}"
+        if bias is not None:
+            detail += f" (평균 {bias:+.1f}%)"
+        signals.append({
+            "kind": "drift",
+            "label": BAND_SIGNAL_LABELS["drift"],
+            "factory": str(drift.get("factory")),
+            "target": str(drift.get("target")),
+            "date": drift.get("start_date"),
+            "detail": detail,
+        })
+    # 최신 신호부터 — 경보를 지속 편차보다 앞에 둔다.
+    signals.sort(key=lambda item: (item["kind"] != "alert", -(item["date"].toordinal() if item.get("date") else 0)))
+    return {
+        "alertCount": int(result.get("n_alert", 0)),
+        "watchCount": int(result.get("n_watch", 0)),
+        "driftCount": len(result.get("drift_signals", [])),
+        "signals": signals[:8],
+        "flags": flags,
+    }
+
+
+def band_alert_banner(evaluation: dict[str, Any]) -> dict[str, Any]:
+    """판정 결과를 대시보드 배너 문구로 — 단발 이탈만 있으면 경고로 올리지 않는다."""
+    alert_count = evaluation.get("alertCount", 0)
+    drift_count = evaluation.get("driftCount", 0)
+    watch_count = evaluation.get("watchCount", 0)
+    if alert_count:
+        parts = [f"반복 이탈 {alert_count}건"]
+        if drift_count:
+            parts.append(f"지속 편차 {drift_count}건")
+        return {
+            "level": "warning",
+            "title": f"조치 필요 — {' · '.join(parts)}",
+            "description": "같은 방향 이탈이 이틀 이상 이어졌거나 최근 7일 안에 3회 이상 반복된 건입니다. AI 예측 화면에서 원인을 확인하세요.",
+            **evaluation,
+        }
+    if drift_count:
+        return {
+            "level": "warning",
+            "title": f"점검 권장 — 지속 편차 {drift_count}건",
+            "description": "정상범주 안이지만 여러 날 계속 한쪽으로 치우쳐 있습니다. 하루만 보면 정상이라 놓치기 쉬운 유형입니다.",
+            **evaluation,
+        }
+    if watch_count:
+        return {
+            "level": "normal",
+            "title": "이상 신호 없음",
+            "description": f"단발 이탈 {watch_count}건이 있으나 정상범주(90%) 특성상 흔한 수준으로, 반복되지 않아 조치 대상이 아닙니다.",
+            **evaluation,
+        }
+    return {
+        "level": "normal",
+        "title": "AI 이상 신호 없음",
+        "description": "최근 7일 예측 밴드 기준으로 반복 이탈과 지속 편차가 없습니다.",
+        **evaluation,
+    }
+
+
 @app.get("/api/v1/predictions")
 def predictions(
     factory: str = "전사",
@@ -1836,6 +2162,9 @@ def predictions(
     max_row = fetch_one("SELECT MAX(pred_date) max_date FROM prediction_log") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
     rows = aggregate_prediction_rows(factory, base)
+    # 대시보드 배너와 같은 판정 규칙을 쓴다 — 두 화면이 다른 기준으로 다른 건수를
+    # 보여주면 어느 쪽을 믿어야 할지 알 수 없다.
+    evaluation = band_rule_evaluation(factory, base)
     status = {"normal": 0, "warning": 0, "alert": 0, "unknown": 0, "label": "정상"}
     for row in rows:
         if row["band_status"] == "inside":
@@ -1844,7 +2173,17 @@ def predictions(
             status["alert"] += 1
         else:
             status["unknown"] += 1
-    status["label"] = "주의" if status["alert"] else "미확정" if status["unknown"] else "정상"
+    status.update({
+        "repeated": evaluation["alertCount"],
+        "single": evaluation["watchCount"],
+        "drift": evaluation["driftCount"],
+    })
+    status["label"] = (
+        "조치 필요" if evaluation["alertCount"]
+        else "점검 권장" if evaluation["driftCount"]
+        else "미확정" if status["unknown"] and not status["normal"]
+        else "정상"
+    )
     model = {"version": "v5.3", "trainedAt": "-", "mape": 0, "coverage": 0, "state": "운영 중"}
     try:
         service = import_core("app.services.usage_prediction_v5_service")
@@ -1871,7 +2210,80 @@ def predictions(
             "actual": round(actual, 2) if actual is not None else None,
             "status": row["band_status"],
         })
-    return json_safe({"baseDate": base, "status": status, "latest": latest, "model": model})
+    return json_safe({
+        "baseDate": base,
+        "status": status,
+        "latest": latest,
+        "model": model,
+        "signals": evaluation["signals"],
+    })
+
+
+PREDICTION_TARGETS = ("전력", "연료", "용수")
+
+
+@app.get("/api/v1/predictions/gap")
+def prediction_gap_series(
+    factory: str = "전사",
+    target: str = "전력",
+    requested_date: date | None = Query(None, alias="date"),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+) -> dict[str, Any]:
+    """예측 대비 실측 괴리 시계열 — 기간을 지정해 편향 추이를 본다.
+
+    단일 시점 판정만으로는 '매일 조금씩 계속 높은' 유형을 못 본다. 절대값(예측·실측)과
+    괴리율(%)을 함께 돌려주어 화면이 2단으로 그린다: 위는 수준, 아래는 편향 방향.
+    """
+    if target not in PREDICTION_TARGETS:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 지표입니다: {target}")
+    max_row = fetch_one("SELECT MAX(pred_date) max_date FROM prediction_log") or {}
+    base = bounded_base_date(requested_date, max_row.get("max_date"))
+    window_to = date_to or base
+    window_from = date_from or (window_to - timedelta(days=29))
+    if window_from > window_to:
+        raise HTTPException(status_code=400, detail="시작일은 종료일보다 늦을 수 없습니다.")
+    if (window_to - window_from).days > 365:
+        raise HTTPException(status_code=400, detail="조회 기간은 최대 366일입니다.")
+
+    rows = aggregate_prediction_rows(
+        factory, window_to, date_from=window_from, target=target, limit=400,
+    )
+    series = []
+    for row in sorted(rows, key=lambda item: item["pred_date"]):
+        predicted = optional_scalar(row.get("predicted"))
+        actual = optional_scalar(row.get("actual"))
+        lower = optional_scalar(row.get("lower_band"))
+        upper = optional_scalar(row.get("upper_band"))
+        gap = actual - predicted if (actual is not None and predicted is not None) else None
+        gap_pct = (gap / predicted * 100) if (gap is not None and predicted) else None
+        series.append({
+            "date": row["pred_date"].strftime("%m.%d"),
+            "fullDate": row["pred_date"],
+            "predicted": round(predicted, 2) if predicted is not None else None,
+            "actual": round(actual, 2) if actual is not None else None,
+            "lower": round(lower, 2) if lower is not None else None,
+            "upper": round(upper, 2) if upper is not None else None,
+            "band": [round(lower, 2), round(upper, 2)] if (lower is not None and upper is not None) else None,
+            "gap": round(gap, 2) if gap is not None else None,
+            "gapPct": round(gap_pct, 1) if gap_pct is not None else None,
+            "status": row["band_status"],
+        })
+    measured = [point for point in series if point["gapPct"] is not None]
+    outside = [point for point in series if point["status"] in ("over", "under")]
+    summary = {
+        "days": len(series),
+        "measuredDays": len(measured),
+        "outsideDays": len(outside),
+        # 평균 괴리율은 편향(한쪽 쏠림), 평균 절대 괴리율은 정확도 — 둘은 다른 질문에 답한다.
+        "meanGapPct": round(sum(point["gapPct"] for point in measured) / len(measured), 1) if measured else None,
+        "meanAbsGapPct": round(sum(abs(point["gapPct"]) for point in measured) / len(measured), 1) if measured else None,
+    }
+    return json_safe({
+        "factory": factory, "target": target,
+        "dateFrom": window_from, "dateTo": window_to,
+        "series": series, "summary": summary,
+    })
 
 
 class PredictionRequest(BaseModel):

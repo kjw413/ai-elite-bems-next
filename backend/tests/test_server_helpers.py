@@ -4,7 +4,7 @@ import asyncio
 import os
 import sys
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -547,7 +547,12 @@ class ServerHelperTests(unittest.TestCase):
         lookup = server.LOCAL_CORE_ROOT / "analysis_results" / "item_energy_impact_lookup.json"
         self.assertTrue(lookup.exists())
 
-    def test_annual_burnup_actual_line_stops_after_last_actual_month(self) -> None:
+    def test_annual_monthly_plan_rate_stops_after_last_actual_month(self) -> None:
+        """연간 모드는 누계 Burn-up이 아니라 월별 계획 대비 실적을 낸다.
+
+        생산계획이 주 단위로 수립·집계되므로 연 누계보다 월 달성률이 현장 주기와 맞는다.
+        미래 월 실적을 0으로 두면 달성률 0%로 오독되므로 None이어야 한다.
+        """
         def month_row(month: int, ic: float) -> dict[str, object]:
             return {"month_no": month, "IC": ic, "MY": 0, "FM": 0, "SN": 0, "ETC": 0}
 
@@ -561,22 +566,26 @@ class ServerHelperTests(unittest.TestCase):
                 [month_row(month, 50.0) for month in (1, 2, 3)],  # 월별 실적 (3월까지)
                 [{"name": "IC", "value": 300.0}],                  # 제품 믹스
                 [{"name": "품목", "plan": 10.0, "actual": 9.0}],   # 품목 순위
-                [{"m": month, "plan": 100.0} for month in range(1, 13)],  # 월별 계획 (burnup)
+                [month_row(month, 40.0) for month in (1, 2, 3)],  # 전년 월별 실적
+                [{"m": month, "plan": 100.0} for month in range(1, 13)],  # 월별 계획
                 [],                                                # 미달/초과 gap
                 [],                                                # 제품유형 계획
                 [],                                                # 월별 전년비
             ]),
         ):
             result = server.production(factory="전사", requested_date=date(2026, 7, 15), mode="year")
-        burnup = result["burnup"]
-        self.assertEqual(len(burnup), 12)
-        # 계획 누계는 12월까지 이어진다
-        self.assertEqual(burnup[0]["cumPlan"], 100.0)
-        self.assertEqual(burnup[11]["cumPlan"], 1200.0)
-        # 실적 누계는 마지막 실적 월(3월)까지만 값이 있고 이후는 None (평탄선 방지)
-        self.assertEqual(burnup[2]["cumActual"], 150.0)
-        self.assertIsNone(burnup[3]["cumActual"])
-        self.assertIsNone(burnup[11]["cumActual"])
+        monthly_plan = result["monthlyPlan"]
+        self.assertEqual(len(monthly_plan), 12)
+        # 계획은 12월까지 나오지만 실적·달성률은 마지막 실적 월(3월)까지만
+        self.assertEqual(monthly_plan[0]["plan"], 100.0)
+        self.assertEqual(monthly_plan[11]["plan"], 100.0)
+        self.assertEqual(monthly_plan[2]["actual"], 50.0)
+        self.assertEqual(monthly_plan[2]["rate"], 50.0)
+        self.assertIsNone(monthly_plan[3]["actual"])
+        self.assertIsNone(monthly_plan[3]["rate"])
+        # 유형별 전년비를 위해 전년 동월 값이 daily에 함께 실린다
+        self.assertEqual(result["daily"][0]["IC"], 50.0)
+        self.assertEqual(result["daily"][0]["prevIC"], 40.0)
 
     def test_energy_window_defaults_to_current_month(self) -> None:
         base = date(2026, 7, 15)
@@ -810,16 +819,14 @@ class ServerHelperTests(unittest.TestCase):
 
     def test_dashboard_trend_includes_all_energy_sources(self) -> None:
         with (
-            patch.object(server, "fetch_one", side_effect=[
-                {"max_date": date(2026, 7, 15), "updated_at": None},   # MAX(date)
-                {"count": 0},                                           # 이상 이탈 건수
-            ]),
+            patch.object(server, "fetch_one", return_value={"max_date": date(2026, 7, 15), "updated_at": None}),
             patch.object(server, "fetch_all", side_effect=[
                 [{"date": date(2026, 7, 15), "actual": 191.0,
                   "fuel": 1200.0, "water": 340.0, "wastewater": 150.0}],  # 7일 추이
                 [],                                                        # YoY rows
                 [],                                                        # 구성비 (YTD)
                 [],                                                        # events
+                [],                                                        # 판정 규칙용 prediction_log
             ]),
             patch.object(server, "aggregate_prediction_rows", return_value=[]),
             patch.object(server, "fetch_actual_production_frame", return_value=None),
@@ -834,6 +841,50 @@ class ServerHelperTests(unittest.TestCase):
         self.assertEqual(row["water"], 340.0)
         self.assertEqual(row["wastewater"], 150.0)
         self.assertEqual(row["production"], 52.3)
+
+    def test_single_day_band_exit_does_not_raise_dashboard_warning(self) -> None:
+        """단발 이탈은 경고로 올리지 않는다 — 90% 밴드에서 통계적으로 흔해 알람 피로를 만든다."""
+        banner = server.band_alert_banner(
+            {"alertCount": 0, "watchCount": 6, "driftCount": 0, "signals": [], "flags": []}
+        )
+        self.assertEqual(banner["level"], "normal")
+        self.assertIn("단발 이탈 6건", banner["description"])
+
+        repeated = server.band_alert_banner(
+            {"alertCount": 2, "watchCount": 6, "driftCount": 1, "signals": [], "flags": []}
+        )
+        self.assertEqual(repeated["level"], "warning")
+        self.assertIn("반복 이탈 2건", repeated["title"])
+
+        drift_only = server.band_alert_banner(
+            {"alertCount": 0, "watchCount": 0, "driftCount": 3, "signals": [], "flags": []}
+        )
+        self.assertEqual(drift_only["level"], "warning")
+        self.assertIn("지속 편차 3건", drift_only["title"])
+
+    def test_band_rule_evaluation_groups_alerts_by_series(self) -> None:
+        """같은 (공장, 지표)의 연속 이탈은 날짜별로 쪼개지 않고 한 건으로 묶는다."""
+        rows = [
+            {"factory": "논산", "target": "연료", "pred_date": date(2026, 7, 13) + timedelta(days=offset),
+             "band_status": "over", "band_position": 1.4, "actual_value": 110.0, "pred_value": 100.0}
+            for offset in range(4)
+        ]
+        with patch.object(server, "fetch_all", return_value=rows):
+            evaluation = server.band_rule_evaluation("논산", date(2026, 7, 16))
+        alert_signals = [signal for signal in evaluation["signals"] if signal["kind"] == "alert"]
+        self.assertEqual(len(alert_signals), 1)
+        self.assertEqual(alert_signals[0]["factory"], "논산")
+        self.assertEqual(alert_signals[0]["date"], date(2026, 7, 16))
+        self.assertGreater(evaluation["alertCount"], 1)
+
+    def test_intensity_bridge_splits_change_without_residual(self) -> None:
+        """원단위 변동 분해는 사용량효과 + 생산량효과가 정확히 전체 변동과 같아야 한다."""
+        usage_prev, ton_prev = 1_000.0, 10.0   # 원단위 100
+        usage_curr, ton_curr = 1_100.0, 10.5   # 원단위 약 104.76
+        usage_effect = (usage_curr - usage_prev) / ton_curr
+        production_effect = usage_prev * (1 / ton_curr - 1 / ton_prev)
+        total_change = usage_curr / ton_curr - usage_prev / ton_prev
+        self.assertAlmostEqual(usage_effect + production_effect, total_change, places=9)
 
 
 if __name__ == "__main__":

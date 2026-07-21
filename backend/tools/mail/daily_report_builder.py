@@ -931,6 +931,9 @@ def build_daily_report(
     rows = _fetch_rows_range(fetch_from, ref_date, factories_filter)
     factory_rows, warning_items, good_count = _build_daily_factory_rows(rows, ref_date, prev_date)
     n_current_factories = sum(1 for row in factory_rows if row["has_current"])
+    # 기준일 원본이 안 들어온 사업장 — 표에서 "-"로만 보이면 왜 비었는지 알 수 없어
+    # 수신자가 "실적이 안 뜬다"로 오해한다. 명시적으로 사유를 알린다.
+    missing_factories = [row["factory"] for row in factory_rows if not row["has_current"]]
     warning_factory_count = len({item["factory"] for item in warning_items})
     snapshot_table = _build_daily_snapshot_table(rows, ref_date, prev_date)
 
@@ -954,6 +957,7 @@ def build_daily_report(
         warning_items=warning_items,
         factory_rows=factory_rows,
         snapshot_table=snapshot_table,
+        missing_factories=missing_factories,
     )
 
     log.info(

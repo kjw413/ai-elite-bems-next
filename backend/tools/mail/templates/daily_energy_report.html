@@ -31,6 +31,13 @@
               광주공장 유틸리티 사용 재공품 Mix-kg 환산하여 생산량에 반영.
             </div>
 
+            {% if missing_factories %}
+            <div style="font-size:11px; color:#8a5500; background:#fff7e8; border:1px solid #f3c989; border-radius:6px; padding:9px 12px; margin:0 0 12px 13px;">
+              <b>기준일 데이터 없음:</b> {{ missing_factories|join(', ') }} — 해당 사업장은 표에 "-"로 표시됩니다.
+              원본(RawDB_에너지)에 {{ ref_date }} 행이 아직 들어오지 않은 상태이며, 전사 합계에서도 제외되어 있습니다.
+            </div>
+            {% endif %}
+
             {% if snapshot_table and snapshot_table.metric_rows %}
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:10.5px; table-layout:fixed;">
               <thead>

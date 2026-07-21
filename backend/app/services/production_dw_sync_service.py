@@ -115,6 +115,58 @@ def _df_to_records(df: pd.DataFrame) -> list[tuple]:
     return records
 
 
+_SELECT_EXISTING_SQL = """
+SELECT date, factory, item_code, item_name, category1, category2, planned_qty, actual_qty
+FROM production_daily
+"""
+
+
+def _comparable(name: Any, cat1: Any, cat2: Any, planned: Any, actual: Any) -> tuple:
+    """DB 값과 엑셀 값을 같은 형태로 정규화 — 부동소수 표현차로 오탐하지 않도록 반올림."""
+    return (
+        str(name or ""),
+        str(cat1 or ""),
+        None if cat2 is None else str(cat2),
+        round(float(planned or 0.0), 6),
+        round(float(actual or 0.0), 6),
+    )
+
+
+def _existing_snapshot() -> dict[tuple, tuple]:
+    """(date, factory, item_code) → 비교 대상 값. 변경분만 UPSERT하기 위한 현재 DB 상태."""
+    conn = get_connection(admin=True)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(_SELECT_EXISTING_SQL)
+            snapshot: dict[tuple, tuple] = {}
+            for row_date, factory, item_code, item_name, cat1, cat2, planned, actual in cur:
+                snapshot[(row_date, str(factory), str(item_code))] = _comparable(
+                    item_name, cat1, cat2, planned, actual,
+                )
+            return snapshot
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+
+def _changed_records(records: list[tuple], snapshot: dict[tuple, tuple]) -> list[tuple]:
+    """엑셀 행 중 DB와 실제로 다른 것만 추린다.
+
+    엑셀은 전체 스냅샷이라 매번 30만 행을 전량 UPSERT하면 파일이 조금만 바뀌어도
+    2분 이상 걸린다. 그 사이 화면을 새로고침하면 생산실적만 옛 값으로 보여
+    '에너지만 갱신된다'로 보이므로, 바뀐 행만 골라 반영 시간을 수 초로 줄인다.
+    """
+    changed: list[tuple] = []
+    for record in records:
+        row_date, item_code, item_name, factory, cat1, cat2, planned, actual = record
+        key = (row_date, factory, item_code)
+        if snapshot.get(key) != _comparable(item_name, cat1, cat2, planned, actual):
+            changed.append(record)
+    return changed
+
+
 # 배치 단위로 UPSERT 실행 후 (영향 행수, 배치 수) 반환.
 def _bulk_upsert(records: list[tuple]) -> tuple[int, int]:
     if not records:
@@ -195,27 +247,39 @@ def auto_sync_production_once(
         t0 = datetime.now()
         df = _load_daily_sheet(src)
         records = _df_to_records(df)
-        affected, batches = _bulk_upsert(records)
+        # 변경분만 UPSERT — 실패하면 전량 UPSERT로 안전하게 되돌린다(정확성 우선).
+        try:
+            targets = _changed_records(records, _existing_snapshot())
+            incremental = True
+        except Exception as diff_error:
+            logger.warning(f"[production_sync] 증분 비교 실패 — 전량 UPSERT로 대체: {diff_error}")
+            targets, incremental = records, False
+        affected, batches = _bulk_upsert(targets)
         dt = (datetime.now() - t0).total_seconds()
 
         new_state = {
             "last_mtime": mtime,
             "last_sync_at": t0.strftime("%Y-%m-%d %H:%M:%S"),
             "last_rows": len(records),
+            "last_changed": len(targets),
             "last_affected": affected,
             "last_batches": batches,
             "last_duration_sec": round(dt, 2),
+            "last_incremental": incremental,
             "src": str(src),
         }
         _write_state(new_state)
 
+        scope = f"변경 {len(targets):,}/{len(records):,}행" if incremental else f"전량 {len(records):,}행"
         result.update(
             status="synced",
-            message=f"UPSERT 완료 — {len(records):,}행 / {batches} 배치 / {dt:.1f}s",
+            message=f"UPSERT 완료 — {scope} / {batches} 배치 / {dt:.1f}s",
             rows=len(records),
+            changed=len(targets),
             affected=affected,
             batches=batches,
             duration_sec=round(dt, 2),
+            incremental=incremental,
         )
         logger.info(f"[production_sync] {result['message']}")
     except Exception as exc:

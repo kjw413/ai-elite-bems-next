@@ -177,7 +177,7 @@ export function ProductionItemTrend({ factory, date, mode, rangeFrom, rangeTo }:
   }
 
   return <article className="card chart-card span-all">
-    <header className="card-title"><h3>품목 실적 비교</h3><div className="card-title-side">
+    <header className="card-title"><h3>품목간 실적 비교</h3><div className="card-title-side">
       {merged.length > 0 && <button type="button" className="csv-button"
         onClick={() => downloadCsv(`item_compare_${mode}_${selectedCodes.join("-")}`, merged, ["period", ...selectedCodes],
           { period: axisLabel(mode), ...Object.fromEntries(selectedCodes.map(code => [code, `${nameOf(code)}(ton)`])) })}>
@@ -253,7 +253,7 @@ export function ProductionItemYoy({ factory, date, mode, rangeFrom, rangeTo }: M
   }));
 
   return <article className="card chart-card span-all">
-    <header className="card-title"><h3>품목 전년비 비교</h3><div className="card-title-side">
+    <header className="card-title"><h3>단일품목 전년비 비교</h3><div className="card-title-side">
       {series.length > 0 && <button type="button" className="csv-button"
         onClick={() => downloadCsv(`item_yoy_${mode}_${code}`, csvRows, ["period", "actual", "prevYear", "change"],
           { period: axisLabel(mode), actual: "금년(ton)", prevYear: "전년 동기(ton)", change: "증감률(%)" })}>
