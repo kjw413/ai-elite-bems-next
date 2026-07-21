@@ -719,6 +719,56 @@ class ServerHelperTests(unittest.TestCase):
             server.production_item_trend(items="  , ", factory="전사")
         self.assertEqual(raised.exception.status_code, 400)
 
+    def test_item_trend_axis_follows_selected_mode(self) -> None:
+        """품목 추이 x축은 그 탭의 시간 범위·단위를 따른다 — 연간은 1년(12개월), 월간은 그 달(일별)."""
+        with (
+            patch.object(server, "fetch_one", return_value={"max_date": date(2026, 7, 31)}),
+            patch.object(server, "fetch_all", return_value=[
+                {"code": "A1", "name": "테스트품목", "y": 2026, "m": 7, "actual": 120.0},
+                {"code": "A1", "name": "테스트품목", "y": 2025, "m": 7, "actual": 100.0},
+            ]),
+        ):
+            yearly = server.production_item_trend(items="A1", factory="전사", requested_date=None, mode="year")
+        self.assertEqual(yearly["granularity"], "month")
+        yearly_series = yearly["items"][0]["series"]
+        self.assertEqual(len(yearly_series), 12)
+        self.assertEqual(yearly_series[0]["period"], "1월")
+        self.assertEqual(yearly_series[11]["period"], "12월")
+        # 7월 지점에 금년 값과 전년 동월 값이 함께 붙는다
+        self.assertEqual(yearly_series[6]["actual"], 120.0)
+        self.assertEqual(yearly_series[6]["prevYear"], 100.0)
+
+        with (
+            patch.object(server, "fetch_one", return_value={"max_date": date(2026, 7, 31)}),
+            patch.object(server, "fetch_all", return_value=[
+                {"code": "A1", "name": "테스트품목", "d": date(2026, 7, 3), "actual": 55.0},
+                {"code": "A1", "name": "테스트품목", "d": date(2025, 7, 3), "actual": 50.0},
+            ]),
+        ):
+            monthly = server.production_item_trend(items="A1", factory="전사", requested_date=None, mode="month")
+        self.assertEqual(monthly["granularity"], "day")
+        monthly_series = monthly["items"][0]["series"]
+        self.assertEqual(len(monthly_series), 31)  # 7월 1~31일
+        self.assertEqual(monthly_series[0]["period"], "07.01")
+        self.assertEqual(monthly_series[30]["period"], "07.31")
+        self.assertEqual(monthly_series[2]["actual"], 55.0)
+        self.assertEqual(monthly_series[2]["prevYear"], 50.0)  # 전년 동일자(2025-07-03)
+
+    def test_item_trend_range_mode_spans_selected_days(self) -> None:
+        with (
+            patch.object(server, "fetch_one", return_value={"max_date": date(2026, 7, 31)}),
+            patch.object(server, "fetch_all", return_value=[]),
+        ):
+            ranged = server.production_item_trend(
+                items="A1", factory="전사", requested_date=None, mode="range",
+                date_from=date(2026, 3, 10), date_to=date(2026, 3, 13),
+            )
+        self.assertEqual(ranged["granularity"], "day")
+        self.assertEqual(
+            [point["period"] for point in ranged["items"][0]["series"]],
+            ["03.10", "03.11", "03.12", "03.13"],
+        )
+
     def test_mail_preview_replaces_cid_with_data_uri(self) -> None:
         image = SimpleNamespace(cid="chart1", data=b"\x89PNG", mime_subtype="png")
         html = server.inline_images_to_data_uris('<img src="cid:chart1">', [image])

@@ -1608,21 +1608,33 @@ def production_item_options(
     factory: str = "전사",
     requested_date: date | None = Query(None, alias="date"),
 ) -> dict[str, Any]:
-    """품목 추이·비교 섹션의 선택지 — 최근 12개월 실적 상위 100개 품목."""
+    """품목 추이·비교 섹션의 선택지 — 선택 공장의 최근 12개월 실적 상위 300개 품목.
+
+    제품유형(category)을 함께 내려 프런트가 '유형 선행 필터 → 품목 검색' 순서로
+    목록을 좁힐 수 있게 한다. 유형 필터가 걸리면 후보가 크게 줄기 때문에 상위
+    100개로는 특정 유형이 통째로 비는 경우가 생겨 300개로 넓혔다.
+    """
     max_row = fetch_one("SELECT MAX(date) max_date FROM production_daily") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
     codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
     placeholders = ",".join(["%s"] * len(codes))
     rows = fetch_all(
         f"""
-        SELECT item_code code, MAX(item_name) name, SUM(actual_qty)/1000 actual
+        SELECT item_code code, MAX(item_name) name,
+               MAX(CASE WHEN category2 IN ('IC','MY','FM','SN') THEN category2 ELSE 'ETC' END) category,
+               SUM(actual_qty)/1000 actual
         FROM production_daily WHERE date BETWEEN %s AND %s AND factory IN ({placeholders})
-        GROUP BY item_code ORDER BY actual DESC LIMIT 100
+        GROUP BY item_code ORDER BY actual DESC LIMIT 300
         """,
         (base - timedelta(days=365), base, *codes),
     )
     return json_safe({"baseDate": base, "items": [
-        {"code": str(row["code"]), "name": row.get("name") or str(row["code"]), "actual": round(scalar(row.get("actual")), 1)}
+        {
+            "code": str(row["code"]),
+            "name": row.get("name") or str(row["code"]),
+            "category": str(row.get("category") or "ETC"),
+            "actual": round(scalar(row.get("actual")), 1),
+        }
         for row in rows
     ]})
 
@@ -1632,65 +1644,103 @@ def production_item_trend(
     items: str,
     factory: str = "전사",
     requested_date: date | None = Query(None, alias="date"),
+    mode: str = "month",
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
 ) -> dict[str, Any]:
-    """단일 품목 월별 추이(전월비·전년동월비) 또는 여러 품목(최대 5개) 비교 — 최근 13개월.
+    """선택 품목(최대 5개)의 실적 추이 — x축이 조회 모드의 시간 범위·단위를 그대로 따른다.
 
-    전년 동월비 계산을 위해 25개월 범위를 조회해 (y-1, m) 값을 함께 붙인다.
+    month : 해당 월 1일~말일 (일 단위)
+    range : 지정 기간 (일 단위)
+    year  : 해당 연도 1~12월 (월 단위)
+
+    같은 탭의 다른 차트(일일 생산량·Burn-up·월별 전년비)와 축을 맞춰 나란히 읽히게
+    한다. 각 지점에 전년 동기 값(prevYear)을 붙여 품목 전년비 섹션이 같은 응답을
+    재사용한다 — 품목간 비교 섹션은 actual만 그리고 prevYear는 쓰지 않는다.
     """
+    if mode not in PRODUCTION_MODES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 조회 모드입니다: {mode}")
     codes_selected = [code.strip() for code in items.split(",") if code.strip()][:5]
     if not codes_selected:
         raise HTTPException(status_code=400, detail="items에 품목 코드를 1~5개 지정하세요.")
     max_row = fetch_one("SELECT MAX(date) max_date FROM production_daily") or {}
+    data_max = normalize_date(max_row.get("max_date"))
     base = bounded_base_date(requested_date, max_row.get("max_date"))
-    months = [shift_month(base.year, base.month, offset) for offset in range(-12, 1)]
-    fetch_from = date(*shift_month(base.year, base.month, -24), 1)
+
+    # 연간은 (연, 월) 키의 12개월, 월간·기간별은 date 키의 일 단위.
+    monthly = mode == "year"
+    if monthly:
+        period_keys: list[Any] = [(base.year, month) for month in range(1, 13)]
+        labels = [f"{month}월" for month in range(1, 13)]
+        prev_keys: list[Any] = [(base.year - 1, month) for month in range(1, 13)]
+        fetch_from, fetch_to = date(base.year - 1, 1, 1), date(base.year, 12, 31)
+    else:
+        period_from, period_to = resolve_production_period(mode, base, date_from, date_to, data_max)
+        span = (period_to - period_from).days + 1
+        period_keys = [period_from + timedelta(days=offset) for offset in range(span)]
+        labels = [key.strftime("%m.%d") for key in period_keys]
+        # 전년 동일자 — 2/29는 previous_year_date가 2/28로 클램프한다.
+        prev_keys = [previous_year_date(key) for key in period_keys]
+        fetch_from, fetch_to = date(period_from.year - 1, period_from.month, 1), period_to
+    if data_max is not None:
+        fetch_to = min(fetch_to, data_max)
+
     factory_codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
     factory_ph = ",".join(["%s"] * len(factory_codes))
     item_ph = ",".join(["%s"] * len(codes_selected))
+    period_select = "YEAR(date) y, MONTH(date) m" if monthly else "date d"
+    period_group = "item_code, y, m" if monthly else "item_code, d"
     rows = fetch_all(
         f"""
-        SELECT item_code code, MAX(item_name) name, YEAR(date) y, MONTH(date) m,
+        SELECT item_code code, MAX(item_name) name, {period_select},
                SUM(actual_qty)/1000 actual
         FROM production_daily
         WHERE date BETWEEN %s AND %s AND factory IN ({factory_ph}) AND item_code IN ({item_ph})
-        GROUP BY item_code, y, m
+        GROUP BY {period_group}
         """,
-        (fetch_from, base, *factory_codes, *codes_selected),
+        (fetch_from, fetch_to, *factory_codes, *codes_selected),
     )
     by_item: dict[str, dict[str, Any]] = {}
     for row in rows:
         entry = by_item.setdefault(str(row["code"]), {"name": str(row["code"]), "values": {}})
-        entry["values"][(int(row["y"]), int(row["m"]))] = scalar(row.get("actual"))
+        key = (int(row["y"]), int(row["m"])) if monthly else normalize_date(row.get("d"))
+        if key is not None:
+            entry["values"][key] = scalar(row.get("actual"))
         if row.get("name"):
             entry["name"] = str(row["name"])
     output_items = []
     for code in codes_selected:
         entry = by_item.get(code, {"name": code, "values": {}})
-        values: dict[tuple[int, int], float] = entry["values"]
+        values: dict[Any, float] = entry["values"]
         series = []
-        for y, m in months:
-            actual_value = values.get((y, m))
-            prev_year_value = values.get((y - 1, m))
+        for index, key in enumerate(period_keys):
+            actual_value = values.get(key)
+            prev_year_value = values.get(prev_keys[index])
             series.append({
-                "month": f"{str(y)[2:]}.{m:02d}",
+                "period": labels[index],
                 "actual": round(actual_value, 2) if actual_value is not None else None,
                 "prevYear": round(prev_year_value, 2) if prev_year_value is not None else None,
             })
         latest = None
-        indices_with_data = [i for i, key in enumerate(months) if values.get(key) is not None]
+        indices_with_data = [i for i, key in enumerate(period_keys) if values.get(key) is not None]
         if indices_with_data:
-            y, m = months[indices_with_data[-1]]
-            current_value = values[(y, m)]
-            prev_month_value = values.get(shift_month(y, m, -1))
-            prev_year_value = values.get((y - 1, m))
+            index = indices_with_data[-1]
+            current_value = values[period_keys[index]]
+            prev_period_value = values.get(period_keys[index - 1]) if index > 0 else None
+            prev_year_value = values.get(prev_keys[index])
             latest = {
-                "month": f"{y}.{m:02d}",
+                "period": labels[index],
                 "actual": round(current_value, 2),
-                "mom": rate_change(current_value, prev_month_value) if prev_month_value else None,
-                "yoy": rate_change(current_value, prev_year_value) if prev_year_value else None,
+                "prevChange": rate_change(current_value, prev_period_value) if prev_period_value else None,
+                "yoyChange": rate_change(current_value, prev_year_value) if prev_year_value else None,
             }
         output_items.append({"code": code, "name": entry["name"], "series": series, "latest": latest})
-    return json_safe({"baseDate": base, "items": output_items})
+    return json_safe({
+        "baseDate": base,
+        "mode": mode,
+        "granularity": "month" if monthly else "day",
+        "items": output_items,
+    })
 
 
 def aggregate_prediction_rows(

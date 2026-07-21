@@ -192,15 +192,21 @@ nav button:focus-visible{outline-offset:-2px}
 .pivot-table .pivot-total{font-weight:700;border-left:2px solid var(--line);background:var(--soft,#f7f9fc)}
 .pivot-table th.pivot-total{background:var(--soft,#f7f9fc)}
 .sub-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
-/* 품목 실적 추이 · 비교 — 검색 + 체크박스 다중 선택(최대 5개) */
-.item-multiselect{border:1px solid var(--line);border-radius:10px;overflow:hidden;max-width:420px;margin-bottom:10px}
-.item-multiselect-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--soft,#f7f9fc)}
-.item-multiselect-head input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:12px;color:var(--text)}
-.item-multiselect-head span{font-size:10.5px;color:var(--muted);white-space:nowrap;font-family:var(--mono)}
-.item-option-list{max-height:170px;overflow:auto}
-.item-option{display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:12px;cursor:pointer}
-.item-option:hover{background:var(--soft,#f7f9fc)}
-.item-option input{accent-color:var(--accent);flex:none}
-.item-option.disabled{opacity:.4;cursor:not-allowed}
-.item-option-list .panel-copy{padding:10px}
+/* 품목 실적 비교·전년비 — 제품유형 선행 필터 + 타이핑 검색 드롭다운(콤보박스).
+   목록을 상시 펼쳐두면 좌측 공간을 잡아먹어, 선택 결과는 칩으로만 남긴다. */
+.item-filter-row{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.item-filter-row label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
+.item-filter-row select{height:36px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);padding:0 10px;font-size:12px;min-width:150px}
+.item-combobox{position:relative;min-width:240px}
+.item-combobox-input{display:flex;align-items:center;gap:6px;height:36px;border:1px solid var(--line);border-radius:8px;background:var(--card);padding:0 10px}
+.item-combobox-input input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:12px}
+.item-combobox-input input:disabled{cursor:not-allowed}
+.item-combobox-input svg{color:var(--muted);flex:none}
+.item-combobox-list{position:absolute;z-index:30;top:calc(100% + 4px);left:0;right:0;max-height:236px;overflow:auto;margin:0;padding:4px;list-style:none;border:1px solid var(--line);border-radius:9px;background:var(--card);box-shadow:0 8px 24px #1e315522}
+.item-combobox-list li{margin:0}
+.item-combobox-list button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;border:0;background:transparent;border-radius:6px;padding:7px 9px;font-size:12px;color:var(--text);text-align:left;cursor:pointer}
+.item-combobox-list button:hover{background:var(--soft,#f1f5fb)}
+.item-combobox-list em{font-style:normal;font-size:10px;color:var(--muted);white-space:nowrap;font-family:var(--mono)}
+.item-combobox-empty{padding:9px;font-size:12px;color:var(--muted)}
+[data-theme="dark"] .item-combobox-list{box-shadow:0 8px 24px #00000066}
 .legend-chip svg{opacity:.6}
