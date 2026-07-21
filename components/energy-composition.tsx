@@ -16,6 +16,13 @@ const donutDefs = [
 
 const fmtTotal = (value: number) =>
   value >= 1000 ? value.toLocaleString("ko-KR", { maximumFractionDigits: 0 }) : value.toLocaleString("ko-KR", { maximumFractionDigits: 1 });
+function RatioLabel({ percent, payload, x, y, textAnchor }: AnyData) {
+  if ((percent ?? 0) < 0.06) return null;
+  const color = factoryColors[String(payload?.name)] ?? "var(--chart-previous)";
+  return <text x={x} y={y} fill={color} textAnchor={textAnchor} dominantBaseline="central" fontSize={11}>
+    {`${((percent ?? 0) * 100).toFixed(0)}%`}
+  </text>;
+}
 
 function Donut({ rows, def }: { rows: AnyData[]; def: (typeof donutDefs)[number] }) {
   const data = rows
@@ -32,8 +39,8 @@ function Donut({ rows, def }: { rows: AnyData[]; def: (typeof donutDefs)[number]
               `${fmtTotal(typeof value === "number" ? value : 0)} ${def.unit} (${total > 0 ? ((Number(value) || 0) / total * 100).toFixed(1) : 0}%)`,
               String(name ?? ""),
             ]}/>
-          <Pie data={data} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="88%" paddingAngle={2} strokeWidth={2} stroke="var(--card)"
-            label={({ percent }: AnyData) => (percent ?? 0) >= 0.06 ? `${((percent ?? 0) * 100).toFixed(0)}%` : ""} labelLine={false} fontSize={11}>
+          <Pie data={data} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="74%" paddingAngle={2} strokeWidth={2} stroke="var(--card)"
+            label={RatioLabel} labelLine={false}>
             {data.map(row => <Cell key={row.name} fill={factoryColors[row.name] ?? "var(--chart-previous)"}/>)}
           </Pie>
         </PieChart>

@@ -163,18 +163,6 @@ function Dashboard({ data, factory, date }: { data: AnyData; factory: string; da
 // 표·차트에는 분모 정의가 다르다는 각주를 반드시 함께 둔다.
 const WIP_FOOTNOTE = "※ 광주는 자사 완제품 외에 외부 판매용 재공품(탈지분유·살균유 등)이 생산량 분모에 포함됩니다 — 다른 공장과 분모 정의가 달라 절대 비교 시 유의하세요.";
 
-// 보관유형 색 — 냉동(진한 파랑) → 냉장(하늘) → 상온(회색)으로 온도감을 따른다.
-const storageColors = {
-  frozen: "var(--chart-actual)", chilled: "var(--chart-water)",
-  ambient: "var(--chart-previous)", intensity: "var(--chart-power)",
-};
-const storageItems: LegendItem[] = [
-  { key: "frozen", label: "냉동(ton)", color: storageColors.frozen },
-  { key: "chilled", label: "냉장(ton)", color: storageColors.chilled },
-  { key: "ambient", label: "상온(ton)", color: storageColors.ambient },
-  { key: "intensity", label: "냉동 원단위(kWh/ton)", color: storageColors.intensity },
-];
-
 // 원단위 변동 원인분해 막대 — 전년 원단위에서 두 효과를 거쳐 금년 원단위에 도달하는 흐름.
 function BridgeBars({ bridge, unit }: { bridge: AnyData; unit: string }) {
   const steps = [
@@ -334,7 +322,19 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
   const metricColor = energyMetricColors[metric] ?? palette.actual;
   // 주말·공휴일 등 생산 실적이 없는 날은 value가 null로 내려온다 — 그 날짜 자체를
   // 배열에서 제거해 x축에 빈 구간이 생기지 않고 실적 있는 날끼리 바로 이어지게 한다.
-  const dailySeries = (data.daily ?? []).filter((row: AnyData) => row.value != null);
+  const measuredDays: AnyData[] = (data.daily ?? []).filter((row: AnyData) => row.value != null);
+  // 가동일 필터 — 원단위는 분모가 작아지면 불안정해지는 비율이라, 소량 생산일의
+  // 원단위는 "효율이 나빴다"가 아니라 "고정부하가 소량에 배분됐다"는 뜻이다.
+  // 그대로 같은 축에 두면 한 점이 평일 밴드를 수십 배로 눌러 증감이 안 보인다.
+  // 임계값은 기간 중앙 생산량의 50% — 실측상 가동일(중앙값의 80% 이상)과
+  // 비가동일(30% 이하) 사이가 비어 있어 어디를 잡아도 같은 결과가 나온다.
+  const [operatingOnly, setOperatingOnly] = useState(true);
+  const sortedTons = measuredDays.map((row: AnyData) => Number(row.productionTon) || 0).sort((a: number, b: number) => a - b);
+  const medianTon = sortedTons.length ? sortedTons[Math.floor(sortedTons.length / 2)] : 0;
+  const operatingThreshold = medianTon * 0.5;
+  const isOperating = (row: AnyData) => medianTon <= 0 || (Number(row.productionTon) || 0) >= operatingThreshold;
+  const dailySeries = operatingOnly ? measuredDays.filter(isOperating) : measuredDays;
+  const excludedDays = measuredDays.length - dailySeries.length;
   // 연간 '누계 추이 보기' (legacy 규칙, 원단위 페이지) — 각 월을 1월부터의 가중
   // 누계 원단위(Σ사용량 ÷ Σ생산톤)로 재계산한다. 단순 월 원단위 평균과 다르다.
   const monthlyBase = data.monthly ?? [];
@@ -359,8 +359,9 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
   const cumulative = data.yoyCumulative;
   // 일별 원단위 표의 누계는 단순 평균이 아니라 가중 누계(Σ사용량÷Σ생산톤) — 서버가
   // 각 날짜에 실어 보내는 usage/productionTon 원자료로 클라이언트가 재계산한다.
-  const dailyUsageTotal = dailySeries.reduce((acc: number, row: AnyData) => acc + (Number(row.usage) || 0), 0);
-  const dailyTonTotal = dailySeries.reduce((acc: number, row: AnyData) => acc + (Number(row.productionTon) || 0), 0);
+  // 차트에서 비가동일을 빼도 누계는 전체 기간 기준이어야 실제 실적과 맞는다.
+  const dailyUsageTotal = measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.usage) || 0), 0);
+  const dailyTonTotal = measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.productionTon) || 0), 0);
   const dailyWeightedTotal = dailyTonTotal > 0 ? Math.round(dailyUsageTotal / dailyTonTotal * 100) / 100 : null;
   const monthlyLegend = useSeriesToggle();
   const showMonthlyTotal = Boolean(cumulative) && !showCumulative;
@@ -370,10 +371,6 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
   // P1-2 원인분해 — 원단위는 사용량÷생산량이라 값만으로는 악화 원인을 알 수 없다.
   const [bridgeScope, setBridgeScope] = useState<"ytd" | "mtd">("ytd");
   const bridge: AnyData | null = data.bridge?.[bridgeScope] ?? null;
-  const storage: AnyData | null = data.storage ?? null;
-  const storageLegend = useSeriesToggle();
-  const storageSummary: AnyData = storage?.summary ?? {};
-  const storageDaily: AnyData[] = storage?.daily ?? [];
   return <><div className="segmented" role="group" aria-label="원단위 지표 선택">{intensityMetrics.map(item=><button type="button" key={item.id} className={metric===item.id?"active":""} aria-pressed={metric===item.id} onClick={()=>onMetricChange(item.id)}>{item.label}</button>)}</div>
     <div className="mode-row">
       <div className="segmented" role="group" aria-label="원단위 일별 조회 방식">{energyModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
@@ -386,9 +383,19 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
     </div>
     <section className="kpi-grid compact"><Kpi label="MTD 원단위" value={data.summary?.mtd?.current} unit={data.unit} change={data.summary?.mtd?.change} icon={Gauge}/><Kpi label="YTD 원단위" value={data.summary?.ytd?.current} unit={data.unit} change={data.summary?.ytd?.change} icon={CalendarDays}/><Kpi label="절감 목표" value={data.targetPct} unit="%" icon={ShieldCheck}/></section>
     <section className="content-grid">
-      <article className="card chart-card span-all"><CardTitle title="일별 원단위 추이" meta={`${data.unit} · 생산 실적 있는 날만 표시`}><CsvButton filename={`intensity_daily_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={dailySeries} columns={["date","value"]} labels={{date:"일자",value:`원단위(${data.unit})`}}/></CardTitle><Chart><LineChart data={dailySeries}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Line type="linear" dataKey="value" name={`원단위(${data.unit})`} stroke={metricColor} strokeWidth={2} connectNulls={false} dot={seriesDot(metricColor)} activeDot={{ r: 5 }}/>{eventMarkers(intensityEvents)}</LineChart></Chart><EventMarkerHint count={intensityEvents.size}/>
-        <DataToggle><PivotTable periods={dailySeries.map((row: AnyData) => row.date)} totalLabel={`가중 누계(${data.unit})`} rows={[
-          { key: "value", label: `원단위(${data.unit})`, values: dailySeries.map((row: AnyData) => row.value), total: dailyWeightedTotal, format: value => value == null ? "-" : fmt(Number(value), 2) },
+      <article className="card chart-card span-all"><CardTitle title="일별 원단위 추이" meta={`${data.unit} · ${operatingOnly ? "가동일" : "실적 있는 날 전체"}`}>
+          <label className="check-toggle"><input type="checkbox" checked={operatingOnly} onChange={event => setOperatingOnly(event.target.checked)}/>가동일만 보기</label>
+          <CsvButton filename={`intensity_daily_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={measuredDays} columns={["date","value","productionTon"]} labels={{date:"일자",value:`원단위(${data.unit})`,productionTon:"생산량(ton)"}}/></CardTitle>
+        <Chart><LineChart data={dailySeries}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Line type="linear" dataKey="value" name={`원단위(${data.unit})`} stroke={metricColor} strokeWidth={2} connectNulls={false} dot={seriesDot(metricColor)} activeDot={{ r: 5 }}/>{eventMarkers(intensityEvents)}</LineChart></Chart>
+        {operatingOnly && excludedDays > 0 && <p className="quad-caption">비가동 {excludedDays}일(생산량이 기간 중앙값의 50% 미만)을 차트에서 제외했습니다 — 소량 생산일은 고정부하가 분모에 몰려 원단위가 수십 배로 튀어 평일 증감을 가립니다. 아래 데이터 표에는 모든 날짜가 그대로 있습니다.</p>}
+        <EventMarkerHint count={intensityEvents.size}/>
+        <DataToggle><PivotTable periods={measuredDays.map((row: AnyData) => row.date)} totalLabel={`가중 누계(${data.unit})`} rows={[
+          { key: "value", label: `원단위(${data.unit})`, values: measuredDays.map((row: AnyData) => row.value), total: dailyWeightedTotal,
+            format: value => value == null ? "-" : fmt(Number(value), 2),
+            // 비가동일은 값이 튀므로 흐리게 — 평일과 같은 무게로 읽히지 않게 한다.
+            className: (_value, index) => index >= 0 && !isOperating(measuredDays[index]) ? "off-day" : undefined },
+          { key: "productionTon", label: "생산량(ton)", values: measuredDays.map((row: AnyData) => row.productionTon), total: Math.round(dailyTonTotal * 10) / 10,
+            className: (_value, index) => index >= 0 && !isOperating(measuredDays[index]) ? "off-day" : undefined },
         ]}/></DataToggle></article>
       <article className="card chart-card wide"><CardTitle title={`${data.year}년 원단위 추이${showCumulative ? " · 누계" : ""}`} meta={data.unit}><label className="check-toggle"><input type="checkbox" checked={showCumulative} onChange={event => setShowCumulative(event.target.checked)}/>누계 추이 보기</label><CsvButton filename={`intensity_monthly_${metric}_${data.year}`} rows={monthlySeries} columns={["month","previous","target","current"]} labels={{month:"월",previous:`전년(${data.unit})`,target:`목표(${data.unit})`,current:`금년(${data.unit})`}}/></CardTitle>
         <Chart><LineChart data={monthlySeries}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!monthlyLegend.isHidden("previous") && <Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/>}{!monthlyLegend.isHidden("target") && <Line type="linear" dataKey="target" name="목표" stroke={palette.target} strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls/>}{!monthlyLegend.isHidden("current") && <Line type="linear" dataKey="current" name="금년" stroke={metricColor} strokeWidth={2} dot={seriesDot(metricColor)} activeDot={{ r: 5 }} connectNulls/>}</LineChart></Chart>
@@ -415,31 +422,6 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
             <tr className="total-row"><td>원단위({data.unit})</td><td>{fmt(bridge.previous, 2)}</td><td>{fmt(bridge.current, 2)}</td><td className={bridge.current > bridge.previous ? "bad" : "good"}>{`${bridge.current > bridge.previous ? "+" : ""}${fmt(bridge.current - bridge.previous, 2)}`}</td></tr>
           </tbody>
         </table></div>
-      </article>}
-      {storageDaily.length > 0 && <article className="card chart-card span-all">
-        <CardTitle title="보관유형별 냉동 부하" meta={`냉동전력 ${fmt(storageSummary.freezingMwh)} MWh · 전력의 ${fmt(storageSummary.freezingShare)}%`}>
-          <CsvButton filename={`storage_load_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={storageDaily} columns={["date","freezing","frozen","chilled","ambient","intensity"]} labels={{date:"일자",freezing:"냉동전력(MWh)",frozen:"냉동(ton)",chilled:"냉장(ton)",ambient:"상온(ton)",intensity:"냉동 원단위(kWh/ton)"}}/>
-        </CardTitle>
-        <p className="quad-caption">냉동설비 전력을 냉동·냉장 생산톤으로 나눈 값입니다. 냉동 전력이 늘었을 때 제품 믹스 때문인지 설비 효율 때문인지 구분합니다. 상온 제품은 냉동설비를 쓰지 않아 분모에서 제외하며, 보관유형이 분류되지 않은 광주 판매용 재공품도 제외됩니다.</p>
-        <div className="kpi-grid compact">
-          <Kpi label="냉동 원단위" value={storageSummary.intensity} unit="kWh/ton" icon={Gauge}/>
-          <Kpi label="냉동+냉장 생산" value={storageSummary.coldTon} unit="ton" goodWhen="up" icon={PackageCheck}/>
-          <Kpi label="냉동전력 비중" value={storageSummary.freezingShare} unit="%" icon={Bolt}/>
-        </div>
-        <ToggleLegend items={storageItems} hidden={storageLegend.hidden} onToggle={storageLegend.toggle}/>
-        <Chart><ComposedChart data={storageDaily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis yAxisId="ton"/><YAxis yAxisId="rate" orientation="right"/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>
-          {!storageLegend.isHidden("frozen") && <Bar yAxisId="ton" dataKey="frozen" name="냉동(ton)" stackId="s" fill={storageColors.frozen} maxBarSize={22}/>}
-          {!storageLegend.isHidden("chilled") && <Bar yAxisId="ton" dataKey="chilled" name="냉장(ton)" stackId="s" fill={storageColors.chilled} maxBarSize={22}/>}
-          {!storageLegend.isHidden("ambient") && <Bar yAxisId="ton" dataKey="ambient" name="상온(ton)" stackId="s" fill={storageColors.ambient} maxBarSize={22} radius={[4,4,0,0]}/>}
-          {!storageLegend.isHidden("intensity") && <Line yAxisId="rate" type="linear" dataKey="intensity" name="냉동 원단위(kWh/ton)" stroke={storageColors.intensity} strokeWidth={2} dot={false} connectNulls/>}
-        </ComposedChart></Chart>
-        <DataToggle><PivotTable periods={storageDaily.map(row => row.date)} totalLabel="기간 계" rows={[
-          { key: "frozen", label: "냉동(ton)", values: storageDaily.map(row => row.frozen), total: storageSummary.frozen },
-          { key: "chilled", label: "냉장(ton)", values: storageDaily.map(row => row.chilled), total: storageSummary.chilled },
-          { key: "ambient", label: "상온(ton)", values: storageDaily.map(row => row.ambient), total: storageSummary.ambient },
-          { key: "freezing", label: "냉동전력(MWh)", values: storageDaily.map(row => row.freezing), total: storageSummary.freezingMwh },
-          { key: "intensity", label: "냉동 원단위(kWh/ton)", values: storageDaily.map(row => row.intensity), total: storageSummary.intensity },
-        ]}/></DataToggle>
       </article>}
       <article className="card table-card span-all"><CardTitle title="공장 효율 매트릭스" meta="MTD 기준"><CsvButton filename={`intensity_matrix_${metric}`} rows={data.matrix} columns={["factory","current","previous","change"]} labels={{factory:"공장",current:`금년(${data.unit})`,previous:`전년(${data.unit})`,change:"증감률(%)"}}/></CardTitle><DataTable rows={data.matrix} columns={["factory","current","previous","change"]} labels={{factory:"공장",current:"금년",previous:"전년",change:"증감률(%)"}}/><p className="quad-caption">{WIP_FOOTNOTE}</p></article>
     </section></>;

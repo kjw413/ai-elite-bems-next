@@ -1205,94 +1205,6 @@ def energy(
     })
 
 
-# 보관유형(production_daily.category1) — 냉동설비 부하와 직접 연결되는 유일한 생산 축.
-STORAGE_TYPES = ("냉동", "냉장", "상온")
-STORAGE_KEYS = {"냉동": "frozen", "냉장": "chilled", "상온": "ambient"}
-# 상온 제품은 냉동설비를 쓰지 않으므로 냉동 원단위 분모에서 제외한다.
-STORAGE_COLD_TYPES = ("냉동", "냉장")
-
-
-def build_storage_load(factory: str, date_from: date, date_to: date) -> dict[str, Any]:
-    """보관유형별 생산량과 냉동설비 전력을 하나의 일별 시계열로 묶는다.
-
-    category1(냉동/냉장/상온)은 지금까지 어느 화면에서도 쓰이지 않던 축인데,
-    냉동설비 전력이 전체 전력의 큰 비중을 차지하므로 '냉동 전력이 왜 늘었나'를
-    제품 믹스로 설명할 수 있는 유일한 연결고리다.
-
-    분모는 완제품(production_daily) 기준이다 — 광주 판매용 재공품은 보관유형이
-    분류돼 있지 않아 여기에 합산하지 않는다(전체 원단위 분모와 다른 점).
-    """
-    energy_clause, energy_values = factory_clause(factory)
-    energy_rows = fetch_all(
-        """
-        SELECT date, SUM(freezing_power_kwh) freezing, SUM(total_power_kwh) total_power
-        FROM energy_daily WHERE date BETWEEN %s AND %s
-        """ + energy_clause + " GROUP BY date ORDER BY date",
-        (date_from, date_to, *energy_values),
-    )
-    codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
-    placeholders = ",".join(["%s"] * len(codes))
-    production_rows = fetch_all(
-        f"""
-        SELECT date, category1, SUM(actual_qty)/1000 ton
-        FROM production_daily WHERE date BETWEEN %s AND %s AND factory IN ({placeholders})
-        GROUP BY date, category1
-        """,
-        (date_from, date_to, *codes),
-    )
-
-    by_date: dict[date, dict[str, float]] = {}
-    for row in energy_rows:
-        row_date = normalize_date(row.get("date"))
-        if row_date is None:
-            continue
-        bucket = by_date.setdefault(row_date, {})
-        bucket["freezing"] = scalar(row.get("freezing"))
-        bucket["totalPower"] = scalar(row.get("total_power"))
-    for row in production_rows:
-        row_date = normalize_date(row.get("date"))
-        storage_type = str(row.get("category1") or "").strip()
-        if row_date is None or storage_type not in STORAGE_TYPES:
-            continue
-        by_date.setdefault(row_date, {})[STORAGE_KEYS[storage_type]] = scalar(row.get("ton"))
-
-    daily: list[dict[str, Any]] = []
-    total_freezing = total_power = 0.0
-    totals = {key: 0.0 for key in STORAGE_KEYS.values()}
-    for row_date in sorted(by_date):
-        bucket = by_date[row_date]
-        freezing_kwh = float(bucket.get("freezing") or 0.0)
-        cold_ton = sum(float(bucket.get(STORAGE_KEYS[name]) or 0.0) for name in STORAGE_COLD_TYPES)
-        total_freezing += freezing_kwh
-        total_power += float(bucket.get("totalPower") or 0.0)
-        for key in totals:
-            totals[key] += float(bucket.get(key) or 0.0)
-        daily.append({
-            "date": row_date.strftime("%m.%d"),
-            "freezing": round(freezing_kwh / 1000, 2),
-            **{key: round(float(bucket.get(key) or 0.0), 1) for key in STORAGE_KEYS.values()},
-            "coldTon": round(cold_ton, 1),
-            "intensity": round(freezing_kwh / cold_ton, 1) if cold_ton > 0 else None,
-        })
-
-    cold_total = totals["frozen"] + totals["chilled"]
-    mix_total = sum(totals.values())
-    return {
-        "daily": daily,
-        "summary": {
-            "freezingMwh": round(total_freezing / 1000, 1),
-            "freezingShare": round(total_freezing / total_power * 100, 1) if total_power > 0 else None,
-            "coldTon": round(cold_total, 1),
-            "intensity": round(total_freezing / cold_total, 1) if cold_total > 0 else None,
-            **{key: round(value, 1) for key, value in totals.items()},
-            "mix": {
-                key: round(value / mix_total * 100, 1) if mix_total > 0 else None
-                for key, value in totals.items()
-            },
-        },
-    }
-
-
 def period_coverage(factory: str, date_from: date, date_to: date) -> dict[str, Any]:
     """선택 기간의 데이터 결측일 — 부분 결측을 완전한 집계로 오인하지 않게 한다."""
     clause, values = factory_clause(factory)
@@ -1475,7 +1387,6 @@ def intensity_analysis(
         "yoyCumulative": weighted_intensity_yoy(monthly_usage, monthly_production, base.year),
         "matrix": matrix,
         "bridge": bridge,
-        "storage": build_storage_load(factory, window_from, window_to),
         "coverage": period_coverage(factory, window_from, window_to),
     })
 

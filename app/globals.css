@@ -191,6 +191,8 @@ nav button:focus-visible{outline-offset:-2px}
 .pivot-table th[scope="row"]{position:sticky;left:0;background:var(--card);text-align:left;font-weight:700;color:var(--text);z-index:1}
 .pivot-table .pivot-total{font-weight:700;border-left:2px solid var(--line);background:var(--soft,#f7f9fc)}
 .pivot-table th.pivot-total{background:var(--soft,#f7f9fc)}
+/* 비가동일 — 값은 보여주되 평일과 같은 무게로 읽히지 않게 흐리게 */
+.pivot-table td.off-day{opacity:.5;font-style:italic}
 .sub-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
 
 /* ── 2026-07-21 운영 개선: 이벤트 마커·판정 신호·원인분해·신선도 배지 ── */
