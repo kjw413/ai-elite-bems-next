@@ -658,23 +658,12 @@ def fetch_actual_production_frame(date_from: date, date_to: date) -> list[dict[s
     """Load operational production through the viewer DB account plus legacy WIP rules."""
     service = import_core("app.services.production_actual_service")
     try:
-        gwangju_conversion = getattr(service, "WIP_MIX_CONVERSION", {}).get("광주", {})
-        wip_codes = tuple(str(code) for code in gwangju_conversion)
         factory_codes = tuple(OPERATIONAL_PRODUCTION_FACTORY_BY_CODE)
         factory_placeholders = ",".join(["%s"] * len(factory_codes))
-        if wip_codes:
-            wip_placeholders = ",".join(["%s"] * len(wip_codes))
-            quantity_expression = (
-                f"CASE WHEN factory = %s AND item_code IN ({wip_placeholders}) "
-                "THEN 0 ELSE actual_qty END"
-            )
-            leading_params: tuple[Any, ...] = ("F30", *wip_codes)
-        else:
-            quantity_expression = "actual_qty"
-            leading_params = ()
+        quantity_expression, leading_params = service.operational_production_sum_sql()
         rows = fetch_all(
             f"""
-            SELECT date, factory, SUM({quantity_expression}) actual_prod_kg
+            SELECT date, factory, {quantity_expression} actual_prod_kg
             FROM production_daily
             WHERE date BETWEEN %s AND %s
               AND factory IN ({factory_placeholders})
@@ -1414,12 +1403,16 @@ def production(
     placeholders = ",".join(["%s"] * len(codes))
     clause = f" AND factory IN ({placeholders})"
     values = list(codes)
+    correction_service = import_core("app.services.production_correction_service")
+    finished_filter, finished_filter_params = correction_service.finished_production_filter_sql()
+    finished_clause = clause + finished_filter
+    scoped_values = (*values, *finished_filter_params)
     summary = fetch_one(
         """
         SELECT SUM(actual_qty)/1000 actual, COUNT(DISTINCT item_code) items
         FROM production_daily WHERE date BETWEEN %s AND %s
-        """ + clause,
-        (period_from, period_to, *values),
+        """ + finished_clause,
+        (period_from, period_to, *scoped_values),
     ) or {}
     # 다중 월 기간에서도 계획이 정확하도록 (공장·품목·연·월) 단위 MAX 후 합산
     plan_row = fetch_one(
@@ -1428,8 +1421,8 @@ def production(
           SELECT factory,item_code,YEAR(date) y,MONTH(date) m,
                  MAX(planned_qty)/1000 planned_qty
           FROM production_daily WHERE date BETWEEN %s AND %s
-        """ + clause + " GROUP BY factory,item_code,y,m) p",
-        (period_from, period_to, *values),
+        """ + finished_clause + " GROUP BY factory,item_code,y,m) p",
+        (period_from, period_to, *scoped_values),
     ) or {}
     actual = scalar(summary.get("actual"))
     plan = scalar(plan_row.get("plan"))
@@ -1446,41 +1439,77 @@ def production(
         daily = fetch_all(
             "SELECT MONTH(date) month_no," + cat2_select +
             " FROM production_daily WHERE date BETWEEN %s AND %s"
-            + clause + " GROUP BY month_no ORDER BY month_no",
-            (period_from, period_to, *values),
+            + finished_clause + " GROUP BY month_no ORDER BY month_no",
+            (period_from, period_to, *scoped_values),
         )
     else:
         daily = fetch_all(
             "SELECT date," + cat2_select +
             " FROM production_daily WHERE date BETWEEN %s AND %s"
-            + clause + " GROUP BY date ORDER BY date",
-            (period_from, period_to, *values),
+            + finished_clause + " GROUP BY date ORDER BY date",
+            (period_from, period_to, *scoped_values),
         )
     mix_rows = fetch_all(
         """
         SELECT COALESCE(category2,'기타') name, SUM(actual_qty) value FROM production_daily
         WHERE date BETWEEN %s AND %s
-        """ + clause + " GROUP BY category2 ORDER BY value DESC",
-        (period_from, period_to, *values),
+        """ + finished_clause + " GROUP BY category2 ORDER BY value DESC",
+        (period_from, period_to, *scoped_values),
     )
     mix_total = sum(scalar(row["value"]) for row in mix_rows) or 1
-    # 광주 전용 — 자사 완제품(production_daily)에는 안 잡히는 외부판매 재공품
-    # (탈지분유·살균유 등)의 품목별 구성비. 신뢰 대상 밖 공장은 빈 리스트.
-    wip_mix = import_core("app.services.production_correction_service").get_wip_mix(
-        factory, period_from, period_to,
-    )
-    # 광주 전용 — 유틸리티가 실제로 소비되는 총 생산량(완제품+재공품 환산, ton).
-    # 자사 완제품 실적(daily_output의 cat2 합)만으로는 탈지분유·생크림 등
-    # 판매용 반제품 생산이 빠져 원단위 분모(accounted_kg)와 어긋나 보인다 —
-    # 같은 정의를 트렌드 차트에도 노출해 실질 생산량을 비교할 수 있게 한다.
+    # 광주 전용 WIP 집계. DB_재공품.xlsx 7품목과 production_daily에 기록된
+    # 129998·129999를 mix-equivalent kg로 합쳐 구성비와 유틸리티 생산량에 쓴다.
     wip_daily_kg: dict[date, float] = {}
+    wip_item_totals: list[dict[str, Any]] = []
     if factory == "광주":
-        wip_frame = import_core("app.services.production_correction_service").get_wip_daily("광주")
+        wip_frame = correction_service.get_wip_daily("광주")
         for row in _table_records(wip_frame):
             row_date = normalize_date(row.get("date"))
             kg = optional_scalar(row.get("total_wip_kg"))
             if row_date is not None and kg is not None and period_from <= row_date <= period_to:
                 wip_daily_kg[row_date] = wip_daily_kg.get(row_date, 0.0) + kg
+        wip_item_totals.extend(
+            correction_service.get_wip_item_totals("광주", period_from, period_to)
+        )
+
+        recorded_wip = correction_service.PRODUCTION_RECORDED_WIP_MIX_CONVERSION.get(
+            "광주", {}
+        )
+        if recorded_wip:
+            recorded_codes = tuple(recorded_wip)
+            recorded_placeholders = ",".join(["%s"] * len(recorded_codes))
+            recorded_rows = fetch_all(
+                f"""
+                SELECT date, item_code, MAX(item_name) name, SUM(actual_qty) actual_qty
+                FROM production_daily
+                WHERE date BETWEEN %s AND %s AND factory = %s
+                  AND item_code IN ({recorded_placeholders})
+                GROUP BY date, item_code
+                ORDER BY date, item_code
+                """,
+                (period_from, period_to, "F30", *recorded_codes),
+            )
+            recorded_totals: dict[str, float] = {}
+            labels = correction_service.WIP_ITEM_LABELS.get("광주", {})
+            for row in recorded_rows:
+                row_date = normalize_date(row.get("date"))
+                code = str(row.get("item_code", "")).strip()
+                raw_qty = optional_scalar(row.get("actual_qty"))
+                factor = recorded_wip.get(code)
+                if row_date is None or raw_qty is None or factor is None:
+                    continue
+                converted_kg = raw_qty * float(factor)
+                wip_daily_kg[row_date] = wip_daily_kg.get(row_date, 0.0) + converted_kg
+                recorded_totals[code] = recorded_totals.get(code, 0.0) + converted_kg
+            wip_item_totals.extend(
+                {
+                    "item_code": code,
+                    "name": labels.get(code, code),
+                    "kg": kg,
+                }
+                for code, kg in recorded_totals.items()
+            )
+    wip_mix = correction_service.wip_mix_from_totals(wip_item_totals)
     top_rows = fetch_all(
         """
         SELECT item_name name, SUM(plan) plan, SUM(actual) actual
@@ -1488,12 +1517,12 @@ def production(
           SELECT factory, item_code, MAX(item_name) item_name,
                  MAX(planned_qty)/1000 plan, SUM(actual_qty)/1000 actual
           FROM production_daily WHERE date BETWEEN %s AND %s
-        """ + clause + """
+        """ + finished_clause + """
           GROUP BY factory,item_code,YEAR(date),MONTH(date)
         ) item_totals
         GROUP BY item_code,item_name ORDER BY actual DESC LIMIT 10
         """,
-        (period_from, period_to, *values),
+        (period_from, period_to, *scoped_values),
     )
 
     cat2_keys = ("IC", "MY", "FM", "SN", "ETC")
@@ -1505,8 +1534,12 @@ def production(
         previous_rows = fetch_all(
             "SELECT MONTH(date) month_no," + cat2_select +
             " FROM production_daily WHERE date BETWEEN %s AND %s"
-            + clause + " GROUP BY month_no ORDER BY month_no",
-            (date(base.year - 1, 1, 1), date(base.year - 1, 12, 31), *values),
+            + finished_clause + " GROUP BY month_no ORDER BY month_no",
+            (
+                date(base.year - 1, 1, 1),
+                date(base.year - 1, 12, 31),
+                *scoped_values,
+            ),
         )
         previous_map = {int(row["month_no"]): row for row in previous_rows if row.get("month_no") is not None}
         wip_monthly_ton: dict[int, float] = {}
@@ -1532,8 +1565,8 @@ def production(
             SELECT m, SUM(planned_qty) plan FROM (
               SELECT factory,item_code,MONTH(date) m,MAX(planned_qty)/1000 planned_qty
               FROM production_daily WHERE date BETWEEN %s AND %s
-            """ + clause + " GROUP BY factory,item_code,m) p GROUP BY m ORDER BY m",
-            (period_from, period_to, *values),
+            """ + finished_clause + " GROUP BY factory,item_code,m) p GROUP BY m ORDER BY m",
+            (period_from, period_to, *scoped_values),
         )
         monthly_plan = {int(row["m"]): scalar(row.get("plan")) for row in monthly_plan_rows}
         last_actual_month = max(monthly_map) if monthly_map else 0
@@ -1553,10 +1586,13 @@ def production(
     else:
         # 월별·기간별 모두 기간 전체를 그대로 반환한다 — 과거 [-14:] 절단은
         # 월초 일자가 누락되는 결함이었음 (2026-07-18 수정).
-        for row in daily:
-            row_date = normalize_date(row.get("date"))
-            if row_date is None:
-                continue
+        daily_by_date = {
+            row_date: row
+            for row in daily
+            if (row_date := normalize_date(row.get("date"))) is not None
+        }
+        for row_date in sorted(set(daily_by_date) | set(wip_daily_kg)):
+            row = daily_by_date.get(row_date, {})
             entry = {
                 "date": row_date.strftime("%m.%d") if mode == "month" else row_date.isoformat(),
                 **{key: round(scalar(row.get(key)), 3) for key in cat2_keys},
@@ -1588,12 +1624,12 @@ def production(
               SELECT factory, item_code, MAX(item_name) item_name,
                      MAX(planned_qty)/1000 plan, SUM(actual_qty)/1000 actual
               FROM production_daily WHERE date BETWEEN %s AND %s
-            """ + clause + """
+            """ + finished_clause + """
               GROUP BY factory,item_code,YEAR(date),MONTH(date)
             ) item_totals
             GROUP BY item_code,item_name HAVING SUM(plan) > 0
             """,
-            (period_from, period_to, *values),
+            (period_from, period_to, *scoped_values),
         )
         ranked = []
         for row in gap_rows:
@@ -1616,11 +1652,11 @@ def production(
           SELECT CASE WHEN category2 IN ('IC','MY','FM','SN') THEN category2 ELSE 'ETC' END cat2,
                  factory, item_code, MAX(planned_qty)/1000 plan
           FROM production_daily WHERE date BETWEEN %s AND %s
-        """ + clause + """
+        """ + finished_clause + """
           GROUP BY cat2,factory,item_code,YEAR(date),MONTH(date)
         ) t GROUP BY cat2
         """,
-        (period_from, period_to, *values),
+        (period_from, period_to, *scoped_values),
     ) if plan_allowed else []
     cat2_plan = {str(row["cat2"]): scalar(row.get("plan")) for row in cat2_plan_rows}
     cat2_actual = {key: sum(scalar(row.get(key)) for row in daily) for key in cat2_keys}
@@ -1650,8 +1686,8 @@ def production(
             """
             SELECT YEAR(date) y, MONTH(date) m, SUM(actual_qty)/1000 total
             FROM production_daily WHERE date BETWEEN %s AND %s
-            """ + clause + " GROUP BY y, m ORDER BY y, m",
-            (date(base.year - 1, 1, 1), date(base.year, 12, 31), *values),
+            """ + finished_clause + " GROUP BY y, m ORDER BY y, m",
+            (date(base.year - 1, 1, 1), date(base.year, 12, 31), *scoped_values),
         )
         yoy_map = {(int(row["y"]), int(row["m"])): scalar(row.get("total")) for row in yoy_rows}
         for month in range(1, 13):
@@ -1714,15 +1750,18 @@ def production_item_options(
     base = bounded_base_date(requested_date, max_row.get("max_date"))
     codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
     placeholders = ",".join(["%s"] * len(codes))
+    correction_service = import_core("app.services.production_correction_service")
+    finished_filter, finished_filter_params = correction_service.finished_production_filter_sql()
     rows = fetch_all(
         f"""
         SELECT item_code code, MAX(item_name) name,
                MAX(CASE WHEN category2 IN ('IC','MY','FM','SN') THEN category2 ELSE 'ETC' END) category,
                SUM(actual_qty)/1000 actual
         FROM production_daily WHERE date BETWEEN %s AND %s AND factory IN ({placeholders})
+        {finished_filter}
         GROUP BY item_code ORDER BY actual DESC LIMIT 300
         """,
-        (base - timedelta(days=365), base, *codes),
+        (base - timedelta(days=365), base, *codes, *finished_filter_params),
     )
     return json_safe({"baseDate": base, "items": [
         {
@@ -1784,6 +1823,8 @@ def production_item_trend(
     factory_codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
     factory_ph = ",".join(["%s"] * len(factory_codes))
     item_ph = ",".join(["%s"] * len(codes_selected))
+    correction_service = import_core("app.services.production_correction_service")
+    finished_filter, finished_filter_params = correction_service.finished_production_filter_sql()
     period_select = "YEAR(date) y, MONTH(date) m" if monthly else "date d"
     period_group = "item_code, y, m" if monthly else "item_code, d"
     rows = fetch_all(
@@ -1792,9 +1833,16 @@ def production_item_trend(
                SUM(actual_qty)/1000 actual
         FROM production_daily
         WHERE date BETWEEN %s AND %s AND factory IN ({factory_ph}) AND item_code IN ({item_ph})
+        {finished_filter}
         GROUP BY {period_group}
         """,
-        (fetch_from, fetch_to, *factory_codes, *codes_selected),
+        (
+            fetch_from,
+            fetch_to,
+            *factory_codes,
+            *codes_selected,
+            *finished_filter_params,
+        ),
     )
     by_item: dict[str, dict[str, Any]] = {}
     for row in rows:

@@ -2,7 +2,8 @@
 
 에너지 사용량은 ``energy_daily``에서 조회하되 생산량 분모는
 ``production_daily.actual_qty`` 합계를 기본으로 사용한다. 광주는 여기에
-``DB_재공품.xlsx``의 판매용 재공품 7개 품목을 믹스 kg로 환산해 합산한다.
+``DB_재공품.xlsx``의 판매용 재공품 7개 품목과 생산실적으로 기록되는 재공품
+2개 품목(129998·129999)을 믹스 kg로 환산해 합산한다.
 ``energy_daily.mix_prod_kg``는 RawDB_에너지 원본 보존용 컬럼이며
 화면·메일·분석 계산에는 사용하지 않는다.
 """
@@ -16,12 +17,14 @@ import pandas as pd
 from app.database.db_connection import get_connection
 from app.domain.factories import (
     FACTORY_CODE_TO_KR,
-    FACTORY_KR_TO_CODE,
     FACTORY_PHYSICAL_DISPLAY_ORDER,
     expand_factory_members,
     recalc_unit_rates,
 )
-from app.services.production_correction_service import WIP_MIX_CONVERSION, get_wip_daily
+from app.services.production_correction_service import (
+    get_wip_daily,
+    operational_production_sum_sql,
+)
 
 
 ACTUAL_PRODUCTION_COLUMN = "actual_prod_kg"
@@ -42,20 +45,14 @@ def fetch_actual_production(
 ) -> pd.DataFrame:
     """기간 내 공장×일자별 운영 기준 생산량을 에너지 공장명으로 반환.
 
-    기본값은 DB_생산실적 합계이며, 광주는 판매용 재공품 7개 품목의
+    기본값은 DB_생산실적 완제품 합계이며, 광주는 판매용 재공품 9개 품목의
     믹스 환산 kg를 일자별로 더한다. 완제품 실적이 없는 날도 재공품 실적이
     있으면 광주 생산량 행을 생성한다.
     """
-    gwangju_wip_codes = tuple(WIP_MIX_CONVERSION["광주"])
-    wip_placeholders = ",".join(["%s"] * len(gwangju_wip_codes))
+    quantity_expression, quantity_params = operational_production_sum_sql()
     sql = f"""
         SELECT date, factory,
-               SUM(
-                   CASE
-                       WHEN factory = %s AND item_code IN ({wip_placeholders}) THEN 0
-                       ELSE actual_qty
-                   END
-               ) AS actual_prod_kg
+               {quantity_expression} AS actual_prod_kg
         FROM production_daily
         WHERE date BETWEEN %s AND %s
         GROUP BY date, factory
@@ -67,7 +64,7 @@ def fetch_actual_production(
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
             sql,
-            (FACTORY_KR_TO_CODE["광주"], *gwangju_wip_codes, date_from, date_to),
+            (*quantity_params, date_from, date_to),
         )
         actual = pd.DataFrame(
             cursor.fetchall(),
@@ -89,7 +86,8 @@ def fetch_actual_production(
         ).fillna(0.0)
         actual = actual.dropna(subset=["date", "factory"])
 
-    # 광주 판매용 재공품 7개 품목은 DB_생산실적에 들어오지 않으므로 별도 합산한다.
+    # DB_재공품.xlsx 기반 광주 판매용 재공품 7개 품목을 별도 합산한다.
+    # production_daily에 기록되는 129998·129999는 위 SQL 식에서 이미 환산됐다.
     # get_wip_daily()가 품목별 환산계수와 상류 RPA의 외탁 제외 결과를 적용한
     # 일자별 mix-equivalent kg를 반환한다.
     wip = get_wip_daily("광주")
@@ -213,6 +211,7 @@ __all__ = [
     "ACTUAL_PRODUCTION_COLUMN",
     "fetch_actual_production",
     "get_actual_production_kg",
+    "operational_production_sum_sql",
     "overlay_actual_production",
     "overlay_actual_production_rows",
 ]

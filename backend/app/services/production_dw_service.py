@@ -9,6 +9,7 @@ from __future__ import annotations
 import pandas as pd
 
 from app.config.paths import sampled_db_path
+from app.services.production_correction_service import finished_production_filter_sql
 
 # RPA(AI-Elite_MIS_RPA)가 생성하는 통합 파일. production_dw_sync_service 가 startup 에 읽어 적재.
 # 경로는 .env(SAMPLED_DB_DIR / PRODUCTION_DW_XLSX)로 오버라이드 가능 — RPA 측과 동일해야 함.
@@ -48,7 +49,8 @@ def _build_filter_clause(
         if sub_parts:
             clauses.append("(" + " OR ".join(sub_parts) + ")")
     where = (" AND " + " AND ".join(clauses)) if clauses else ""
-    return where, params
+    finished_filter, finished_params = finished_production_filter_sql()
+    return where + finished_filter, params + list(finished_params)
 
 
 def query_production_daily(

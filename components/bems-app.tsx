@@ -558,19 +558,19 @@ function Production({ data, factory, date, mode, onModeChange, rangeFrom, rangeT
         </article>
         {itemRankingCard}
       </div>}
-      <article className="card chart-card span-all"><CardTitle title={trendTitle} meta={mode === "year" ? "ton · 금년 vs 전년" : "ton"}><CsvButton filename={`production_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={data.daily} columns={csvColumns} labels={csvLabels}/></CardTitle>
+      <article className="card chart-card span-all"><CardTitle title={trendTitle} meta={mode === "year" ? "ton · 전년 vs 금년" : "ton"}><CsvButton filename={`production_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={data.daily} columns={csvColumns} labels={csvLabels}/></CardTitle>
         <ToggleLegend items={productionLegendItems} hidden={productionLegend.hidden} onToggle={productionLegend.toggle}/>
-        {mode === "year" && <p className="quad-caption">막대 한 쌍은 왼쪽이 금년, 오른쪽(옅은 색)이 전년입니다. 유형별 합이 곧 총 생산량이라 별도 총량 차트 없이 유형별 전년비를 함께 읽을 수 있습니다.</p>}
+        {mode === "year" && <p className="quad-caption">막대 한 쌍은 왼쪽(옅은 색)이 전년, 오른쪽이 금년입니다. 유형별 합이 곧 총 생산량이라 별도 총량 차트 없이 유형별 전년비를 함께 읽을 수 있습니다.</p>}
         <Chart><ComposedChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>
-          {cat2ActiveKeys.filter(key => !productionLegend.isHidden(key)).map((key, index, visible) => <Bar key={key} dataKey={key} name={`${cat2Labels[key] ?? key} 금년`} stackId="a" fill={palette.cat2[key]} stroke="var(--card)" strokeWidth={1} maxBarSize={22} radius={index === visible.length - 1 ? [4,4,0,0] : undefined}/>)}
           {mode === "year" && cat2ActiveKeys.filter(key => !productionLegend.isHidden(key)).map((key, index, visible) => <Bar key={`prev${key}`} dataKey={`prev${key}`} name={`${cat2Labels[key] ?? key} 전년`} stackId="p" fill={palette.cat2[key]} fillOpacity={0.42} stroke="var(--card)" strokeWidth={1} maxBarSize={22} radius={index === visible.length - 1 ? [4,4,0,0] : undefined}/>)}
+          {cat2ActiveKeys.filter(key => !productionLegend.isHidden(key)).map((key, index, visible) => <Bar key={key} dataKey={key} name={`${cat2Labels[key] ?? key} 금년`} stackId="a" fill={palette.cat2[key]} stroke="var(--card)" strokeWidth={1} maxBarSize={22} radius={index === visible.length - 1 ? [4,4,0,0] : undefined}/>)}
           {showUtilityProd && !productionLegend.isHidden("utilityProd") && <Line type="linear" dataKey="utilityProd" name="유틸리티 사용 총 생산량" stroke="var(--chart-production)" strokeWidth={2} dot={seriesDot("var(--chart-production)")} activeDot={{ r: 5 }} connectNulls/>}
           {eventMarkers(productionEvents)}</ComposedChart></Chart><EventMarkerHint count={productionEvents.size}/>
         <DataToggle><PivotTable periods={(data.daily ?? []).map((row: AnyData) => row.date)} rows={productionPivotRows} totalLabel="누계(ton)"/></DataToggle></article>
       {mode !== "year" && itemRankingCard}
       <article className="card list"><CardTitle title="제품 믹스" meta="구성비"/>{data.mix?.map((r: AnyData) => <div className="progress" key={r.name}><div><span>{cat2Labels[r.name] ?? r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{ width: `${r.value}%` }}/></i></div>)}
         {(data.wipMix?.length ?? 0) > 0 && <div className="sub-section">
-          <p className="quad-caption">재공품 믹스 · 판매용 반제품(탈지분유·살균유 등) 구성비</p>
+          <p className="quad-caption">재공품 믹스 · 판매용 반제품(탈지분유·살균유 등)의 mix-kg 환산 기준 구성비</p>
           {data.wipMix.map((r: AnyData) => <div className="progress" key={r.name}><div><span>{r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{ width: `${r.value}%`, background: "linear-gradient(90deg,var(--chart-amber),#b45309)" }}/></i></div>)}
         </div>}
       </article>

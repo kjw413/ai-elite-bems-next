@@ -20,8 +20,9 @@ raw 값을 분모로 쓰면 광주 원단위가 비현실적으로 높게 나옵
 계수를 곱해 mix-equivalent kg 로 정규화합니다.
 
 이 모듈의 분해 API는 RawDB_에너지와 DB_생산실적의 차이를 진단하는 보조 도구로
-유지합니다. 다만 광주 7개 판매용 재공품의 일별 환산량(``get_wip_daily``)은
-``production_actual_service``에서 재사용해 운영 화면·메일·원단위 분모에 합산합니다.
+유지합니다. 광주 WIP는 ``DB_재공품.xlsx`` 기반 7품목과 내부 MIS 사정으로
+``production_daily``에 기록되는 2품목(129998·129999)을 원천별로 환산하며,
+``production_actual_service``에서 운영 화면·메일·원단위 분모에 합산합니다.
 
 이 모듈은 `DB_재공품.xlsx`(공장×일자×품번)을 합쳐 다음 4가지 KG 정의를 한 번에 계산합니다:
 
@@ -91,6 +92,85 @@ WIP_MIX_CONVERSION: dict[str, dict[str, float]] = {
         "260352": 1.00000,   # 살균탈지유
     },
 }
+
+# 내부 MIS 사정으로 DB_생산실적.xlsx에 기록되지만 실제 분류는 재공품인 품목.
+# 이 값들은 DB_재공품.xlsx에 없으므로 WIP_MIX_CONVERSION과 원천을 분리한다.
+# 운영 생산량에서는 production_daily 완제품 합계에서 제외한 뒤 아래 계수로
+# mix-equivalent kg를 계산해 재공품으로 다시 합산한다.
+PRODUCTION_RECORDED_WIP_MIX_CONVERSION: dict[str, dict[str, float]] = {
+    "광주": {
+        "129998": 10.91954,  # 탈지분유(수) — 기존 재공품 탈지분유와 동일 환산
+        "129999": 1.00000,   # 생크림(35%)(수)
+    },
+}
+
+
+def _sql_column(alias: str, column: str) -> str:
+    """내부 고정 alias를 SQL 컬럼명에 붙인다."""
+    return f"{alias}.{column}" if alias else column
+
+
+def all_wip_mix_conversion(factory: str) -> dict[str, float]:
+    """공장의 모든 WIP 품목 환산표(DB_재공품 + 생산실적 기록 재공품)."""
+    key = str(factory).strip()
+    combined = dict(WIP_MIX_CONVERSION.get(key, {}))
+    combined.update(PRODUCTION_RECORDED_WIP_MIX_CONVERSION.get(key, {}))
+    return combined
+
+
+def finished_production_filter_sql(alias: str = "") -> tuple[str, tuple[Any, ...]]:
+    """완제품 SQL에서 광주 WIP 품목을 제외하는 AND 절과 파라미터."""
+    factory_col = _sql_column(alias, "factory")
+    item_col = _sql_column(alias, "item_code")
+    codes = tuple(all_wip_mix_conversion("광주"))
+    if not codes:
+        return "", ()
+    placeholders = ",".join(["%s"] * len(codes))
+    return (
+        f" AND NOT ({factory_col} = %s AND {item_col} IN ({placeholders}))",
+        (FACTORY_KR_TO_CODE["광주"], *codes),
+    )
+
+
+def production_recorded_wip_sum_sql(alias: str = "") -> tuple[str, tuple[Any, ...]]:
+    """production_daily에 기록된 WIP만 환산하는 SQL 합계식."""
+    factory_col = _sql_column(alias, "factory")
+    item_col = _sql_column(alias, "item_code")
+    qty_col = _sql_column(alias, "actual_qty")
+    recorded = PRODUCTION_RECORDED_WIP_MIX_CONVERSION.get("광주", {})
+    if not recorded:
+        return "0", ()
+    cases: list[str] = []
+    params: list[Any] = []
+    for code, factor in recorded.items():
+        cases.append(
+            f"WHEN {factory_col} = %s AND {item_col} = %s "
+            f"THEN {qty_col} * %s"
+        )
+        params.extend((FACTORY_KR_TO_CODE["광주"], code, float(factor)))
+    return f"SUM(CASE {' '.join(cases)} ELSE 0 END)", tuple(params)
+
+
+def operational_production_sum_sql(alias: str = "") -> tuple[str, tuple[Any, ...]]:
+    """완제품 + production_daily 기록 WIP 환산량의 SQL 합계식."""
+    factory_col = _sql_column(alias, "factory")
+    item_col = _sql_column(alias, "item_code")
+    qty_col = _sql_column(alias, "actual_qty")
+    all_codes = tuple(all_wip_mix_conversion("광주"))
+
+    params: list[Any] = []
+    if all_codes:
+        placeholders = ",".join(["%s"] * len(all_codes))
+        finished = (
+            f"SUM(CASE WHEN {factory_col} = %s AND {item_col} IN ({placeholders}) "
+            f"THEN 0 ELSE {qty_col} END)"
+        )
+        params.extend((FACTORY_KR_TO_CODE["광주"], *all_codes))
+    else:
+        finished = f"SUM({qty_col})"
+
+    production_wip, production_wip_params = production_recorded_wip_sum_sql(alias)
+    return f"({finished} + {production_wip})", tuple(params) + production_wip_params
 
 
 @dataclass(frozen=True)
@@ -247,6 +327,7 @@ WIP_ITEM_LABELS: dict[str, dict[str, str]] = {
         "260014": "탈지분유", "260016": "생크림(냉동)", "260039": "살균유",
         "260042": "유크림믹스", "260047": "생크림(냉장)",
         "260351": "살균탈지유(수)", "260352": "살균탈지유",
+        "129998": "탈지분유(수)", "129999": "생크림(35%)(수)",
     },
 }
 
@@ -316,17 +397,15 @@ def _load_wip_workbook_items() -> dict[str, pd.DataFrame]:
         return out
 
 
-def get_wip_mix(
+def get_wip_item_totals(
     factory: str,
     date_from: str | pd.Timestamp,
     date_to: str | pd.Timestamp,
 ) -> list[dict[str, Any]]:
-    """신뢰 공장의 기간 내 재공품 품목별 구성비(%) — 믹스 환산(kg) 기준.
+    """DB_재공품.xlsx 기반 기간 내 재공품 품목별 mix-equivalent kg.
 
-    광주 전용(WIP_TRUSTED_FACTORIES) — 자사 완제품 실적(production_daily)에는
-    잡히지 않는 외부판매 재공품(탈지분유·살균유 등)의 품목별 비중을 '제품 믹스'
-    카드 옆에 보조 지표로 보여주기 위함. 신뢰 대상이 아니거나 기간 내 실적이
-    없으면 빈 리스트를 반환한다.
+    production_daily에 기록된 재공품은 호출부가
+    PRODUCTION_RECORDED_WIP_MIX_CONVERSION으로 별도 합산한다.
     """
     f = factory.upper()
     if f not in WIP_TRUSTED_FACTORIES:
@@ -343,16 +422,48 @@ def get_wip_mix(
         return []
     totals = scoped.groupby("item_code")["kg"].sum()
     totals = totals[totals > 0]
-    grand_total = float(totals.sum())
-    if grand_total <= 0:
-        return []
     labels = WIP_ITEM_LABELS.get(f, {})
     rows = [
-        {"name": labels.get(code, code), "value": round(float(kg) / grand_total * 100, 1)}
+        {"item_code": str(code), "name": labels.get(code, code), "kg": float(kg)}
         for code, kg in totals.items()
     ]
-    rows.sort(key=lambda r: r["value"], reverse=True)
+    rows.sort(key=lambda r: r["kg"], reverse=True)
     return rows
+
+
+def wip_mix_from_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """품목별 kg 행을 재공품 구성비(%) 응답으로 정규화한다."""
+    combined: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        code = str(row.get("item_code", "")).strip()
+        if not code:
+            continue
+        kg = pd.to_numeric(row.get("kg"), errors="coerce")
+        if pd.isna(kg) or float(kg) <= 0:
+            continue
+        current = combined.setdefault(
+            code,
+            {"name": str(row.get("name") or code), "kg": 0.0},
+        )
+        current["kg"] += float(kg)
+    grand_total = sum(float(row["kg"]) for row in combined.values())
+    if grand_total <= 0:
+        return []
+    result = [
+        {"name": row["name"], "value": round(float(row["kg"]) / grand_total * 100, 1)}
+        for row in combined.values()
+    ]
+    result.sort(key=lambda row: row["value"], reverse=True)
+    return result
+
+
+def get_wip_mix(
+    factory: str,
+    date_from: str | pd.Timestamp,
+    date_to: str | pd.Timestamp,
+) -> list[dict[str, Any]]:
+    """DB_재공품.xlsx 기반 재공품 품목별 구성비(%) — 호환용 API."""
+    return wip_mix_from_totals(get_wip_item_totals(factory, date_from, date_to))
 
 
 # ── 핵심 보정 API ────────────────────────────────────────────
@@ -389,22 +500,35 @@ def get_breakdown(
         else:
             energy_mix_kg = 0.0
 
-        # finished products (production_daily)
+        # production_daily: 완제품과 생산실적으로 기록된 WIP를 분리한다.
+        production_wip_kg = 0.0
         if prod_factory_codes:
             qmarks = ",".join(["%s"] * len(prod_factory_codes))
+            operational_expr, operational_params = operational_production_sum_sql()
+            production_wip_expr, production_wip_params = production_recorded_wip_sum_sql()
             row = pd.read_sql_query(
-                f"SELECT COALESCE(SUM(actual_qty),0) AS s "
+                f"SELECT COALESCE({operational_expr},0) AS operational_kg, "
+                f"COALESCE({production_wip_expr},0) AS production_wip_kg "
                 f"FROM production_daily WHERE factory IN ({qmarks}) AND date BETWEEN %s AND %s",
-                conn, params=tuple(prod_factory_codes) + (df_from, df_to),
+                conn,
+                params=(
+                    *operational_params,
+                    *production_wip_params,
+                    *prod_factory_codes,
+                    df_from,
+                    df_to,
+                ),
             )
-            finished_kg = float(row.iloc[0]["s"]) if len(row) else 0.0
+            operational_kg = float(row.iloc[0]["operational_kg"]) if len(row) else 0.0
+            production_wip_kg = float(row.iloc[0]["production_wip_kg"]) if len(row) else 0.0
+            finished_kg = operational_kg - production_wip_kg
         else:
             finished_kg = 0.0
     finally:
         conn.close()
 
-    # WIP from DB_재공품.xlsx (신뢰 공장 한정)
-    wip_kg = 0.0
+    # WIP = production_daily 기록 재공품 + DB_재공품.xlsx(신뢰 공장 한정)
+    wip_kg = production_wip_kg
     note_bits: list[str] = []
     for f_code in (energy_factory_codes or [f]):
         wdf = get_wip_daily(f_code)
@@ -471,22 +595,43 @@ def get_breakdown_daily(
 
         if prod_factory_codes:
             qmarks = ",".join(["%s"] * len(prod_factory_codes))
+            operational_expr, operational_params = operational_production_sum_sql()
+            production_wip_expr, production_wip_params = production_recorded_wip_sum_sql()
             prod_df = pd.read_sql_query(
-                f"SELECT date, SUM(actual_qty) AS finished_kg "
+                f"SELECT date, {operational_expr} AS operational_kg, "
+                f"{production_wip_expr} AS production_wip_kg "
                 f"FROM production_daily WHERE factory IN ({qmarks}) AND date BETWEEN %s AND %s "
                 f"GROUP BY date",
-                conn, params=tuple(prod_factory_codes) + (df_from, df_to),
+                conn,
+                params=(
+                    *operational_params,
+                    *production_wip_params,
+                    *prod_factory_codes,
+                    df_from,
+                    df_to,
+                ),
+            )
+            prod_df["finished_kg"] = (
+                pd.to_numeric(prod_df["operational_kg"], errors="coerce").fillna(0.0)
+                - pd.to_numeric(prod_df["production_wip_kg"], errors="coerce").fillna(0.0)
             )
         else:
-            prod_df = pd.DataFrame(columns=["date", "finished_kg"])
+            prod_df = pd.DataFrame(
+                columns=["date", "operational_kg", "production_wip_kg", "finished_kg"]
+            )
     finally:
         conn.close()
 
     energy_df["date"] = pd.to_datetime(energy_df["date"]) if not energy_df.empty else pd.Series([], dtype="datetime64[ns]")
     prod_df["date"] = pd.to_datetime(prod_df["date"]) if not prod_df.empty else pd.Series([], dtype="datetime64[ns]")
 
-    # WIP: 합산 (집계 공장이라면 멤버 공장의 WIP 합)
+    # WIP: production_daily 기록 WIP + DB_재공품.xlsx WIP 합산
     wip_parts = []
+    if not prod_df.empty:
+        wip_parts.append(
+            prod_df[["date", "production_wip_kg"]]
+            .rename(columns={"production_wip_kg": "total_wip_kg"})
+        )
     for f_code in (energy_factory_codes or [f]):
         wdf = get_wip_daily(f_code)
         if not wdf.empty:
@@ -501,7 +646,7 @@ def get_breakdown_daily(
     else:
         wip_df = pd.DataFrame(columns=["date", "wip_kg"])
 
-    out = energy_df.merge(prod_df, on="date", how="outer")
+    out = energy_df.merge(prod_df[["date", "finished_kg"]], on="date", how="outer")
     out = out.merge(wip_df, on="date", how="outer")
     for c in ("energy_mix_kg", "finished_kg", "wip_kg"):
         if c not in out.columns:
@@ -581,9 +726,16 @@ __all__ = [
     "ProductionBreakdown",
     "WIP_TRUSTED_FACTORIES",
     "WIP_MIX_CONVERSION",
+    "PRODUCTION_RECORDED_WIP_MIX_CONVERSION",
     "WIP_ITEM_LABELS",
+    "all_wip_mix_conversion",
+    "finished_production_filter_sql",
+    "operational_production_sum_sql",
+    "production_recorded_wip_sum_sql",
     "get_wip_daily",
+    "get_wip_item_totals",
     "get_wip_mix",
+    "wip_mix_from_totals",
     "get_breakdown",
     "get_breakdown_daily",
     "build_breakdown_caption",

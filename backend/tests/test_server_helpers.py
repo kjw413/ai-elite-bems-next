@@ -127,7 +127,7 @@ class ServerHelperTests(unittest.TestCase):
         first = date(2026, 7, 1)
         second = date(2026, 7, 2)
         service = SimpleNamespace(
-            WIP_MIX_CONVERSION={"광주": {"260014": 10.91954}},
+            operational_production_sum_sql=lambda: ("SUM(actual_qty)", ()),
             get_wip_daily=lambda factory: [
                 {"date": second, "total_wip_kg": 400.0},
             ],
@@ -161,6 +161,111 @@ class ServerHelperTests(unittest.TestCase):
             {"date": second, "factory": "광주", "actual_prod_kg": 400.0},
             records,
         )
+
+    def test_gwangju_production_recorded_wip_policy_uses_expected_factors(self) -> None:
+        service = server.import_core("app.services.production_correction_service")
+        recorded = service.PRODUCTION_RECORDED_WIP_MIX_CONVERSION["광주"]
+        self.assertEqual(recorded, {"129998": 10.91954, "129999": 1.0})
+
+        finished_filter, finished_params = service.finished_production_filter_sql()
+        self.assertIn("NOT", finished_filter)
+        self.assertIn("129998", finished_params)
+        self.assertIn("129999", finished_params)
+
+        expression, params = service.operational_production_sum_sql()
+        self.assertIn("actual_qty * %s", expression)
+        self.assertIn(10.91954, params)
+        self.assertIn(1.0, params)
+
+    def test_gwangju_production_api_reclassifies_recorded_wip(self) -> None:
+        correction = server.import_core("app.services.production_correction_service")
+        first = date(2026, 7, 1)
+        second = date(2026, 7, 2)
+        service = SimpleNamespace(
+            finished_production_filter_sql=lambda: (
+                " AND NOT (factory = %s AND item_code IN (%s,%s))",
+                ("F30", "129998", "129999"),
+            ),
+            get_wip_daily=lambda factory: [
+                {"date": first, "total_wip_kg": 300.0},
+            ],
+            get_wip_item_totals=lambda factory, date_from, date_to: [
+                {"item_code": "260014", "name": "탈지분유", "kg": 300.0},
+            ],
+            PRODUCTION_RECORDED_WIP_MIX_CONVERSION={
+                "광주": {"129998": 10.91954, "129999": 1.0},
+            },
+            WIP_ITEM_LABELS={
+                "광주": {
+                    "129998": "탈지분유(수)",
+                    "129999": "생크림(35%)(수)",
+                },
+            },
+            wip_mix_from_totals=correction.wip_mix_from_totals,
+        )
+        with (
+            patch.object(server, "import_core", return_value=service),
+            patch.object(server, "fetch_one", side_effect=[
+                {"max_date": date(2026, 7, 31)},
+                {"actual": 1.0, "items": 1},
+                {"plan": 1.2},
+            ]) as fetch_one,
+            patch.object(server, "fetch_all", side_effect=[
+                [{"date": first, "IC": 0, "MY": 0, "FM": 1.0, "SN": 0, "ETC": 0}],
+                [{"name": "FM", "value": 1_000.0}],
+                [
+                    {"date": first, "item_code": "129998", "name": "탈지분유(수)", "actual_qty": 100.0},
+                    {"date": second, "item_code": "129999", "name": "생크림(35%)(수)", "actual_qty": 200.0},
+                ],
+                [{"name": "완제품", "plan": 1.2, "actual": 1.0}],
+                [],
+                [],
+            ]) as fetch_all,
+        ):
+            result = server.production(
+                factory="광주", requested_date=date(2026, 7, 15), mode="month",
+            )
+
+        self.assertIn("NOT", fetch_one.call_args_list[1].args[0])
+        self.assertIn("NOT", fetch_all.call_args_list[0].args[0])
+        self.assertEqual(result["daily"][0]["utilityProd"], 2.392)
+        self.assertEqual(result["daily"][1]["date"], "07.02")
+        self.assertEqual(result["daily"][1]["FM"], 0.0)
+        self.assertEqual(result["daily"][1]["utilityProd"], 0.2)
+        mix = {row["name"]: row["value"] for row in result["wipMix"]}
+        self.assertEqual(mix["탈지분유(수)"], 68.6)
+        self.assertEqual(mix["탈지분유"], 18.8)
+        self.assertEqual(mix["생크림(35%)(수)"], 12.6)
+
+    def test_gwangju_wip_mix_uses_mix_kg_conversion_before_ratio(self) -> None:
+        service = server.import_core("app.services.production_correction_service")
+        source = service.pd.DataFrame({
+            "날짜": [date(2026, 7, 1), date(2026, 6, 30)],
+            # 7월 원본 kg 비율은 약 4.8 / 88.9 / 6.3이지만,
+            # 환산 후에는 화면 기준 31.3 / 53.5 / 15.2가 된다.
+            "260014": [31.3 / 10.91954, 1_000.0],
+            "260039": [53.5, 1_000.0],
+            "260042": [15.2 / 4.0, 1_000.0],
+            # 환산표에 없는 포장재는 구성비 분모에서 제외한다.
+            "220999": [100_000.0, 100_000.0],
+        })
+        service._WIP_ITEM_CACHE = {}
+        service._WIP_ITEM_CACHE_MTIME = None
+        try:
+            with (
+                patch.object(service, "PATH_WIP_SUMMARY", __file__),
+                patch.object(service.pd, "read_excel", return_value={"광주": source}),
+            ):
+                rows = service.get_wip_mix("광주", date(2026, 7, 1), date(2026, 7, 31))
+        finally:
+            service._WIP_ITEM_CACHE = {}
+            service._WIP_ITEM_CACHE_MTIME = None
+
+        self.assertEqual(rows, [
+            {"name": "살균유", "value": 53.5},
+            {"name": "탈지분유", "value": 31.3},
+            {"name": "유크림믹스", "value": 15.2},
+        ])
 
     def test_prediction_aggregate_requires_every_member(self) -> None:
         rows = [

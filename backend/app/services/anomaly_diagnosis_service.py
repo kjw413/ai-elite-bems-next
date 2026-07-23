@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 from app.database.db_connection import get_connection, execute_query, execute_write
 from app.domain.factories import PRODUCTION_DAILY_FACTORY_MAP
 from app.services.production_actual_service import overlay_actual_production
+from app.services.production_correction_service import finished_production_filter_sql
 from app.services.v5_common import (
     BAND_STATUS_LABELS_KO,
     TARGET_SPECS, classify_band,
@@ -461,6 +462,7 @@ def _fetch_prod_breakdown(
     base_from = (
         datetime.strptime(pred_date, "%Y-%m-%d").date() - timedelta(days=PROD_LOOKBACK_DAYS)
     ).isoformat()
+    finished_filter, finished_filter_params = finished_production_filter_sql()
 
     conn = get_connection()
     try:
@@ -469,10 +471,11 @@ def _fetch_prod_breakdown(
             SELECT category2, SUM(actual_qty) AS qty
             FROM production_daily
             WHERE factory=%s AND date=%s
+            """ + finished_filter + """
             GROUP BY category2
             """,
             conn,
-            params=(prod_factory, pred_date),
+            params=(prod_factory, pred_date, *finished_filter_params),
         )
         df_base = pd.read_sql_query(
             """
@@ -482,12 +485,13 @@ def _fetch_prod_breakdown(
               FROM production_daily
               WHERE factory=%s AND date >= %s AND date < %s
                 AND actual_qty > 0
+              """ + finished_filter + """
               GROUP BY date, category2
             ) t
             GROUP BY category2
             """,
             conn,
-            params=(prod_factory, base_from, pred_date),
+            params=(prod_factory, base_from, pred_date, *finished_filter_params),
         )
     finally:
         conn.close()

@@ -17,8 +17,8 @@ Daily Energy Alert Report Builder
 
 주간/월간 메일은 period_report_builder.py가 본 모듈의 공용 집계 함수 +
 차트 렌더러(_render_metric_grid_chart)를 재사용한다(일간 자체는 표만 사용, 차트 없음).
-생산량은 DB_생산실적을 기준으로 하되 광주는 판매용 재공품 7개 품목의
-믹스 환산 생산량을 합산한다.
+생산량은 DB_생산실적 완제품을 기준으로 하되 광주는 DB_재공품 7품목과
+생산실적으로 기록되는 재공품 2품목(129998·129999)의 믹스 환산 생산량을 합산한다.
 """
 
 from __future__ import annotations
