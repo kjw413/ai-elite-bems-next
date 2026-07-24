@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Bolt, BrainCircuit, Building2, CalendarDays, ChevronRight, Database, Download, Factory, Gauge, Menu, Moon, PackageCheck, RefreshCw, ShieldCheck, Sun, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ArrowUpDown, Bolt, BrainCircuit, Building2, CalendarDays, ChevronRight, Database, Download, Factory, Gauge, Menu, Moon, PackageCheck, RefreshCw, ShieldCheck, Sun, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiGet, query } from "@/lib/bems-api";
 import { downloadCsv } from "@/lib/bems-csv";
@@ -69,6 +69,8 @@ const seriesDot = (color: string) => ({ r: 3, fill: color, stroke: "var(--card)"
 const numberFormatter = (value: unknown) => typeof value === "number" ? value.toLocaleString("ko-KR", { maximumFractionDigits: 2 }) : Array.isArray(value) ? value.map(item => typeof item === "number" ? item.toLocaleString("ko-KR", { maximumFractionDigits: 2 }) : String(item)).join(" ~ ") : String(value ?? "-");
 
 type ProductionMode = "month" | "range" | "year";
+type RankingSortColumn = "name" | "plan" | "actual" | "variance" | "rate";
+type RankingSort = { column: RankingSortColumn; direction: "asc" | "desc" } | null;
 const productionModes: { id: ProductionMode; label: string }[] = [
   { id: "month", label: "월간" },
   { id: "range", label: "기간별" },
@@ -545,6 +547,31 @@ function Production({ data, factory, date, mode, onModeChange, rangeFrom, rangeT
   const activeRankTab = gapAvailable ? rankTab : "top";
   const rankRows: AnyData[] = activeRankTab === "top" ? data.topItems ?? [] : activeRankTab === "under" ? data.underItems ?? [] : data.overItems ?? [];
   const rankTitle = activeRankTab === "top" ? "주요 품목 계획 대비 실적" : activeRankTab === "under" ? "계획 미달 Top" : "계획 초과 Top";
+  const [rankSort, setRankSort] = useState<RankingSort>(null);
+  const rankColumns = useMemo<RankingSortColumn[]>(() => activeRankTab === "top"
+    ? ["name", "plan", "actual", "rate"]
+    : ["name", "plan", "actual", "variance", "rate"], [activeRankTab]);
+  const rankLabels: Record<RankingSortColumn, string> = { name: "품목", plan: "계획", actual: "실적", variance: "편차", rate: "달성률(%)" };
+  const sortedRankRows = useMemo(() => {
+    if (!rankSort || !rankColumns.includes(rankSort.column)) return rankRows;
+    const collator = new Intl.Collator("ko", { numeric: true, sensitivity: "base" });
+    const direction = rankSort.direction === "asc" ? 1 : -1;
+    return [...rankRows].sort((left, right) => {
+      const leftValue = left[rankSort.column];
+      const rightValue = right[rankSort.column];
+      const leftMissing = leftValue == null || leftValue === "";
+      const rightMissing = rightValue == null || rightValue === "";
+      if (leftMissing !== rightMissing) return leftMissing ? 1 : -1;
+      if (leftMissing && rightMissing) return 0;
+      const result = rankSort.column === "name"
+        ? collator.compare(String(leftValue), String(rightValue))
+        : Number(leftValue) - Number(rightValue);
+      return result * direction;
+    });
+  }, [rankRows, rankSort, rankColumns]);
+  const toggleRankSort = (column: RankingSortColumn) => setRankSort(current => current?.column === column
+    ? { column, direction: current.direction === "asc" ? "desc" : "asc" }
+    : { column, direction: "asc" });
   // 연간 모드 — 생산계획은 주 단위로 수립·집계되므로 연 누계(Burn-up)가 아니라
   // 월별 계획 대비 실적으로 본다. 진행 중인 달은 부분 실적이라 별도로 알린다.
   const monthlyPlanLegend = useSeriesToggle();
@@ -613,14 +640,28 @@ function Production({ data, factory, date, mode, onModeChange, rangeFrom, rangeT
     })()] : []),
   ];
   // 연간 모드에서는 상단 2열(월별 계획비 옆)에, 그 외 모드에서는 유형별 차트 아래에 놓는다.
-  const itemRankingCard = <article className="card table-card"><CardTitle title={rankTitle} meta={`${s.items ?? 0}개 품목`}><CsvButton filename={`item_ranking_${activeRankTab}_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={rankRows} columns={activeRankTab === "top" ? ["name", "plan", "actual", "rate"] : ["name", "plan", "actual", "variance", "rate"]} labels={{ name: "품목", plan: "계획(ton)", actual: "실적(ton)", variance: "편차(ton)", rate: "달성률(%)" }}/></CardTitle>
-    {gapAvailable && <div className="segmented" role="group" aria-label="품목 순위 구분">{([["top","실적 Top"],["under","미달 Top"],["over","초과 Top"]] as const).map(([id,label]) => <button type="button" key={id} className={activeRankTab === id ? "active" : ""} aria-pressed={activeRankTab === id} onClick={() => setRankTab(id)}>{label}</button>)}</div>}
-    {activeRankTab === "top"
-      ? <DataTable rows={rankRows} columns={["name", "plan", "actual", "rate"]} labels={{ name: "품목", plan: "계획", actual: "실적", rate: "달성률(%)" }}/>
-      : <div className="table-wrap"><table><thead><tr><th>품목</th><th>계획</th><th>실적</th><th>편차</th><th>달성률(%)</th></tr></thead><tbody>
-          {rankRows.map((row: AnyData, index: number) => <tr key={index}><td>{row.name}</td><td>{fmt(row.plan)}</td><td>{fmt(row.actual)}</td><td className={Number(row.variance) < 0 ? "bad" : "good"}>{Number(row.variance) > 0 ? "+" : ""}{fmt(row.variance)}</td><td>{row.rate == null ? "-" : fmt(row.rate)}</td></tr>)}
-          {rankRows.length === 0 && <tr><td colSpan={5}>{activeRankTab === "under" ? "계획 대비 미달 품목이 없습니다." : "계획 대비 초과 품목이 없습니다."}</td></tr>}
-        </tbody></table></div>}
+  const itemRankingCard = <article className="card table-card production-ranking-card"><CardTitle title={rankTitle} meta={`${s.items ?? 0}개 품목`}><CsvButton filename={`item_ranking_${activeRankTab}_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={sortedRankRows} columns={rankColumns} labels={{ name: "품목", plan: "계획(ton)", actual: "실적(ton)", variance: "편차(ton)", rate: "달성률(%)" }}/></CardTitle>
+    {gapAvailable && <div className="segmented" role="group" aria-label="품목 순위 구분">{([["top","실적 Top"],["under","미달 Top"],["over","초과 Top"]] as const).map(([id,label]) => <button type="button" key={id} className={activeRankTab === id ? "active" : ""} aria-pressed={activeRankTab === id} onClick={() => { setRankTab(id); setRankSort(null); }}>{label}</button>)}</div>}
+    <div className="table-wrap production-ranking-scroll"><table className={`production-ranking-table${activeRankTab === "top" ? "" : " has-variance"}`}>
+      <thead><tr>{rankColumns.map(column => {
+        const direction = rankSort?.column === column ? rankSort.direction : null;
+        return <th key={column} aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}>
+          <button type="button" className={direction ? "ranking-sort-button active" : "ranking-sort-button"} onClick={() => toggleRankSort(column)} title={`${rankLabels[column]} ${direction === "asc" ? "내림차순" : "오름차순"} 정렬`}>
+            {rankLabels[column]}{direction === "asc" ? <ArrowUp size={12}/> : direction === "desc" ? <ArrowDown size={12}/> : <ArrowUpDown size={12}/>}
+          </button>
+        </th>;
+      })}</tr></thead>
+      <tbody>
+        {sortedRankRows.map((row: AnyData, index: number) => <tr key={`${row.name ?? "item"}-${index}`}>{rankColumns.map(column => {
+          const value = row[column];
+          const varianceClass = column === "variance" && value != null ? Number(value) < 0 ? "bad" : "good" : undefined;
+          return <td key={column} className={varianceClass} title={column === "name" ? String(value ?? "-") : undefined}>
+            {column === "name" ? value ?? "-" : value == null ? "-" : `${column === "variance" && Number(value) > 0 ? "+" : ""}${fmt(value)}`}
+          </td>;
+        })}</tr>)}
+        {sortedRankRows.length === 0 && <tr><td colSpan={rankColumns.length}>{activeRankTab === "under" ? "계획 대비 미달 품목이 없습니다." : activeRankTab === "over" ? "계획 대비 초과 품목이 없습니다." : "표시할 품목이 없습니다."}</td></tr>}
+      </tbody>
+    </table></div>
   </article>;
   return <>
     <div className="mode-row">

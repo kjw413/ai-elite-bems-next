@@ -265,6 +265,19 @@ nav button.unsupported:hover{background:transparent;color:#a9b6c9}
 [data-theme="dark"] .item-combobox-list{box-shadow:0 8px 24px #00000066}
 .legend-chip svg{opacity:.6}
 
+/* 생산실적 주요 품목 — 헤더 + 5행만 노출하고 나머지는 카드 안에서 탐색한다. */
+.production-ranking-scroll{max-height:240px;overflow-y:auto;scrollbar-gutter:stable}
+.production-ranking-table{table-layout:fixed}
+.production-ranking-table th,.production-ranking-table td{height:40px;padding:0 13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.production-ranking-table th:first-child{width:46%}
+.production-ranking-table.has-variance th:first-child{width:36%}
+.production-ranking-table thead th{position:sticky;top:0;z-index:2}
+.ranking-sort-button{width:100%;height:100%;display:flex;align-items:center;gap:5px;border:0;background:transparent;color:inherit;font:inherit;font-weight:600;text-align:left;cursor:pointer;padding:0}
+.ranking-sort-button svg{flex:none;opacity:.55}
+.ranking-sort-button:hover,.ranking-sort-button.active{color:var(--accent)}
+.ranking-sort-button.active svg{opacity:1}
+.ranking-sort-button:focus-visible{outline:2px solid var(--accent);outline-offset:-3px;border-radius:4px}
+
 /* ── 2026-07-24 홈 대시보드 1안: 운영 모니터링 + 성과 요약 2단 구조 ── */
 .dashboard-home{display:grid;gap:20px}
 .dashboard-section{border:1px solid var(--line);border-radius:15px;background:var(--soft,#f7f9fc);padding:20px;box-shadow:0 8px 26px #172d4a0a}
