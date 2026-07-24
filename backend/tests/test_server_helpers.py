@@ -926,6 +926,7 @@ class ServerHelperTests(unittest.TestCase):
         with (
             patch.object(server, "fetch_one", return_value={"max_date": date(2026, 7, 15), "updated_at": None}),
             patch.object(server, "fetch_all", side_effect=[
+                [],                                                        # 기간·공장별 홈 집계 원본
                 [{"date": date(2026, 7, 15), "actual": 191.0,
                   "fuel": 1200.0, "water": 340.0, "wastewater": 150.0}],  # 7일 추이
                 [],                                                        # YoY rows
@@ -933,7 +934,7 @@ class ServerHelperTests(unittest.TestCase):
                 [],                                                        # events
                 [],                                                        # 판정 규칙용 prediction_log
             ]),
-            patch.object(server, "aggregate_prediction_rows", return_value=[]),
+            patch.object(server, "aggregate_prediction_rows", return_value=[]) as predictions,
             patch.object(server, "fetch_actual_production_frame", return_value=None),
             patch.object(server, "actual_production_records", return_value=[]),
             patch.object(server, "actual_production_daily_kg", return_value={date(2026, 7, 15): 52340.0}),
@@ -946,6 +947,13 @@ class ServerHelperTests(unittest.TestCase):
         self.assertEqual(row["water"], 340.0)
         self.assertEqual(row["wastewater"], 150.0)
         self.assertEqual(row["production"], 52.3)
+        self.assertEqual(result["operationTrends"]["power"][0]["actual"], 191.0)
+        self.assertEqual(result["operationTrends"]["fuel"][0]["actual"], 1.2)
+        self.assertEqual(result["operationTrends"]["water"][0]["actual"], 0.34)
+        self.assertEqual(set(result["performance"]), {"mtd", "ytd"})
+        predictions.assert_called_once_with(
+            "전사", date(2026, 7, 15), date_from=date(2026, 7, 9), limit=21,
+        )
 
     def test_single_day_band_exit_does_not_raise_dashboard_warning(self) -> None:
         """단발 이탈은 경고로 올리지 않는다 — 90% 밴드에서 통계적으로 흔해 알람 피로를 만든다."""

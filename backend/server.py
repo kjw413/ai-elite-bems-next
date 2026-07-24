@@ -918,6 +918,47 @@ def factory_yoy_entry(factory: str, current: dict[str, float], previous: dict[st
     }
 
 
+def dashboard_metric_cards(
+    current: dict[str, float],
+    previous: dict[str, float],
+    *,
+    label_prefix: str = "",
+) -> list[dict[str, Any]]:
+    """대시보드 KPI 4종(원단위 3종 + 생산량)의 기간 실적과 비교 증감률."""
+    current_ton = current.get("production", 0.0) / 1000
+    previous_ton = previous.get("production", 0.0) / 1000
+    specs = [
+        ("power", "전력 원단위", "kWh/ton", "blue"),
+        ("fuel", "연료 원단위", "Nm³/ton", "violet"),
+        ("water", "용수 원단위", "ton/ton", "cyan"),
+    ]
+    cards: list[dict[str, Any]] = []
+    for key, label, unit, tone in specs:
+        value = current[key] / current_ton if current_ton > 0 else None
+        previous_value = previous[key] / previous_ton if previous_ton > 0 else None
+        cards.append({
+            "id": key,
+            "label": f"{label_prefix}{label}",
+            "value": round(value, 2) if value is not None else None,
+            "unit": unit,
+            "change": (
+                rate_change(value, previous_value)
+                if value is not None and previous_value
+                else None
+            ),
+            "tone": tone,
+        })
+    cards.append({
+        "id": "production",
+        "label": f"{label_prefix}생산량",
+        "value": round(current_ton, 1),
+        "unit": "ton",
+        "change": rate_change(current_ton, previous_ton),
+        "tone": "emerald",
+    })
+    return cards
+
+
 @app.get("/api/v1/dashboard")
 def dashboard(factory: str = "전사", requested_date: date | None = Query(None, alias="date")) -> dict[str, Any]:
     max_row = fetch_one("SELECT MAX(date) max_date, MAX(updated_at) updated_at FROM energy_daily") or {}
@@ -926,34 +967,57 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
     month_start = base.replace(day=1)
     prev_base = previous_year_date(base)
     prev_start = prev_base.replace(day=1)
-    actual_frame = fetch_actual_production_frame(date(base.year - 1, 1, 1), base)
+    ytd_start = date(base.year, 1, 1)
+    previous_ytd_start = date(prev_base.year, 1, 1)
+    actual_frame = fetch_actual_production_frame(previous_ytd_start, base)
     actual_records = actual_production_records(actual_frame)
-    current = aggregate_period(factory, month_start, base, actual_records=actual_records)
-    previous = aggregate_period(factory, prev_start, prev_base, actual_records=actual_records)
-    prod_ton = current["production"] / 1000
-    prev_prod_ton = previous["production"] / 1000
+    # 홈은 MTD/YTD × 전년 동기 × 5개 공장을 동시에 보여준다. aggregate_period를
+    # 조합별로 호출하면 동일 기간 energy_daily를 20회 넘게 재조회하므로, 일·공장별
+    # 원본을 한 번 읽고 아래에서 기간/공장 조건만 메모리 집계한다.
+    dashboard_energy_rows = fetch_all(
+        """
+        SELECT date, factory, SUM(total_power_kwh) power, SUM(fuel_nm3) fuel,
+               SUM(water_ton) water, SUM(wastewater_ton) wastewater
+        FROM energy_daily WHERE date BETWEEN %s AND %s
+        GROUP BY date, factory ORDER BY date, factory
+        """,
+        (previous_ytd_start, base),
+    )
 
-    def intensity(values: dict[str, float], key: str, tonnes: float) -> float | None:
-        return values[key] / tonnes if tonnes > 0 else None
+    def dashboard_aggregate(selected_factory: str, date_from: date, date_to: date) -> dict[str, float]:
+        members = FACTORY_MEMBERS.get(selected_factory)
+        targets = None if members == [] else set(members if members is not None else [selected_factory])
+        totals = {key: 0.0 for key in ("power", "fuel", "water", "wastewater")}
+        for energy_row in dashboard_energy_rows:
+            row_date = normalize_date(energy_row.get("date"))
+            if row_date is None or row_date < date_from or row_date > date_to:
+                continue
+            if targets is not None and str(energy_row.get("factory")) not in targets:
+                continue
+            for key in totals:
+                totals[key] += scalar(energy_row.get(key))
+        totals["production"] = actual_production_kg(
+            actual_records, selected_factory, date_from, date_to,
+        )
+        return totals
 
-    metrics = []
-    metric_specs = [
-        ("power", "전력 원단위", "kWh/ton", "blue"),
-        ("fuel", "연료 원단위", "Nm³/ton", "violet"),
-        ("water", "용수 원단위", "ton/ton", "cyan"),
-    ]
-    for key, label, unit, tone in metric_specs:
-        value = intensity(current, key, prod_ton)
-        prev_value = intensity(previous, key, prev_prod_ton)
-        metrics.append({
-            "id": key,
-            "label": label,
-            "value": round(value, 2) if value is not None else None,
-            "unit": unit,
-            "change": rate_change(value, prev_value) if value is not None and prev_value else None,
-            "tone": tone,
-        })
-    metrics.append({"id": "production", "label": "누계 생산량", "value": round(prod_ton, 1), "unit": "ton", "change": rate_change(prod_ton, prev_prod_ton), "tone": "emerald"})
+    current = dashboard_aggregate(factory, month_start, base)
+    previous = dashboard_aggregate(factory, prev_start, prev_base)
+    metrics = dashboard_metric_cards(current, previous)
+
+    # 1안의 시간축 분리: 운영 KPI는 최근 7일 vs 직전 7일, 성과 KPI는 MTD/YTD vs 전년 동기.
+    operation_from = base - timedelta(days=6)
+    operation_previous_from = base - timedelta(days=13)
+    operation_previous_to = base - timedelta(days=7)
+    operation_current = dashboard_aggregate(factory, operation_from, base)
+    operation_previous = dashboard_aggregate(factory, operation_previous_from, operation_previous_to)
+    operation_metrics = dashboard_metric_cards(
+        operation_current, operation_previous, label_prefix="최근 7일 ",
+    )[:3]
+
+    ytd_current = dashboard_aggregate(factory, ytd_start, base)
+    ytd_previous = dashboard_aggregate(factory, previous_ytd_start, prev_base)
+    ytd_metrics = dashboard_metric_cards(ytd_current, ytd_previous)
 
     clause, values = factory_clause(factory, "e.factory")
     trend_rows = fetch_all(
@@ -964,23 +1028,29 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
         """ + clause + " GROUP BY e.date ORDER BY e.date",
         (base - timedelta(days=6), base, *values),
     )
-    pred_rows = aggregate_prediction_rows(
-        factory,
-        base,
-        date_from=base - timedelta(days=6),
-        target="전력",
-        limit=7,
+    prediction_rows = aggregate_prediction_rows(
+        factory, base, date_from=operation_from, limit=21,
     )
-    pred_map = {normalize_date(row["pred_date"]): row for row in pred_rows}
+    target_metric = {"전력": "power", "연료": "fuel", "용수": "water"}
+    prediction_maps: dict[str, dict[date | None, dict[str, Any]]] = {
+        "power": {}, "fuel": {}, "water": {},
+    }
+    for prediction_row in prediction_rows:
+        metric_key = target_metric.get(str(prediction_row.get("target")))
+        if metric_key is not None:
+            prediction_maps[metric_key][normalize_date(prediction_row["pred_date"])] = prediction_row
     trend_production = actual_production_daily_kg(
-        actual_records, factory, base - timedelta(days=6), base,
+        actual_records, factory, operation_from, base,
     )
     trend = []
+    operation_trends: dict[str, list[dict[str, Any]]] = {
+        "power": [], "fuel": [], "water": [],
+    }
     for row in trend_rows:
         row_date = normalize_date(row.get("date"))
         if row_date is None:
             continue
-        pred = pred_map.get(row_date, {})
+        pred = prediction_maps["power"].get(row_date, {})
         actual = scalar(row.get("actual"))
         predicted = optional_scalar(pred.get("predicted"))
         lower = optional_scalar(pred.get("lower_band"))
@@ -996,11 +1066,29 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
             "water": round(scalar(row.get("water")), 1),
             "wastewater": round(scalar(row.get("wastewater")), 1),
         })
+        actual_by_metric = {
+            "power": actual,
+            "fuel": scalar(row.get("fuel")) / 1000,
+            "water": scalar(row.get("water")) / 1000,
+        }
+        for metric_key, metric_actual in actual_by_metric.items():
+            metric_prediction = prediction_maps[metric_key].get(row_date, {})
+            metric_predicted = optional_scalar(metric_prediction.get("predicted"))
+            metric_lower = optional_scalar(metric_prediction.get("lower_band"))
+            metric_upper = optional_scalar(metric_prediction.get("upper_band"))
+            operation_trends[metric_key].append({
+                "date": row_date.strftime("%m.%d"),
+                "actual": round(metric_actual, 2),
+                "predicted": round(metric_predicted, 2) if metric_predicted is not None else None,
+                "lower": round(metric_lower, 2) if metric_lower is not None else None,
+                "upper": round(metric_upper, 2) if metric_upper is not None else None,
+            })
 
     yoy_clause, yoy_values = factory_clause(factory)
     yoy_rows = fetch_all(
         """
-        SELECT YEAR(date) y, MONTH(date) m, SUM(total_power_kwh) power
+        SELECT YEAR(date) y, MONTH(date) m, SUM(total_power_kwh) power,
+               SUM(fuel_nm3) fuel, SUM(water_ton) water
         FROM energy_daily WHERE date BETWEEN %s AND %s
         """ + yoy_clause + " GROUP BY y,m ORDER BY y,m",
         (date(base.year - 1, 1, 1), base, *yoy_values),
@@ -1011,32 +1099,45 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
     ).items():
         key = (production_date.year, production_date.month)
         monthly_production[key] = monthly_production.get(key, 0.0) + production_kg
-    yoy_map: dict[tuple[int, int], float] = {}
+    yoy_maps: dict[str, dict[tuple[int, int], float]] = {
+        "power": {}, "fuel": {}, "water": {},
+    }
     for row in yoy_rows:
         key = (int(row["y"]), int(row["m"]))
         prod_ton_month = monthly_production.get(key, 0.0) / 1000
         if prod_ton_month > 0:
-            yoy_map[key] = scalar(row.get("power")) / prod_ton_month
-    yoy = []
-    for month in range(max(1, base.month - 5), base.month + 1):
-        current_yoy = yoy_map.get((base.year, month))
-        previous_yoy = yoy_map.get((base.year - 1, month))
-        yoy.append({
-            "month": f"{month}월",
-            "current": round(current_yoy, 1) if current_yoy is not None else None,
-            "previous": round(previous_yoy, 1) if previous_yoy is not None else None,
-        })
+            for metric_key in yoy_maps:
+                yoy_maps[metric_key][key] = scalar(row.get(metric_key)) / prod_ton_month
+    yoy_by_metric: dict[str, list[dict[str, Any]]] = {}
+    for metric_key, yoy_map in yoy_maps.items():
+        metric_rows = []
+        for month in range(max(1, base.month - 5), base.month + 1):
+            current_yoy = yoy_map.get((base.year, month))
+            previous_yoy = yoy_map.get((base.year - 1, month))
+            metric_rows.append({
+                "month": f"{month}월",
+                "current": round(current_yoy, 2) if current_yoy is not None else None,
+                "previous": round(previous_yoy, 2) if previous_yoy is not None else None,
+            })
+        yoy_by_metric[metric_key] = metric_rows
+    yoy = yoy_by_metric["power"]
 
     comparisons = []
     yoy_factories = []
+    ytd_factories = []
     for display_factory in DISPLAY_FACTORIES:
-        current_factory = aggregate_period(display_factory, month_start, base, actual_records=actual_records)
-        previous_factory = aggregate_period(display_factory, prev_start, prev_base, actual_records=actual_records)
+        current_factory = dashboard_aggregate(display_factory, month_start, base)
+        previous_factory = dashboard_aggregate(display_factory, prev_start, prev_base)
         yoy_factories.append(factory_yoy_entry(display_factory, current_factory, previous_factory))
+        current_factory_ytd = dashboard_aggregate(display_factory, ytd_start, base)
+        previous_factory_ytd = dashboard_aggregate(display_factory, previous_ytd_start, prev_base)
+        ytd_factories.append(
+            factory_yoy_entry(display_factory, current_factory_ytd, previous_factory_ytd)
+        )
         cur_ton = current_factory["production"] / 1000
         prv_ton = previous_factory["production"] / 1000
-        cur_value = intensity(current_factory, "power", cur_ton)
-        prv_value = intensity(previous_factory, "power", prv_ton)
+        cur_value = current_factory["power"] / cur_ton if cur_ton > 0 else None
+        prv_value = previous_factory["power"] / prv_ton if prv_ton > 0 else None
         if cur_value is not None:
             comparisons.append({
                 "factory": display_factory,
@@ -1074,8 +1175,29 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
         "updatedAt": max_row.get("updated_at") or datetime.now(),
         "alert": alert_banner,
         "metrics": metrics,
+        "operationMetrics": operation_metrics,
+        "operationTrends": operation_trends,
+        "performance": {
+            "mtd": {
+                "metrics": metrics,
+                "factories": yoy_factories,
+                "period": {
+                    "currentFrom": month_start, "currentTo": base,
+                    "previousFrom": prev_start, "previousTo": prev_base,
+                },
+            },
+            "ytd": {
+                "metrics": ytd_metrics,
+                "factories": ytd_factories,
+                "period": {
+                    "currentFrom": ytd_start, "currentTo": base,
+                    "previousFrom": previous_ytd_start, "previousTo": prev_base,
+                },
+            },
+        },
         "trend": trend,
         "yoy": yoy,
+        "yoyByMetric": yoy_by_metric,
         "factoryComparison": comparisons,
         "yoyFactories": yoy_factories,
         "yoyPeriod": {

@@ -11,9 +11,6 @@ import { AdminScreen } from "@/components/screens/admin-screen";
 import { PredictionHistory } from "@/components/screens/prediction-history";
 import { PredictionRunner } from "@/components/screens/prediction-runner";
 import { ReportScreen } from "@/components/screens/report-screen";
-import { SevenDayCompare } from "@/components/seven-day-compare";
-import { EnergyComposition } from "@/components/energy-composition";
-import { FactoryYoy, IssuesCard } from "@/components/factory-yoy";
 import { FeatureImportance } from "@/components/feature-importance";
 import { PredictionMonitoring } from "@/components/prediction-monitoring";
 import { ProductionItemTrend, ProductionItemYoy } from "@/components/production-item-trend";
@@ -115,48 +112,155 @@ function CoverageChip({ coverage }: { coverage?: AnyData }) {
   </span>;
 }
 
-function Kpi({ label, value, unit, change, goodWhen = "down", icon: Icon = Activity }: { label: string; value: unknown; unit?: string; change?: number | null; goodWhen?: "down" | "up"; icon?: typeof Activity }) {
+function Kpi({ label, value, unit, change, changeLabel = "전년비", note, noteTone = "", goodWhen = "down", icon: Icon = Activity }: { label: string; value: unknown; unit?: string; change?: number | null; changeLabel?: string; note?: string; noteTone?: "" | "good" | "bad"; goodWhen?: "down" | "up"; icon?: typeof Activity }) {
   const digits = unit === "ton/ton" ? 2 : 1;
   const isGood = goodWhen === "up" ? (change ?? 0) >= 0 : (change ?? 0) <= 0;
-  return <article className="kpi card"><div className="kpi-icon"><Icon size={20}/></div><div><p>{label}</p><strong>{fmt(value, digits)} <small>{unit}</small></strong>{change != null && <span className={isGood ? "good" : "bad"}>{change > 0 ? "+" : ""}{fmt(change)}% 전년비</span>}</div></article>;
+  const changeText = changeLabel === "전년비"
+    ? `${(change ?? 0) > 0 ? "+" : ""}${fmt(change)}% 전년비`
+    : `${changeLabel} ${(change ?? 0) > 0 ? "+" : ""}${fmt(change)}%`;
+  return <article className="kpi card"><div className="kpi-icon"><Icon size={20}/></div><div><p>{label}</p><strong>{fmt(value, digits)} <small>{unit}</small></strong>{change != null && <span className={isGood ? "good" : "bad"}>{changeText}</span>}{note && <span className={noteTone}>{note}</span>}</div></article>;
+}
+
+type DashboardScope = "mtd" | "ytd";
+
+const dashboardMetricMeta: Record<IntensityMetric, { label: string; unit: string; intensityUnit: string; color: string }> = {
+  power: { label: "전력", unit: "MWh", intensityUnit: "kWh/ton", color: "var(--chart-power)" },
+  fuel: { label: "연료", unit: "천 Nm³", intensityUnit: "Nm³/ton", color: "var(--chart-fuel)" },
+  water: { label: "용수", unit: "천 ton", intensityUnit: "ton/ton", color: "var(--chart-water)" },
+};
+
+const dashboardRateChange = (current: number | null, previous: number | null) =>
+  current == null || previous == null || previous <= 0 ? null : (current / previous - 1) * 100;
+
+function DashboardIssueCard({ data }: { data: AnyData }) {
+  const signals: AnyData[] = data.alert?.signals ?? [];
+  const signalRows = signals.map(signal => ({
+    key: `signal-${signal.factory}-${signal.target}-${signal.kind}`,
+    factory: signal.factory,
+    text: `${signal.target} · ${signal.detail}`,
+    label: signal.kind === "alert" ? "조치" : "점검",
+    tone: signal.kind === "alert" ? "critical" : "warning",
+  }));
+  const eventRows = (data.events ?? []).map((event: AnyData) => ({
+    key: `event-${event.id}`,
+    factory: event.factory,
+    text: `${event.tag} · ${event.note}`,
+    label: "현장",
+    tone: "event",
+  }));
+  const rows = [...signalRows, ...eventRows].slice(0, 4);
+  const status = data.alert?.level === "warning" ? "warning" : "normal";
+  return <article className="card dashboard-issues-card">
+    <CardTitle title="오늘 확인할 이슈" meta="이상 신호 · 현장 이벤트"/>
+    <div className={`dashboard-status ${status}`}><BrainCircuit size={17}/><div><b>{data.alert?.title ?? "AI 이상 신호 없음"}</b><span>{data.alert?.description}</span></div></div>
+    <div className="dashboard-issue-list">
+      {rows.map(row => <div className="dashboard-issue-row" key={row.key}>
+        <b>{row.factory}</b><span>{row.text}</span><em className={row.tone}>{row.label}</em>
+      </div>)}
+      {rows.length === 0 && <div className="dashboard-issues-empty">현재 확인이 필요한 신호나 현장 이벤트가 없습니다.</div>}
+    </div>
+  </article>;
 }
 
 function Dashboard({ data, factory, date }: { data: AnyData; factory: string; date: string }) {
-  const trend = (data.trend ?? []).map((row: AnyData) => ({
+  const [operationMetric, setOperationMetric] = useState<IntensityMetric>("power");
+  const [performanceMetric, setPerformanceMetric] = useState<IntensityMetric>("power");
+  const [performanceScope, setPerformanceScope] = useState<DashboardScope>("mtd");
+  const trendLegend = useSeriesToggle();
+  const yoyLegend = useSeriesToggle();
+  const baseDate: string = data.baseDate ?? "";
+  const operationMeta = dashboardMetricMeta[operationMetric];
+  const performanceMeta = dashboardMetricMeta[performanceMetric];
+  const fallbackOperationTrend = (data.trend ?? []).map((row: AnyData) => {
+    const key = operationMetric === "power" ? "actual" : operationMetric;
+    const raw = typeof row[key] === "number" ? row[key] : null;
+    return {
+      date: row.date,
+      actual: raw == null ? null : operationMetric === "power" ? raw : raw / 1000,
+      predicted: operationMetric === "power" ? row.predicted : null,
+      lower: operationMetric === "power" ? row.lower : null,
+      upper: operationMetric === "power" ? row.upper : null,
+    };
+  });
+  const operationTrend = (data.operationTrends?.[operationMetric] ?? fallbackOperationTrend).map((row: AnyData) => ({
     ...row,
     band: row.lower != null && row.upper != null ? [row.lower, row.upper] : null,
   }));
-  const trendLegend = useSeriesToggle();
-  const trendItems: LegendItem[] = [{ key: "band", label: "P05~P95", color: palette.band }, { key: "predicted", label: "AI 예측", color: palette.predicted }, { key: "actual", label: "실제", color: palette.actual }];
-  const powerYoyLegend = useSeriesToggle();
-  const powerYoyItems: LegendItem[] = [{ key: "previous", label: "전년", color: palette.previous }, { key: "current", label: "금년", color: palette.actual }];
-  // 7일 차트 구간의 현장 이벤트 — trend는 %m.%d 라벨이라 dayLabelOf와 짝이 맞는다.
-  const baseDate: string = data.baseDate ?? "";
+  const operationMetrics: AnyData[] = data.operationMetrics ?? (data.metrics ?? [])
+    .filter((metric: AnyData) => metric.id !== "production")
+    .map((metric: AnyData) => ({ ...metric, label: `최근 7일 ${metric.label}` }));
+  const alertCount = Number(data.alert?.alertCount ?? data.alert?.count ?? 0);
+  const driftCount = Number(data.alert?.driftCount ?? 0);
+  const actionCount = alertCount + driftCount;
+  const actionNote = actionCount > 0
+    ? `반복 이탈 ${alertCount} · 지속 편차 ${driftCount}`
+    : "반복 이탈·지속 편차 없음";
+  const performance = data.performance?.[performanceScope] ?? {
+    metrics: data.metrics ?? [], factories: data.yoyFactories ?? [], period: data.yoyPeriod,
+  };
+  const performanceMetrics: AnyData[] = performance.metrics ?? [];
+  const factoryRows = (performance.factories ?? []).map((entry: AnyData) => {
+    const pair = entry.intensity?.[performanceMetric] ?? {};
+    const current = typeof pair.current === "number" ? pair.current : null;
+    const previous = typeof pair.previous === "number" ? pair.previous : null;
+    return { factory: entry.factory, value: current, previous, change: dashboardRateChange(current, previous) };
+  }).filter((row: AnyData) => row.value != null);
+  const yoyRows: AnyData[] = data.yoyByMetric?.[performanceMetric]
+    ?? (performanceMetric === "power" ? data.yoy ?? [] : []);
   const dashboardEvents = useFieldEvents(factory, shiftIsoDate(baseDate, -6), baseDate, Boolean(baseDate));
-  const trendEvents = groupEventsByLabel(dashboardEvents, "power", dayLabelOf);
-  const signals: AnyData[] = data.alert?.signals ?? [];
-  return <>
-    <section className="kpi-grid">{data.metrics?.map((m: AnyData) => <Kpi key={m.id} label={m.label} value={m.value} unit={m.unit} change={m.change} goodWhen={m.id === "production" ? "up" : "down"} icon={m.id === "production" ? Factory : Bolt}/>)}</section>
-    <section className={`alert ${data.alert?.level ?? "normal"}`}><BrainCircuit size={22}/><div><strong>{data.alert?.title}</strong><p>{data.alert?.description}</p>
-      {signals.length > 0 && <ul className="alert-signals">
-        {signals.map((signal, index) => <li key={index}>
-          <em className={signal.kind === "alert" ? "sig-alert" : "sig-drift"}>{signal.label}</em>
-          <b>{signal.factory} {signal.target}</b>
-          <span>{signal.detail}</span>
-        </li>)}
-      </ul>}
-    </div></section>
-    <section className="content-grid"><article className="card chart-card wide"><CardTitle title="최근 7일 전력 사용량" meta="MWh · AI P05~P95 정상범주"><CsvButton filename={`7day_trend_${factory}_${date}`} rows={data.trend} columns={["date","actual","predicted","lower","upper"]} labels={{date:"일자",actual:"실제(MWh)",predicted:"AI 예측(MWh)",lower:"P05(MWh)",upper:"P95(MWh)"}}/></CardTitle><Chart><AreaChart data={trend}><defs><linearGradient id="band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={palette.band} stopOpacity={.22}/><stop offset="1" stopColor={palette.band} stopOpacity={.02}/></linearGradient></defs><CartesianGrid vertical={false}/><XAxis dataKey="date"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!trendLegend.isHidden("band") && <Area type="linear" dataKey="band" name="P05~P95" stroke="none" fill="url(#band)" connectNulls={false}/>}{!trendLegend.isHidden("predicted") && <Line type="linear" dataKey="predicted" name="AI 예측" stroke={palette.predicted} strokeDasharray="5 4" strokeWidth={2} dot={seriesDot(palette.predicted)} activeDot={{ r: 5 }}/>}{!trendLegend.isHidden("actual") && <Line type="linear" dataKey="actual" name="실제" stroke={palette.actual} strokeWidth={2} dot={seriesDot(palette.actual)} activeDot={{ r: 5 }}/>}{eventMarkers(trendEvents)}</AreaChart></Chart><EventMarkerHint count={trendEvents.size}/><ToggleLegend items={trendItems} hidden={trendLegend.hidden} onToggle={trendLegend.toggle}/></article>
-    <article className="card chart-card"><CardTitle title="공장별 전력 원단위" meta="낮을수록 효율적"/><Chart><BarChart data={data.factoryComparison} layout="vertical"><CartesianGrid horizontal={false}/><XAxis type="number"/><YAxis dataKey="factory" type="category" width={58}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="value" name="kWh/ton" fill={palette.target} radius={[0,4,4,0]} maxBarSize={18}/></BarChart></Chart><p className="quad-caption">{WIP_FOOTNOTE}</p></article>
-    <article className="card chart-card"><CardTitle title="월별 전년 비교" meta="kWh/ton"><CsvButton filename={`yoy_power_${factory}_${date}`} rows={data.yoy} columns={["month","previous","current"]} labels={{month:"월","previous":"전년(kWh/ton)",current:"금년(kWh/ton)"}}/></CardTitle><Chart><LineChart data={data.yoy}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!powerYoyLegend.isHidden("previous") && <Line dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)}/>}{!powerYoyLegend.isHidden("current") && <Line dataKey="current" name="금년" stroke={palette.actual} strokeWidth={2} dot={seriesDot(palette.actual)} activeDot={{ r: 5 }}/>}</LineChart></Chart><ToggleLegend items={powerYoyItems} hidden={powerYoyLegend.hidden} onToggle={powerYoyLegend.toggle}/></article>
-    <article className="card events"><CardTitle title="최근 현장 이벤트" meta={`${data.events?.length ?? 0}건`}/>{data.events?.map((event: AnyData) => <div className="event" key={event.id}><time>{event.date}</time><span>{event.factory}</span><div><b>{event.tag}</b><p>{event.note}</p></div></div>)}</article>
-    <SevenDayCompare trend={data.trend ?? []} factory={factory} date={date}/>
-    <FactoryYoy rows={data.yoyFactories ?? []} period={data.yoyPeriod} factory={factory} date={date}/>
-    {/* 월간 주요 이슈(좁게)와 공장별 에너지 비율(넓게)을 한 행에 배치해 공간 절약 */}
-    <div className="dash-pair">
-      {(data.yoyFactories?.length ?? 0) > 0 && <IssuesCard rows={data.yoyFactories}/>}
-      <EnergyComposition rows={data.composition ?? []} label={data.compositionLabel} className=""/>
-    </div></section></>;
+  const trendEvents = groupEventsByLabel(dashboardEvents, operationMetric as EventTarget, dayLabelOf);
+  const trendItems: LegendItem[] = [
+    { key: "band", label: "P05~P95", color: palette.band },
+    { key: "predicted", label: "AI 예측", color: palette.predicted },
+    { key: "actual", label: "실제", color: operationMeta.color },
+  ];
+  const yoyItems: LegendItem[] = [
+    { key: "previous", label: "전년", color: palette.previous },
+    { key: "current", label: "금년", color: performanceMeta.color },
+  ];
+  const metricTabs = (value: IntensityMetric, onChange: (metric: IntensityMetric) => void, label: string) =>
+    <div className="segmented dashboard-metric-switch" role="group" aria-label={label}>
+      {intensityMetrics.map(metric => <button type="button" key={metric.id} className={value === metric.id ? "active" : ""} aria-pressed={value === metric.id} onClick={() => onChange(metric.id)}>{metric.label}</button>)}
+    </div>;
+
+  return <div className="dashboard-home">
+    <section className="dashboard-section dashboard-operation">
+      <header className="dashboard-section-head"><div><span>01</span><div><h2>운영 모니터링</h2><p>최근 7일 고정 · 즉시 점검용</p></div></div><em>기준일 {baseDate || date}</em></header>
+      <div className="kpi-grid dashboard-kpi-grid">
+        {operationMetrics.map(metric => <Kpi key={metric.id} label={metric.label} value={metric.value} unit={metric.unit} change={metric.change} changeLabel="직전 7일 대비" icon={metric.id === "power" ? Bolt : Gauge}/>) }
+        <Kpi label="점검 필요 신호" value={actionCount} unit="건" note={actionNote} noteTone={actionCount > 0 ? "bad" : "good"} icon={BrainCircuit}/>
+      </div>
+      <div className="dashboard-primary-grid">
+        <article className="card chart-card dashboard-operation-chart">
+          <CardTitle title="최근 7일 실제 vs AI 예측" meta={`${operationMeta.label} · ${operationMeta.unit} · P05~P95`}><CsvButton filename={`dashboard_operation_${operationMetric}_${factory}_${date}`} rows={operationTrend} columns={["date","actual","predicted","lower","upper"]} labels={{date:"일자",actual:`실제(${operationMeta.unit})`,predicted:`AI 예측(${operationMeta.unit})`,lower:`P05(${operationMeta.unit})`,upper:`P95(${operationMeta.unit})`}}/></CardTitle>
+          {metricTabs(operationMetric, setOperationMetric, "운영 에너지원 선택")}
+          <Chart><AreaChart data={operationTrend}><defs><linearGradient id="dashboard-operation-band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={palette.band} stopOpacity={.22}/><stop offset="1" stopColor={palette.band} stopOpacity={.02}/></linearGradient></defs><CartesianGrid vertical={false}/><XAxis dataKey="date"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!trendLegend.isHidden("band") && <Area type="linear" dataKey="band" name="P05~P95" stroke="none" fill="url(#dashboard-operation-band)" connectNulls={false}/>}{!trendLegend.isHidden("predicted") && <Line type="linear" dataKey="predicted" name="AI 예측" stroke={palette.predicted} strokeDasharray="5 4" strokeWidth={2} dot={seriesDot(palette.predicted)} activeDot={{ r: 5 }} connectNulls/>}{!trendLegend.isHidden("actual") && <Line type="linear" dataKey="actual" name="실제" stroke={operationMeta.color} strokeWidth={2} dot={seriesDot(operationMeta.color)} activeDot={{ r: 5 }} connectNulls/>}{eventMarkers(trendEvents)}</AreaChart></Chart>
+          <EventMarkerHint count={trendEvents.size}/><ToggleLegend items={trendItems} hidden={trendLegend.hidden} onToggle={trendLegend.toggle}/>
+        </article>
+        <DashboardIssueCard data={data}/>
+      </div>
+    </section>
+
+    <section className="dashboard-section dashboard-performance">
+      <header className="dashboard-section-head"><div><span>02</span><div><h2>성과 요약</h2><p>전년 동기 대비 효율과 생산 성과</p></div></div><div className="segmented dashboard-scope-switch" role="group" aria-label="성과 집계 기간"><button type="button" className={performanceScope === "mtd" ? "active" : ""} aria-pressed={performanceScope === "mtd"} onClick={() => setPerformanceScope("mtd")}>당월 MTD</button><button type="button" className={performanceScope === "ytd" ? "active" : ""} aria-pressed={performanceScope === "ytd"} onClick={() => setPerformanceScope("ytd")}>연간 YTD</button></div></header>
+      <div className="kpi-grid dashboard-kpi-grid">
+        {performanceMetrics.map(metric => <Kpi key={metric.id} label={metric.id === "production" ? "누계 생산량" : metric.label} value={metric.value} unit={metric.unit} change={metric.change} changeLabel="전년 동기" goodWhen={metric.id === "production" ? "up" : "down"} icon={metric.id === "production" ? Factory : Gauge}/>) }
+      </div>
+      <div className="dashboard-performance-grid">
+        <article className="card chart-card">
+          <CardTitle title="공장별 원단위 비교" meta={`${performanceScope.toUpperCase()} · 낮을수록 효율적`}/>
+          {metricTabs(performanceMetric, setPerformanceMetric, "성과 에너지원 선택")}
+          <Chart><BarChart data={factoryRows}><CartesianGrid vertical={false}/><XAxis dataKey="factory"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="value" name={performanceMeta.intensityUnit} fill={performanceMeta.color} radius={[4,4,0,0]} maxBarSize={28}/></BarChart></Chart>
+          <p className="quad-caption">{WIP_FOOTNOTE}</p>
+        </article>
+        <article className="card chart-card dashboard-yoy-card">
+          <CardTitle title="월간 전년비 추이" meta={`최근 6개월 · ${performanceMeta.label} 원단위`}><CsvButton filename={`dashboard_yoy_${performanceMetric}_${factory}_${date}`} rows={yoyRows} columns={["month","previous","current"]} labels={{month:"월",previous:`전년(${performanceMeta.intensityUnit})`,current:`금년(${performanceMeta.intensityUnit})`}}/></CardTitle>
+          <Chart><LineChart data={yoyRows}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!yoyLegend.isHidden("previous") && <Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/>}{!yoyLegend.isHidden("current") && <Line type="linear" dataKey="current" name="금년" stroke={performanceMeta.color} strokeWidth={2} dot={seriesDot(performanceMeta.color)} activeDot={{ r: 5 }} connectNulls/>}</LineChart></Chart>
+          <ToggleLegend items={yoyItems} hidden={yoyLegend.hidden} onToggle={yoyLegend.toggle}/>
+        </article>
+      </div>
+    </section>
+  </div>;
 }
 
 // 광주만 원단위 분모에 판매용 재공품이 더해진다 — 다른 공장과 나란히 비교되는
