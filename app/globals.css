@@ -294,11 +294,11 @@ nav button.unsupported:hover{background:transparent;color:#a9b6c9}
 .dashboard-kpi-grid .kpi{background:var(--card)}
 .dashboard-primary-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(310px,1fr);gap:15px;margin-top:15px}
 .dashboard-performance-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-top:15px}
+.dashboard-performance-grid>.card>.card-title{min-height:30px}
 .dashboard-operation-chart{min-width:0}
 .dashboard-metric-switch,.dashboard-scope-switch{margin:0}
 .dashboard-metric-switch{margin-bottom:10px}
 .dashboard-metric-switch button{min-width:64px}
-@media(min-width:981px){.dashboard-yoy-card>.chart{margin-top:48px}}
 .dashboard-issues-card{padding:18px;min-width:0}
 .dashboard-status{display:flex;align-items:flex-start;gap:9px;border:1px solid #cae5da;border-radius:9px;background:#effaf5;color:#147a59;padding:10px 11px;margin-bottom:10px}
 .dashboard-status.warning{border-color:#f0d29d;background:#fff7e8;color:#a26105}

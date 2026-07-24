@@ -164,15 +164,19 @@ function DashboardIssueCard({ data }: { data: AnyData }) {
   </article>;
 }
 
-function Dashboard({ data, factory, date }: { data: AnyData; factory: string; date: string }) {
+function Dashboard({ data, factory, date, factoryComparisonMetric, onFactoryComparisonMetricChange, yoyMetric, onYoyMetricChange }: {
+  data: AnyData; factory: string; date: string;
+  factoryComparisonMetric: IntensityMetric; onFactoryComparisonMetricChange: (metric: IntensityMetric) => void;
+  yoyMetric: IntensityMetric; onYoyMetricChange: (metric: IntensityMetric) => void;
+}) {
   const [operationMetric, setOperationMetric] = useState<IntensityMetric>("power");
-  const [performanceMetric, setPerformanceMetric] = useState<IntensityMetric>("power");
   const [performanceScope, setPerformanceScope] = useState<DashboardScope>("mtd");
   const trendLegend = useSeriesToggle();
   const yoyLegend = useSeriesToggle();
   const baseDate: string = data.baseDate ?? "";
   const operationMeta = dashboardMetricMeta[operationMetric];
-  const performanceMeta = dashboardMetricMeta[performanceMetric];
+  const factoryComparisonMeta = dashboardMetricMeta[factoryComparisonMetric];
+  const yoyMeta = dashboardMetricMeta[yoyMetric];
   const fallbackOperationTrend = (data.trend ?? []).map((row: AnyData) => {
     const key = operationMetric === "power" ? "actual" : operationMetric;
     const raw = typeof row[key] === "number" ? row[key] : null;
@@ -202,13 +206,13 @@ function Dashboard({ data, factory, date }: { data: AnyData; factory: string; da
   };
   const performanceMetrics: AnyData[] = performance.metrics ?? [];
   const factoryRows = (performance.factories ?? []).map((entry: AnyData) => {
-    const pair = entry.intensity?.[performanceMetric] ?? {};
+    const pair = entry.intensity?.[factoryComparisonMetric] ?? {};
     const current = typeof pair.current === "number" ? pair.current : null;
     const previous = typeof pair.previous === "number" ? pair.previous : null;
     return { factory: entry.factory, value: current, previous, change: dashboardRateChange(current, previous) };
   }).filter((row: AnyData) => row.value != null);
-  const yoyRows: AnyData[] = data.yoyByMetric?.[performanceMetric]
-    ?? (performanceMetric === "power" ? data.yoy ?? [] : []);
+  const yoyRows: AnyData[] = data.yoyByMetric?.[yoyMetric]
+    ?? (yoyMetric === "power" ? data.yoy ?? [] : []);
   const dashboardEvents = useFieldEvents(factory, shiftIsoDate(baseDate, -6), baseDate, Boolean(baseDate));
   const trendEvents = groupEventsByLabel(dashboardEvents, operationMetric as EventTarget, dayLabelOf);
   const trendItems: LegendItem[] = [
@@ -218,7 +222,7 @@ function Dashboard({ data, factory, date }: { data: AnyData; factory: string; da
   ];
   const yoyItems: LegendItem[] = [
     { key: "previous", label: "전년", color: palette.previous },
-    { key: "current", label: "금년", color: performanceMeta.color },
+    { key: "current", label: "금년", color: yoyMeta.color },
   ];
   const metricTabs = (value: IntensityMetric, onChange: (metric: IntensityMetric) => void, label: string) =>
     <div className="segmented dashboard-metric-switch" role="group" aria-label={label}>
@@ -251,13 +255,14 @@ function Dashboard({ data, factory, date }: { data: AnyData; factory: string; da
       <div className="dashboard-performance-grid">
         <article className="card chart-card">
           <CardTitle title="공장별 원단위 비교" meta={`${performanceScope.toUpperCase()} · 낮을수록 효율적`}/>
-          {metricTabs(performanceMetric, setPerformanceMetric, "성과 에너지원 선택")}
-          <Chart><BarChart data={factoryRows}><CartesianGrid vertical={false}/><XAxis dataKey="factory"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="value" name={performanceMeta.intensityUnit} fill={performanceMeta.color} radius={[4,4,0,0]} maxBarSize={28}/></BarChart></Chart>
+          {metricTabs(factoryComparisonMetric, onFactoryComparisonMetricChange, "공장별 원단위 에너지원 선택")}
+          <Chart><BarChart data={factoryRows}><CartesianGrid vertical={false}/><XAxis dataKey="factory"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="value" name={factoryComparisonMeta.intensityUnit} fill={factoryComparisonMeta.color} radius={[4,4,0,0]} maxBarSize={28}/></BarChart></Chart>
           <p className="quad-caption">{WIP_FOOTNOTE}</p>
         </article>
         <article className="card chart-card dashboard-yoy-card">
-          <CardTitle title="월간 전년비 추이" meta={`최근 6개월 · ${performanceMeta.label} 원단위`}><CsvButton filename={`dashboard_yoy_${performanceMetric}_${factory}_${date}`} rows={yoyRows} columns={["month","previous","current"]} labels={{month:"월",previous:`전년(${performanceMeta.intensityUnit})`,current:`금년(${performanceMeta.intensityUnit})`}}/></CardTitle>
-          <Chart><LineChart data={yoyRows}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!yoyLegend.isHidden("previous") && <Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/>}{!yoyLegend.isHidden("current") && <Line type="linear" dataKey="current" name="금년" stroke={performanceMeta.color} strokeWidth={2} dot={seriesDot(performanceMeta.color)} activeDot={{ r: 5 }} connectNulls/>}</LineChart></Chart>
+          <CardTitle title="월간 전년비 추이" meta={`${factory} · 최근 6개월 · ${yoyMeta.label} 원단위`}><CsvButton filename={`dashboard_yoy_${yoyMetric}_${factory}_${date}`} rows={yoyRows} columns={["month","previous","current"]} labels={{month:"월",previous:`전년(${yoyMeta.intensityUnit})`,current:`금년(${yoyMeta.intensityUnit})`}}/></CardTitle>
+          {metricTabs(yoyMetric, onYoyMetricChange, "월간 전년비 에너지원 선택")}
+          <Chart><LineChart data={yoyRows}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!yoyLegend.isHidden("previous") && <Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/>}{!yoyLegend.isHidden("current") && <Line type="linear" dataKey="current" name="금년" stroke={yoyMeta.color} strokeWidth={2} dot={seriesDot(yoyMeta.color)} activeDot={{ r: 5 }} connectNulls/>}</LineChart></Chart>
           <ToggleLegend items={yoyItems} hidden={yoyLegend.hidden} onToggle={yoyLegend.toggle}/>
         </article>
       </div>
@@ -814,6 +819,10 @@ function DataTable({ rows=[], columns, labels }: { rows?: AnyData[]; columns:str
 export function BemsApp() {
   const [screen,setScreen]=useState<Screen>("dashboard"), [factory,setFactory]=useState("전사"), [date,setDate]=useState(localYesterday), [mobile,setMobile]=useState(false);
   const [intensityMetric,setIntensityMetric]=useState<IntensityMetric>("power");
+  // 홈의 두 성과 차트는 서로 다른 분석 카드다. 데이터 재조회로 Dashboard가 잠시
+  // 언마운트되어도 각각의 에너지원 선택이 섞이거나 초기화되지 않도록 상위에서 보존한다.
+  const [dashboardFactoryComparisonMetric,setDashboardFactoryComparisonMetric]=useState<IntensityMetric>("power");
+  const [dashboardYoyMetric,setDashboardYoyMetric]=useState<IntensityMetric>("power");
   // 실제 테마는 layout.tsx 인라인 스크립트가 첫 페인트 전에 <html data-theme>로 적용한다.
   // 이 상태는 토글 아이콘 표시용이며, SSR 불일치를 피하려고 mount 후 동기화한다.
   const [theme,setTheme]=useState<"light"|"dark">("light");
@@ -892,5 +901,5 @@ export function BemsApp() {
       {FACTORY_GROUPS.map(group => group.options.length === 1 && !group.label
         ? <option key={group.options[0]}>{group.options[0]}</option>
         : <optgroup key={group.label} label={group.label}>{group.options.map(f => <option key={f}>{f}</option>)}</optgroup>)}
-    </select></label><label className={dateIgnored?"is-muted":""} title={dateIgnored?"기간 지정 모드에서는 아래 시작일·종료일이 적용됩니다.":undefined}><CalendarDays size={16}/><input type="date" aria-label={`${dateLabel} 선택`} value={date} disabled={dateIgnored} onChange={e=>setDate(e.target.value)}/>{dateIgnored&&<em className="filter-note">미적용</em>}</label><DataFreshnessBadge/><button type="button" className="theme-toggle" aria-label="화면 테마 전환" title={theme==="dark"?"라이트 모드로 전환":"다크 모드로 전환"} onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}</button><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&isDataScreen(screen)&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>API 연결 실패 · 예시 데이터 표시 중</strong><p>현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다.</p></div></section>}{screen==="dashboard"&&<Dashboard data={data} factory={factory} date={date}/>} {screen==="energy"&&<Energy data={data} factory={factory} mode={energyMode} onModeChange={setEnergyMode} rangeFrom={energyRange.from} rangeTo={energyRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setEnergyRange({from:to,to}); } else { setEnergyRange({from,to}); } }}/>} {screen==="intensity"&&<Intensity data={data} factory={factory} metric={intensityMetric} onMetricChange={setIntensityMetric} mode={intensityMode} onModeChange={setIntensityMode} rangeFrom={intensityRange.from} rangeTo={intensityRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setIntensityRange({from:to,to}); } else { setIntensityRange({from,to}); } }}/>} {screen==="production"&&<Production data={data} factory={factory} date={date} mode={productionMode} onModeChange={setProductionMode} rangeFrom={productionRange.from} rangeTo={productionRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setProductionRange({from:to,to}); } else { setProductionRange({from,to}); } }}/>} {screen==="prediction"&&<Prediction data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="report"&&<ReportScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="admin"&&<AdminScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>}</>}</div></main></div>;
+    </select></label><label className={dateIgnored?"is-muted":""} title={dateIgnored?"기간 지정 모드에서는 아래 시작일·종료일이 적용됩니다.":undefined}><CalendarDays size={16}/><input type="date" aria-label={`${dateLabel} 선택`} value={date} disabled={dateIgnored} onChange={e=>setDate(e.target.value)}/>{dateIgnored&&<em className="filter-note">미적용</em>}</label><DataFreshnessBadge/><button type="button" className="theme-toggle" aria-label="화면 테마 전환" title={theme==="dark"?"라이트 모드로 전환":"다크 모드로 전환"} onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}</button><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&isDataScreen(screen)&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>API 연결 실패 · 예시 데이터 표시 중</strong><p>현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다.</p></div></section>}{screen==="dashboard"&&<Dashboard data={data} factory={factory} date={date} factoryComparisonMetric={dashboardFactoryComparisonMetric} onFactoryComparisonMetricChange={setDashboardFactoryComparisonMetric} yoyMetric={dashboardYoyMetric} onYoyMetricChange={setDashboardYoyMetric}/>} {screen==="energy"&&<Energy data={data} factory={factory} mode={energyMode} onModeChange={setEnergyMode} rangeFrom={energyRange.from} rangeTo={energyRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setEnergyRange({from:to,to}); } else { setEnergyRange({from,to}); } }}/>} {screen==="intensity"&&<Intensity data={data} factory={factory} metric={intensityMetric} onMetricChange={setIntensityMetric} mode={intensityMode} onModeChange={setIntensityMode} rangeFrom={intensityRange.from} rangeTo={intensityRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setIntensityRange({from:to,to}); } else { setIntensityRange({from,to}); } }}/>} {screen==="production"&&<Production data={data} factory={factory} date={date} mode={productionMode} onModeChange={setProductionMode} rangeFrom={productionRange.from} rangeTo={productionRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setProductionRange({from:to,to}); } else { setProductionRange({from,to}); } }}/>} {screen==="prediction"&&<Prediction data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="report"&&<ReportScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="admin"&&<AdminScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>}</>}</div></main></div>;
 }
