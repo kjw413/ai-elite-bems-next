@@ -14,6 +14,10 @@ from app.domain.factories import FACTORY_PHYSICAL_DISPLAY_ORDER, SHEET_TO_FACTOR
 FACTORY_CODES = list(FACTORY_PHYSICAL_DISPLAY_ORDER)
 
 # Excel 컬럼 매핑 (순서대로). 폐수 원단위(wastewater_per_ton_ton)는 폐기됨.
+# 여기 있는 컬럼은 validate_columns 의 **필수** 컬럼이다 — 누락되면 업로드가 거부된다.
+# 비용·단가·COD 를 선택 컬럼으로 두지 않은 이유: NUMERIC_COLUMNS 가 UPDATE SET 절을
+# 만들고 값 추출이 row.get(col, 0) 이라, 컬럼이 없는 엑셀을 올리면 기존에 적재된
+# 비용·단가가 0으로 덮여 사라진다. 거부하는 편이 안전하다.
 EXPECTED_COLUMNS = [
     "date",
     "freezing_power_kwh",
@@ -26,6 +30,13 @@ EXPECTED_COLUMNS = [
     "power_per_ton_kwh",
     "fuel_per_ton_nm3",
     "water_per_ton_ton",
+    # 2026-07 MIS '원단위 실적입력(일단위)' 화면 신규 수집분
+    "power_cost_krw",
+    "power_price_krw_kwh",
+    "fuel_cost_krw",
+    "fuel_price_krw_nm3",
+    "influent_cod_ppm",
+    "effluent_cod_ppm",
 ]
 
 # 수치 컬럼 목록
@@ -45,10 +56,58 @@ COLUMN_DISPLAY_NAMES = {
     "power_per_ton_kwh": "전력 원단위 (kWh/ton)",
     "fuel_per_ton_nm3": "연료 원단위 (Nm³/ton)",
     "water_per_ton_ton": "용수 원단위 (ton/ton)",
+    "power_cost_krw": "전력비 (원)",
+    "power_price_krw_kwh": "전력단가 (원/kWh)",
+    "fuel_cost_krw": "연료비 (원)",
+    "fuel_price_krw_nm3": "연료단가 (원/Nm³)",
+    "influent_cod_ppm": "원수 COD (ppm)",
+    "effluent_cod_ppm": "배출수 COD (ppm)",
     "created_at": "생성일시",
     "updated_at": "수정일시",
     "changed_by": "변경자",
 }
+
+# 엑셀 머리글(한글) → 컬럼명 부분매칭 표.
+# 비교는 str(v).strip().lower().replace(" ", "") 후 `key in header` 이며, 먼저 매칭된
+# 키가 이긴다. 그래서 짧은 키(`단가`·`비용`·`cod`)를 넣으면 여러 라벨을 함께 삼킨다.
+#
+# ⚠ 삽입 순서에 의존한다 — `냉동전력량[kWh]` 은 `냉동전력량` 과 `전력량` 에 모두
+#   걸리므로 `냉동전력량` 이 반드시 `전력량` 보다 앞에 있어야 한다. 순서를 바꾸면
+#   냉동 전력이 전체 전력으로 잘못 들어간다.
+# `배출수cod` 를 `원수cod` 보다 앞에 두어 접미 충돌 가능성을 원천 차단한다.
+#
+# 모듈 상수로 둔 이유: 전치형 분기의 행 필터(metric_keys)가 이 표에서 파생되어야
+# 매핑을 한 곳만 고쳐도 두 경로가 함께 따라온다. 예전에는 두 목록이 따로 있어,
+# 신규 라벨을 매핑에만 추가하면 전치형 입력에서 그 행이 조용히 버려졌다.
+KOR_SUBSTR_MAP = {
+    "날짜": "date",
+    "일자": "date",
+    "냉동전력량": "freezing_power_kwh",
+    "공압기": "air_compressor_kwh",
+    "공업기": "air_compressor_kwh",
+    "공기압축기": "air_compressor_kwh",
+    "전력량": "total_power_kwh",
+    "전력비": "power_cost_krw",
+    "전력단가": "power_price_krw_kwh",
+    "연료량": "fuel_nm3",
+    "연료비": "fuel_cost_krw",
+    "연료단가": "fuel_price_krw_nm3",
+    "용수량": "water_ton",
+    "폐수량": "wastewater_ton",
+    "배출수cod": "effluent_cod_ppm",
+    "원수cod": "influent_cod_ppm",
+    "mix생산량": "mix_prod_kg",
+    "믹스생산량": "mix_prod_kg",
+    "전력원단위": "power_per_ton_kwh",
+    "전력단위": "power_per_ton_kwh",
+    "연료원단위": "fuel_per_ton_nm3",
+    "연료단위": "fuel_per_ton_nm3",
+    "용수원단위": "water_per_ton_ton",
+    "용수단위": "water_per_ton_ton",
+}
+
+# 전치형(행=항목, 열=날짜) 입력에서 남길 행의 라벨 키 — 날짜 키만 제외한다.
+METRIC_ROW_KEYS = [key for key in KOR_SUBSTR_MAP if key not in ("날짜", "일자")]
 
 
 # 엑셀 데이터를 읽어 정리합니다.
@@ -99,14 +158,8 @@ def parse_excel(file_path_or_buffer, filename: str = "") -> dict[str, pd.DataFra
                 is_transposed = any("냉동전력량" in v or "전력량" in v for v in first_col_values)
                 
                 if is_transposed:
-                    metric_keys = [
-                        "냉동전력량", "공압기", "공업기", "공기압축기", "전력량",
-                        "연료량", "용수량", "폐수량", "mix생산량", "믹스생산량",
-                        "전력원단위", "전력단위", "연료원단위", "연료단위",
-                        "용수원단위", "용수단위",
-                    ]
                     metric_mask = df.iloc[:, 0].apply(
-                        lambda v: any(k in str(v).strip().lower().replace(" ", "") for k in metric_keys)
+                        lambda v: any(k in str(v).strip().lower().replace(" ", "") for k in METRIC_ROW_KEYS)
                     )
                     df = df.loc[metric_mask].copy()
                     # 행열 반전 수행
@@ -119,33 +172,12 @@ def parse_excel(file_path_or_buffer, filename: str = "") -> dict[str, pd.DataFra
                     columns[0] = "date"
                     df.columns = columns
 
-            # 2. 컬럼명 정규화 및 한글 -> 영문 매핑
-            kor_to_eng = {
-                "날짜": "date",
-                "일자": "date",
-                "냉동전력량": "freezing_power_kwh",
-                "공압기": "air_compressor_kwh",
-                "공업기": "air_compressor_kwh",
-                "공기압축기": "air_compressor_kwh",
-                "전력량": "total_power_kwh",
-                "연료량": "fuel_nm3",
-                "용수량": "water_ton",
-                "폐수량": "wastewater_ton",
-                "mix생산량": "mix_prod_kg",
-                "믹스생산량": "mix_prod_kg",
-                "전력원단위": "power_per_ton_kwh",
-                "전력단위": "power_per_ton_kwh",
-                "연료원단위": "fuel_per_ton_nm3",
-                "연료단위": "fuel_per_ton_nm3",
-                "용수원단위": "water_per_ton_ton",
-                "용수단위": "water_per_ton_ton",
-            }
-            
+            # 2. 컬럼명 정규화 및 한글 -> 영문 매핑 (표는 모듈 상수 KOR_SUBSTR_MAP)
             new_cols = []
             for c in df.columns:
                 c_str = str(c).strip().lower().replace(" ", "")
                 matched = False
-                for k, v in kor_to_eng.items():
+                for k, v in KOR_SUBSTR_MAP.items():
                     if k in c_str:
                         new_cols.append(v)
                         matched = True

@@ -125,14 +125,23 @@ PATH_ENERGY_SOURCE = sampled_db_path("RawDB_에너지.xlsx", "ENERGY_SOURCE_XLSX
 PATH_WIP_SUMMARY = sampled_db_path("DB_재공품.xlsx", "WIP_SUMMARY_XLSX")
 PATH_WIP_ITEM_MASTER = sampled_db_path("RawDB_재공품.xlsx", "WIP_ITEM_MASTER_XLSX")
 
+# 라벨 문자열의 단일 출처는 RawDB_에너지.xlsx 의 머리글(RPA energy_builder.FIELDS).
+# 'N㎥' 는 U+33A5(SQUARE M CUBED) 이며 'Nm3' 와 다른 문자다 — 부분매칭이 아니라
+# 완전일치로 쓰이는 자리이므로 원본 그대로 유지해야 한다.
 ENERGY_UPLOAD_TO_MODEL_COLUMNS = {
     "date": "날짜",
     "freezing_power_kwh": "냉동전력량[kWh]",
     "air_compressor_kwh": "공압기[kWh]",
     "total_power_kwh": "전력량[kWh]",
+    "power_cost_krw": "전력비[원]",
+    "power_price_krw_kwh": "전력단가[원/kWh]",
     "fuel_nm3": "연료량[N㎥]",
+    "fuel_cost_krw": "연료비[원]",
+    "fuel_price_krw_nm3": "연료단가[원/N㎥]",
     "water_ton": "용수량[ton]",
     "wastewater_ton": "폐수량[ton]",
+    "influent_cod_ppm": "원수COD[ppm]",
+    "effluent_cod_ppm": "배출수COD[ppm]",
     "mix_prod_kg": "믹스생산량[kg]",
     "power_per_ton_kwh": "전력원단위[kWh/mix-ton]",
     "fuel_per_ton_nm3": "연료원단위[N㎥/mix-ton]",

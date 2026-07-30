@@ -31,6 +31,8 @@ from app.services.v5_common import (
 from app.services.validation_service import ValidationError, validate_data
 from app.utils.excel_parser import (
     EXPECTED_COLUMNS,
+    KOR_SUBSTR_MAP,
+    METRIC_ROW_KEYS,
     NUMERIC_COLUMNS,
     SHEET_TO_FACTORY_MAP,
 )
@@ -48,6 +50,10 @@ _INSERT_COLUMNS = [
     "fuel_nm3", "water_ton", "wastewater_ton", "mix_prod_kg",
     "power_per_ton_kwh", "fuel_per_ton_nm3",
     "water_per_ton_ton",
+    # 2026-07 MIS 신규 수집분 — 비용·단가·COD
+    "power_cost_krw", "power_price_krw_kwh",
+    "fuel_cost_krw", "fuel_price_krw_nm3",
+    "influent_cod_ppm", "effluent_cod_ppm",
 ]
 
 # 동기화 상태 파일 (마지막 mtime/시각 기록)
@@ -86,28 +92,8 @@ def _parse_korean_excel(path: Path) -> dict[str, pd.DataFrame]:
     - 컬럼명은 부분매칭(substring)으로 영문화 (단위 접미사 [kWh] 등 흡수)
     - 수치 컬럼의 콤마(,) 천 단위 구분자 자동 제거
     """
-    # 부분매칭용 한글→영문 매핑 (excel_parser.py와 동일)
-    _KOR_SUBSTR_MAP: dict[str, str] = {
-        "날짜": "date",
-        "일자": "date",
-        "냉동전력량": "freezing_power_kwh",
-        "공압기": "air_compressor_kwh",
-        "공업기": "air_compressor_kwh",
-        "공기압축기": "air_compressor_kwh",
-        "전력량": "total_power_kwh",
-        "연료량": "fuel_nm3",
-        "용수량": "water_ton",
-        "폐수량": "wastewater_ton",
-        "mix생산량": "mix_prod_kg",
-        "믹스생산량": "mix_prod_kg",
-        "전력원단위": "power_per_ton_kwh",
-        "전력단위": "power_per_ton_kwh",
-        "연료원단위": "fuel_per_ton_nm3",
-        "연료단위": "fuel_per_ton_nm3",
-        "용수원단위": "water_per_ton_ton",
-        "용수단위": "water_per_ton_ton",
-    }
-
+    # 부분매칭 표는 excel_parser.KOR_SUBSTR_MAP 이 단일 출처다 — 예전에는 이 파일이
+    # 사본을 들고 있어, 신규 라벨을 한쪽에만 추가하면 그 경로에서만 값이 사라졌다.
     all_sheets = pd.read_excel(path, sheet_name=None, engine="openpyxl")
     out: dict[str, pd.DataFrame] = {}
     for sheet_name, df in all_sheets.items():
@@ -124,9 +110,8 @@ def _parse_korean_excel(path: Path) -> dict[str, pd.DataFrame]:
             is_transposed = any("냉동전력량" in v or "전력량" in v for v in first_col_values)
 
             if is_transposed:
-                metric_keys = [k for k in _KOR_SUBSTR_MAP if k not in ("날짜", "일자")]
                 metric_mask = df.iloc[:, 0].apply(
-                    lambda v: any(k in str(v).strip().lower().replace(" ", "") for k in metric_keys)
+                    lambda v: any(k in str(v).strip().lower().replace(" ", "") for k in METRIC_ROW_KEYS)
                 )
                 df = df.loc[metric_mask].copy()
                 df = df.set_index(df.columns[0])
@@ -141,7 +126,7 @@ def _parse_korean_excel(path: Path) -> dict[str, pd.DataFrame]:
         for c in df.columns:
             c_str = str(c).strip().lower().replace(" ", "")
             matched = False
-            for k, v in _KOR_SUBSTR_MAP.items():
+            for k, v in KOR_SUBSTR_MAP.items():
                 if k in c_str:
                     new_cols.append(v)
                     matched = True

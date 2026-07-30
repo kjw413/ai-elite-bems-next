@@ -250,6 +250,20 @@ _PENDING_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
     ("anomaly_analysis", "pred_p95",      "ADD COLUMN pred_p95 DOUBLE DEFAULT NULL AFTER pred_p05"),
     ("anomaly_analysis", "band_status",   "ADD COLUMN band_status VARCHAR(16) DEFAULT NULL AFTER mape"),
     ("anomaly_analysis", "band_position", "ADD COLUMN band_position DOUBLE DEFAULT NULL AFTER band_status"),
+    # 2026-07 MIS '원단위 실적입력(일단위)' 화면 신규 수집분 — 비용·단가·COD.
+    # AFTER 를 앞 컬럼에 이어 붙여 schema.sql 의 CREATE 순서와 동일하게 맞춘다.
+    ("energy_daily", "power_cost_krw",
+     "ADD COLUMN power_cost_krw DOUBLE NOT NULL DEFAULT 0 AFTER water_per_ton_ton"),
+    ("energy_daily", "power_price_krw_kwh",
+     "ADD COLUMN power_price_krw_kwh DOUBLE NOT NULL DEFAULT 0 AFTER power_cost_krw"),
+    ("energy_daily", "fuel_cost_krw",
+     "ADD COLUMN fuel_cost_krw DOUBLE NOT NULL DEFAULT 0 AFTER power_price_krw_kwh"),
+    ("energy_daily", "fuel_price_krw_nm3",
+     "ADD COLUMN fuel_price_krw_nm3 DOUBLE NOT NULL DEFAULT 0 AFTER fuel_cost_krw"),
+    ("energy_daily", "influent_cod_ppm",
+     "ADD COLUMN influent_cod_ppm DOUBLE NOT NULL DEFAULT 0 AFTER fuel_price_krw_nm3"),
+    ("energy_daily", "effluent_cod_ppm",
+     "ADD COLUMN effluent_cod_ppm DOUBLE NOT NULL DEFAULT 0 AFTER influent_cod_ppm"),
 ]
 
 _PENDING_INDEX_MIGRATIONS: list[tuple[str, str, str]] = [

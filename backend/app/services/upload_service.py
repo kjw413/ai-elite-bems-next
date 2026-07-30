@@ -35,6 +35,12 @@ INSERT_COLUMNS = [
     "fuel_nm3", "water_ton", "wastewater_ton", "mix_prod_kg",
     "power_per_ton_kwh", "fuel_per_ton_nm3",
     "water_per_ton_ton",
+    # 2026-07 MIS 신규 수집분 — 비용·단가·COD
+    # daily_energy_sync_service._INSERT_COLUMNS 와 같은 목록을 유지해야 한다
+    # (자동 동기화 / 수동 업로드 두 경로가 같은 테이블에 쓴다).
+    "power_cost_krw", "power_price_krw_kwh",
+    "fuel_cost_krw", "fuel_price_krw_nm3",
+    "influent_cod_ppm", "effluent_cod_ppm",
 ]
 
 

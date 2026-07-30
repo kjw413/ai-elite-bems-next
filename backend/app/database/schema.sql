@@ -20,9 +20,30 @@ CREATE TABLE IF NOT EXISTS energy_daily (
     mix_prod_kg             DOUBLE NOT NULL DEFAULT 0,
 
     -- 원단위 (폐수 원단위는 폐기 — 폐수/용수 비로 대체, 화면/메일에서 즉석 계산)
+    -- ※ 저장값은 아무도 읽지 않는다 — 소비처 전부(화면·분석·예측·메일)가
+    --   overlay_actual_production*() 으로 mix_prod_kg 를 production_daily.actual_qty
+    --   합계로 덮어쓴 뒤 recalc_unit_rates() 로 원단위를 재계산한다.
+    --   2026-07 MIS 화면 개편으로 믹스생산량·원단위 수집이 중단되어 신규 날짜는 0 이
+    --   들어오지만, 그 때문에 화면 원단위가 틀어지지는 않는다(overlay 가 덮으므로).
     power_per_ton_kwh       DOUBLE NOT NULL DEFAULT 0,
     fuel_per_ton_nm3        DOUBLE NOT NULL DEFAULT 0,
     water_per_ton_ton       DOUBLE NOT NULL DEFAULT 0,
+
+    -- 에너지 비용·단가·COD (2026-07 MIS '원단위 실적입력(일단위)' 화면에서 신규 수집)
+    --   전력비 = 전력량 × 전력단가, 연료비 = 연료량 × 연료단가 (단가는 표시 반올림 2자리).
+    --   전력단가는 일별로 변동하고, 연료단가는 월 단위로 고정이다.
+    --   ⚠ 기간 집계 방식이 컬럼마다 다르다:
+    --     · 비용(power_cost_krw, fuel_cost_krw)  → SUM
+    --     · 단가(power_price_krw_kwh, fuel_price_krw_nm3)
+    --       → SUM(비용)/SUM(사용량) 가중평균. SUM 하면 무의미한 값이 된다.
+    --     · COD(influent_cod_ppm, effluent_cod_ppm)
+    --       → 농도이므로 평균(엄밀히는 유량가중이나 일별 유량이 없어 단순평균).
+    power_cost_krw          DOUBLE NOT NULL DEFAULT 0,
+    power_price_krw_kwh     DOUBLE NOT NULL DEFAULT 0,
+    fuel_cost_krw           DOUBLE NOT NULL DEFAULT 0,
+    fuel_price_krw_nm3      DOUBLE NOT NULL DEFAULT 0,
+    influent_cod_ppm        DOUBLE NOT NULL DEFAULT 0,
+    effluent_cod_ppm        DOUBLE NOT NULL DEFAULT 0,
 
     -- 메타
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

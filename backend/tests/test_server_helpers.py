@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import unittest
 from datetime import date, timedelta
@@ -998,6 +999,115 @@ class ServerHelperTests(unittest.TestCase):
         production_effect = usage_prev * (1 / ton_curr - 1 / ton_prev)
         total_change = usage_curr / ton_curr - usage_prev / ton_prev
         self.assertAlmostEqual(usage_effect + production_effect, total_change, places=9)
+
+    # ── 에너지 비용·단가·COD 적재 (2026-07 MIS 화면 개편) ─────────────
+    # 이 6개 컬럼은 컬럼 목록 3곳·한글 매핑·마이그레이션에 나뉘어 등록된다.
+    # 어긋나면 예외가 아니라 "값이 조용히 사라지거나 다른 컬럼에 들어가는" 형태로
+    # 실패하므로, 사람이 눈으로 맞추는 대신 불변식으로 고정한다.
+
+    ENERGY_COST_COLUMNS = (
+        "power_cost_krw", "power_price_krw_kwh",
+        "fuel_cost_krw", "fuel_price_krw_nm3",
+        "influent_cod_ppm", "effluent_cod_ppm",
+    )
+
+    def test_energy_cost_columns_registered_in_every_list(self) -> None:
+        parser = server.import_core("app.utils.excel_parser")
+        sync = server.import_core("app.services.daily_energy_sync_service")
+        upload = server.import_core("app.services.upload_service")
+        common = server.import_core("app.services.v5_common")
+
+        for label, columns in (
+            ("EXPECTED_COLUMNS", parser.EXPECTED_COLUMNS),
+            ("sync _INSERT_COLUMNS", sync._INSERT_COLUMNS),
+            ("upload INSERT_COLUMNS", upload.INSERT_COLUMNS),
+            ("ENERGY_UPLOAD_TO_MODEL_COLUMNS", list(common.ENERGY_UPLOAD_TO_MODEL_COLUMNS)),
+        ):
+            with self.subTest(list=label):
+                missing = [c for c in self.ENERGY_COST_COLUMNS if c not in columns]
+                self.assertEqual(missing, [], f"{label} 누락")
+
+    def test_insert_column_order_matches_numeric_columns(self) -> None:
+        """INSERT 값 튜플은 NUMERIC_COLUMNS 순서로 만들어진다.
+
+        두 INSERT 목록의 순서가 NUMERIC_COLUMNS와 어긋나면 전력비 값이 전력단가
+        컬럼에 들어가는 식으로 조용히 뒤바뀐다 — 예외가 나지 않아 더 위험하다.
+        """
+        parser = server.import_core("app.utils.excel_parser")
+        sync = server.import_core("app.services.daily_energy_sync_service")
+        upload = server.import_core("app.services.upload_service")
+
+        self.assertEqual(parser.NUMERIC_COLUMNS, parser.EXPECTED_COLUMNS[1:])
+        for label, columns in (
+            ("sync", sync._INSERT_COLUMNS),
+            ("upload", upload.INSERT_COLUMNS),
+        ):
+            with self.subTest(path=label):
+                self.assertEqual(columns[:2], ["factory", "date"])
+                self.assertEqual(columns[2:], parser.NUMERIC_COLUMNS)
+
+    def test_substring_label_map_checks_specific_keys_first(self) -> None:
+        """부분매칭 표는 삽입 순서에 의존한다 — 구체적인 키가 먼저 와야 한다.
+
+        `냉동전력량[kWh]` 은 `냉동전력량` 과 `전력량` 두 키에 모두 걸리므로,
+        `전력량` 이 앞서면 냉동 전력이 전체 전력으로 들어간다.
+        """
+        parser = server.import_core("app.utils.excel_parser")
+        keys = list(parser.KOR_SUBSTR_MAP)
+        for general in keys:
+            for specific in keys:
+                if general != specific and general in specific:
+                    with self.subTest(general=general, specific=specific):
+                        self.assertLess(
+                            keys.index(specific), keys.index(general),
+                            f"{specific}(구체)가 {general}(일반)보다 뒤에 있어 매칭되지 않는다",
+                        )
+
+        # 전치형 행 필터가 같은 표에서 파생되어야 신규 라벨이 함께 살아남는다.
+        for key in ("전력비", "전력단가", "연료비", "연료단가", "원수cod", "배출수cod"):
+            self.assertIn(key, parser.METRIC_ROW_KEYS)
+        self.assertNotIn("날짜", parser.METRIC_ROW_KEYS)
+
+    def test_energy_cost_columns_never_become_model_features(self) -> None:
+        """비용·단가는 모델 피처가 되어선 안 된다 — 전력비 = 전력량 × 단가 라 타깃 누출이다."""
+        common = server.import_core("app.services.v5_common")
+        frame = common.pd.DataFrame(
+            {**{column: [1.0] for column in self.ENERGY_COST_COLUMNS}, "dow": [1]}
+        )
+        features = list(common.get_safe_features(frame).columns)
+        leaked = [c for c in features if any(n in c for n in self.ENERGY_COST_COLUMNS)]
+        self.assertEqual(leaked, [], "비용·단가가 피처 허용목록을 통과했다")
+
+    def test_energy_cost_migration_chain_matches_schema_order(self) -> None:
+        """ALTER AFTER 사슬(기존 DB)과 CREATE 순서(신규 설치)의 컬럼 배치가 같아야 한다."""
+        connection = server.import_core("app.database.db_connection")
+        migrations = [
+            (column, fragment)
+            for table, column, fragment in connection._PENDING_COLUMN_MIGRATIONS
+            if table == "energy_daily" and column in self.ENERGY_COST_COLUMNS
+        ]
+        self.assertEqual([c for c, _ in migrations], list(self.ENERGY_COST_COLUMNS))
+        anchors = ["water_per_ton_ton", *self.ENERGY_COST_COLUMNS[:-1]]
+        for (column, fragment), anchor in zip(migrations, anchors):
+            with self.subTest(column=column):
+                self.assertIn(f"AFTER {anchor}", fragment)
+
+        schema = (server.LOCAL_CORE_ROOT / "app" / "database" / "schema.sql").read_text(encoding="utf-8")
+        create = schema.split("CREATE TABLE IF NOT EXISTS energy_daily")[1].split(") ENGINE")[0]
+        defined = [
+            match.group(1)
+            for match in (
+                re.match(r"([a-z_0-9]+)\s+(?:DOUBLE|INT|DATE|DATETIME|VARCHAR|TEXT)", line.strip())
+                for line in create.splitlines()
+                if line.strip() and not line.strip().startswith("--")
+            )
+            if match
+        ]
+        self.assertEqual(
+            [c for c in defined if c in self.ENERGY_COST_COLUMNS],
+            list(self.ENERGY_COST_COLUMNS),
+        )
+        self.assertEqual(defined[defined.index("water_per_ton_ton") + 1], "power_cost_krw")
 
 
 if __name__ == "__main__":
