@@ -325,3 +325,29 @@ nav button.unsupported:hover{background:transparent;color:#a9b6c9}
 @media(max-width:980px){.dashboard-primary-grid,.dashboard-performance-grid{grid-template-columns:1fr}}
 @media(max-width:760px){.dashboard-home{gap:14px}.dashboard-section{padding:14px;border-radius:12px}.dashboard-section-head{align-items:flex-start}.dashboard-section-head>em{display:none}.dashboard-section-head .dashboard-scope-switch{margin-left:auto}.dashboard-primary-grid,.dashboard-performance-grid{margin-top:10px}.dashboard-issues-card{padding:14px}}
 @media(max-width:520px){.dashboard-section-head{flex-direction:column}.dashboard-section-head .dashboard-scope-switch{margin-left:42px}.dashboard-section-head .dashboard-scope-switch button{padding:7px 10px}.dashboard-issue-row{grid-template-columns:52px minmax(0,1fr) auto}}
+/* 에너지 비용·단가 분석 */
+.energy-view-switch{margin-bottom:16px}
+.energy-cost-screen{display:grid;gap:16px}
+.cost-toolbar{justify-content:flex-start;margin-bottom:0}
+.cost-toolbar .segmented{margin-bottom:0}
+.cost-toolbar .period-chip{margin-left:auto}
+.cost-scope-note{margin-bottom:0}
+.cost-monthly-chart{height:330px}
+.cost-bridge{margin-top:8px}
+.cost-bridge-basis{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.cost-bridge-basis span{border:1px solid var(--line);border-radius:20px;background:var(--soft,#f7f9fc);color:var(--muted);font-size:10.5px;padding:5px 9px}
+.cost-empty{min-height:190px;display:grid;place-content:center;justify-items:center;text-align:center;color:var(--muted);gap:8px}
+.cost-empty p{max-width:420px;margin:0;font-size:12px;line-height:1.6}
+.cost-note{margin:12px 0 0;border-radius:8px;background:var(--soft,#f7f9fc);color:var(--muted);font-size:11px;line-height:1.55;padding:9px 11px}
+.cost-note.warning{background:var(--tint-amber-bg,#fff4da);color:var(--chart-amber)}
+.cost-composition{display:grid;gap:18px;padding-top:4px}
+.cost-composition>div p{display:flex;justify-content:space-between;align-items:center;margin:0 0 7px;font-size:12px}
+.cost-composition>div p small{font-weight:500;color:var(--muted)}
+.cost-composition>div>i{display:block;height:10px;overflow:hidden;border-radius:8px;background:var(--soft,#eef1f6)}
+.cost-composition>div>i>em{display:block;height:100%;border-radius:8px}
+.cost-composition>div>i>em.power{background:var(--chart-power)}
+.cost-composition>div>i>em.fuel{background:var(--chart-fuel)}
+.cost-composition>div>small{display:block;margin-top:6px;font-size:10.5px}
+.cost-matrix th,.cost-matrix td{text-align:right;white-space:nowrap}
+.cost-matrix th:first-child,.cost-matrix td:first-child{text-align:left;font-weight:700}
+@media(max-width:760px){.cost-toolbar .period-chip{width:100%;margin-left:0}.cost-monthly-chart{height:280px}.cost-bridge-basis{display:grid}.energy-view-switch{display:flex}.energy-view-switch button{flex:1}}

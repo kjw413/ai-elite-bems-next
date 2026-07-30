@@ -7,7 +7,7 @@ export type PageId = "dashboard" | "energy" | "intensity" | "production" | "pred
 
 export const PAGE_DEFS: { id: PageId; label: string; icon: LucideIcon }[] = [
   { id: "dashboard", label: "통합 대시보드", icon: BarChart3 },
-  { id: "energy", label: "에너지 사용량", icon: Bolt },
+  { id: "energy", label: "에너지 사용·비용", icon: Bolt },
   { id: "intensity", label: "에너지 원단위", icon: Gauge },
   { id: "production", label: "생산실적 분석", icon: PackageCheck },
   { id: "prediction", label: "AI 에너지 예측", icon: BrainCircuit },

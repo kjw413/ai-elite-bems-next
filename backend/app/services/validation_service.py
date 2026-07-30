@@ -7,6 +7,7 @@ Validation Service
 
 import pandas as pd
 from typing import Optional
+from app.domain.factories import ENERGY_ACTUAL_START_BY_FACTORY
 from app.utils.excel_parser import EXPECTED_COLUMNS, NUMERIC_COLUMNS, get_display_name
 
 
@@ -103,9 +104,17 @@ def validate_data(factory: str, df: pd.DataFrame) -> tuple[pd.DataFrame, list[Va
 
     # 날짜 검증
     if "date" in df.columns:
+        start_date = ENERGY_ACTUAL_START_BY_FACTORY.get(factory)
         for idx, val in df["date"].items():
             try:
-                pd.to_datetime(val)
+                parsed_date = pd.to_datetime(val)
+                if start_date is not None and parsed_date.date() < start_date:
+                    errors.append(ValidationError(
+                        sheet=factory, row=int(idx) + 2,
+                        column="date",
+                        reason=f"공장 실적 시작일({start_date.isoformat()}) 이전 날짜입니다",
+                        value=val,
+                    ))
             except (ValueError, TypeError):
                 errors.append(ValidationError(
                     sheet=factory, row=int(idx) + 2,  # Excel 행번호 (헤더=1행)

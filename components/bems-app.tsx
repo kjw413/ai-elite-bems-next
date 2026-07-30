@@ -19,6 +19,7 @@ import { ToggleLegend, useSeriesToggle, type LegendItem } from "@/components/tog
 import { DataToggle } from "@/components/data-toggle";
 import { EventMarkerHint, dayLabelOf, eventMarkers, groupEventsByLabel, monthLabelOf, useFieldEvents, type EventTarget } from "@/components/event-markers";
 import { PredictionGap } from "@/components/prediction-gap";
+import { EnergyCost } from "@/components/energy-cost";
 
 type Screen = PageId;
 type DataScreen = Exclude<Screen, "report" | "admin">;
@@ -31,7 +32,7 @@ const menus = PAGE_DEFS;
 
 const titles: Record<Screen, [string, string]> = {
   dashboard: ["통합 에너지 대시보드", "실적과 AI 예측을 한눈에 확인합니다."],
-  energy: ["에너지 사용량", "전력·연료·용수 사용 추이를 비교합니다."],
+  energy: ["에너지 사용·비용", "사용량과 전력·연료 비용·단가를 함께 분석합니다."],
   intensity: ["에너지 원단위", "생산량 대비 에너지 효율을 추적합니다."],
   production: ["생산실적 분석", "계획 대비 생산성과 제품 믹스를 분석합니다."],
   prediction: ["AI 에너지 예측", "v5.3 예측값과 정상범주 이탈을 모니터링합니다."],
@@ -295,6 +296,7 @@ function BridgeBars({ bridge, unit }: { bridge: AnyData; unit: string }) {
 }
 
 type EnergyMode = "recent" | "range";
+type EnergyView = "usage" | "cost";
 const energyModes: { id: EnergyMode; label: string }[] = [
   { id: "recent", label: "당월" },
   { id: "range", label: "기간 지정" },
@@ -332,10 +334,11 @@ function buildYoyTable(yoy: AnyData[], metric: string) {
   return { rows, total };
 }
 
-function Energy({ data, factory, mode, onModeChange, rangeFrom, rangeTo, onRangeChange }: {
-  data: AnyData; factory: string; mode: EnergyMode; onModeChange: (mode: EnergyMode) => void;
+function Energy({ data, factory, requestedDate, view, onViewChange, mode, onModeChange, rangeFrom, rangeTo, onRangeChange }: {
+  data: AnyData; factory: string; requestedDate: string; view: EnergyView; onViewChange: (view: EnergyView) => void; mode: EnergyMode; onModeChange: (mode: EnergyMode) => void;
   rangeFrom: string; rangeTo: string; onRangeChange: (from: string, to: string) => void;
 }) {
+
   const [metric, setMetric] = useState("power"); const units: AnyData = { power: "MWh", fuel: "천 Nm³", water: "천 ton", wastewater: "천 ton" };
   const [compareFactories, setCompareFactories] = useState(false);
   const values = data.daily?.map((r: AnyData) => Number(r[metric]) || 0) ?? []; const total = values.reduce((a: number,b: number)=>a+b,0);
@@ -380,7 +383,8 @@ function Energy({ data, factory, mode, onModeChange, rangeFrom, rangeTo, onRange
   // 현장 이벤트를 일별 차트에 점선 마커로 — 스파이크 옆에서 원인 메모를 바로 읽게 한다.
   const fieldEvents = useFieldEvents(factory, data.dateFrom ?? "", data.dateTo ?? "");
   const dailyEvents = groupEventsByLabel(fieldEvents, metric as EventTarget, dayLabelOf);
-  return <><div className="segmented" role="group" aria-label="에너지 지표 선택">{Object.entries(energyMetricLabels).map(([id,label])=><button type="button" className={metric===id?"active":""} aria-pressed={metric===id} onClick={()=>setMetric(id)} key={id}>{label}</button>)}</div>
+  return <><div className="segmented energy-view-switch" role="group" aria-label="에너지 분석 구분"><button type="button" className={view==="usage"?"active":""} aria-pressed={view==="usage"} onClick={()=>onViewChange("usage")}>사용량</button><button type="button" className={view==="cost"?"active":""} aria-pressed={view==="cost"} onClick={()=>onViewChange("cost")}>비용·단가</button></div>
+    {view==="cost"?<EnergyCost factory={factory} requestedDate={requestedDate}/>:<><div className="segmented" role="group" aria-label="에너지 지표 선택">{Object.entries(energyMetricLabels).map(([id,label])=><button type="button" className={metric===id?"active":""} aria-pressed={metric===id} onClick={()=>setMetric(id)} key={id}>{label}</button>)}</div>
     <div className="mode-row">
       <div className="segmented" role="group" aria-label="사용량 조회 방식">{energyModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
       {mode === "range" && <div className="range-fields">
@@ -420,7 +424,7 @@ function Energy({ data, factory, mode, onModeChange, rangeFrom, rangeTo, onRange
         ? <article className="card chart-card"><CardTitle title="공장별 폐수/용수 비율" meta={`${summaryMeta} · 낮을수록 양호`}><CsvButton filename={`wastewater_ratio_${data.dateFrom ?? ""}`} rows={wasteRatioRows} columns={["factory","water","wastewater","ratio"]} labels={{factory:"공장",water:"용수(천 ton)",wastewater:"폐수(천 ton)",ratio:"폐수/용수"}}/></CardTitle><Chart><BarChart data={wasteRatioRows}><CartesianGrid vertical={false}/><XAxis dataKey="factory"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="ratio" name="폐수/용수 비율" fill={energyMetricColors.wastewater} radius={[4,4,0,0]} maxBarSize={22}/></BarChart></Chart></article>
         : <article className="card table-card"><CardTitle title="공장별 사용량" meta={`${summaryMeta} 누계`}><CsvButton filename="energy_factories" rows={data.factories} columns={["factory","power","fuel","water","wastewater"]} labels={{factory:"공장",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><DataTable rows={data.factories} columns={["factory",metric]} labels={{factory:"공장",[metric]:units[metric]}}/></article>}
       {isWater && <article className="card table-card span-all"><CardTitle title="공장별 사용량" meta={`${summaryMeta} 누계`}><CsvButton filename="energy_factories" rows={data.factories} columns={["factory","power","fuel","water","wastewater"]} labels={{factory:"공장",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><DataTable rows={data.factories} columns={["factory",metric]} labels={{factory:"공장",[metric]:units[metric]}}/></article>}
-    </section></>;
+    </section></>}</>;
 }
 
 function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, rangeFrom, rangeTo, onRangeChange }: {
@@ -839,6 +843,7 @@ export function BemsApp() {
     const from=new Date(Date.parse(`${today}T00:00:00`)-30*86_400_000);
     return {from:`${from.getFullYear()}-${String(from.getMonth()+1).padStart(2,"0")}-${String(from.getDate()).padStart(2,"0")}`,to:today};
   });
+  const [energyView,setEnergyView]=useState<EnergyView>("usage");
   const [energyMode,setEnergyMode]=useState<EnergyMode>("recent");
   const [energyRange,setEnergyRange]=useState<{from:string;to:string}>(()=>{
     const today=localYesterday();
@@ -884,7 +889,7 @@ export function BemsApp() {
   // P2-1 — 기간지정 모드에서는 상단 기준일이 차트에 반영되지 않는다. 활성 상태로 두면
   // 화면이 거짓 정보를 주므로 비활성 처리하고 이유를 함께 보여준다.
   const dateIgnored =
-    (screen==="energy"&&energyMode==="range") ||
+    (screen==="energy"&&energyView==="usage"&&energyMode==="range") ||
     (screen==="intensity"&&intensityMode==="range") ||
     (screen==="production"&&productionMode==="range");
   const dateLabel = screen==="production"&&productionMode!=="range" ? (productionMode==="year"?"기준 연도":"기준 월") : "기준일";
@@ -901,5 +906,5 @@ export function BemsApp() {
       {FACTORY_GROUPS.map(group => group.options.length === 1 && !group.label
         ? <option key={group.options[0]}>{group.options[0]}</option>
         : <optgroup key={group.label} label={group.label}>{group.options.map(f => <option key={f}>{f}</option>)}</optgroup>)}
-    </select></label><label className={dateIgnored?"is-muted":""} title={dateIgnored?"기간 지정 모드에서는 아래 시작일·종료일이 적용됩니다.":undefined}><CalendarDays size={16}/><input type="date" aria-label={`${dateLabel} 선택`} value={date} disabled={dateIgnored} onChange={e=>setDate(e.target.value)}/>{dateIgnored&&<em className="filter-note">미적용</em>}</label><DataFreshnessBadge/><button type="button" className="theme-toggle" aria-label="화면 테마 전환" title={theme==="dark"?"라이트 모드로 전환":"다크 모드로 전환"} onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}</button><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&isDataScreen(screen)&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>API 연결 실패 · 예시 데이터 표시 중</strong><p>현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다.</p></div></section>}{screen==="dashboard"&&<Dashboard data={data} factory={factory} date={date} factoryComparisonMetric={dashboardFactoryComparisonMetric} onFactoryComparisonMetricChange={setDashboardFactoryComparisonMetric} yoyMetric={dashboardYoyMetric} onYoyMetricChange={setDashboardYoyMetric}/>} {screen==="energy"&&<Energy data={data} factory={factory} mode={energyMode} onModeChange={setEnergyMode} rangeFrom={energyRange.from} rangeTo={energyRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setEnergyRange({from:to,to}); } else { setEnergyRange({from,to}); } }}/>} {screen==="intensity"&&<Intensity data={data} factory={factory} metric={intensityMetric} onMetricChange={setIntensityMetric} mode={intensityMode} onModeChange={setIntensityMode} rangeFrom={intensityRange.from} rangeTo={intensityRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setIntensityRange({from:to,to}); } else { setIntensityRange({from,to}); } }}/>} {screen==="production"&&<Production data={data} factory={factory} date={date} mode={productionMode} onModeChange={setProductionMode} rangeFrom={productionRange.from} rangeTo={productionRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setProductionRange({from:to,to}); } else { setProductionRange({from,to}); } }}/>} {screen==="prediction"&&<Prediction data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="report"&&<ReportScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="admin"&&<AdminScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>}</>}</div></main></div>;
+    </select></label><label className={dateIgnored?"is-muted":""} title={dateIgnored?"기간 지정 모드에서는 아래 시작일·종료일이 적용됩니다.":undefined}><CalendarDays size={16}/><input type="date" aria-label={`${dateLabel} 선택`} value={date} disabled={dateIgnored} onChange={e=>setDate(e.target.value)}/>{dateIgnored&&<em className="filter-note">미적용</em>}</label><DataFreshnessBadge/><button type="button" className="theme-toggle" aria-label="화면 테마 전환" title={theme==="dark"?"라이트 모드로 전환":"다크 모드로 전환"} onClick={toggleTheme}>{theme==="dark"?<Sun size={16}/>:<Moon size={16}/>}</button><div className={`role ${session.role}`}><ShieldCheck size={16}/>{session.role==="admin"?"관리자":"조회 사용자"}</div></div></header><div className="mobile-title"><h1>{title}</h1><p>{subtitle}</p></div><div className="workspace" aria-busy={loading}>{loading?<div className="loading" role="status" aria-live="polite"><RefreshCw className="spin"/>데이터를 불러오는 중입니다.</div>:<>{!live&&isDataScreen(screen)&&<section className="data-warning" role="alert"><Database size={20}/><div><strong>API 연결 실패 · 예시 데이터 표시 중</strong><p>현재 화면의 수치는 데모 값이며 실제 운영 판단에 사용할 수 없습니다.</p></div></section>}{screen==="dashboard"&&<Dashboard data={data} factory={factory} date={date} factoryComparisonMetric={dashboardFactoryComparisonMetric} onFactoryComparisonMetricChange={setDashboardFactoryComparisonMetric} yoyMetric={dashboardYoyMetric} onYoyMetricChange={setDashboardYoyMetric}/>} {screen==="energy"&&<Energy data={data} factory={factory} requestedDate={date} view={energyView} onViewChange={setEnergyView} mode={energyMode} onModeChange={setEnergyMode} rangeFrom={energyRange.from} rangeTo={energyRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setEnergyRange({from:to,to}); } else { setEnergyRange({from,to}); } }}/>} {screen==="intensity"&&<Intensity data={data} factory={factory} metric={intensityMetric} onMetricChange={setIntensityMetric} mode={intensityMode} onModeChange={setIntensityMode} rangeFrom={intensityRange.from} rangeTo={intensityRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setIntensityRange({from:to,to}); } else { setIntensityRange({from,to}); } }}/>} {screen==="production"&&<Production data={data} factory={factory} date={date} mode={productionMode} onModeChange={setProductionMode} rangeFrom={productionRange.from} rangeTo={productionRange.to} onRangeChange={(from,to)=>{ if(from&&to&&from>to){ setProductionRange({from:to,to}); } else { setProductionRange({from,to}); } }}/>} {screen==="prediction"&&<Prediction data={data} factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="report"&&<ReportScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>} {screen==="admin"&&<AdminScreen factory={factory} date={date} isAdmin={session.role==="admin"}/>}</>}</div></main></div>;
 }

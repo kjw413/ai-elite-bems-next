@@ -24,6 +24,7 @@ from typing import Any
 import pandas as pd
 
 from app.database.db_connection import managed_connection, managed_cursor
+from app.domain.factories import ENERGY_ACTUAL_START_BY_FACTORY
 from app.services.v5_common import (
     PATH_ENERGY_SOURCE,
     PROJECT_ROOT,
@@ -185,6 +186,20 @@ def _validate(parsed: dict[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFrame],
     cleaned: dict[str, pd.DataFrame] = {}
     errors: list[ValidationError] = []
     for factory, df in parsed.items():
+        start_date = ENERGY_ACTUAL_START_BY_FACTORY.get(factory)
+        if start_date is not None and "date" in df.columns:
+            normalized_dates = pd.to_datetime(df["date"], errors="coerce")
+            valid_mask = normalized_dates.dt.date >= start_date
+            dropped = int((~valid_mask).sum())
+            if dropped:
+                logger.warning(
+                    "[daily_energy_sync] %s 가동 시작일(%s) 이전 %s건 제외",
+                    factory,
+                    start_date.isoformat(),
+                    dropped,
+                )
+                df = df.loc[valid_mask].reset_index(drop=True)
+
         # 필수 컬럼 누락 체크 (영문 매핑 후 검사)
         missing = [c for c in EXPECTED_COLUMNS if c not in df.columns]
         if missing:

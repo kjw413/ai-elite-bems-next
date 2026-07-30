@@ -1184,6 +1184,39 @@ class ServerHelperTests(unittest.TestCase):
         )
         self.assertEqual(defined[defined.index("water_per_ton_ton") + 1], "power_cost_krw")
 
+    def test_energy_sync_drops_gyeongsan_rows_before_factory_start(self) -> None:
+        """경산 실적은 2026-04-01 이전 행을 동기화 경계에서 다시 유입시키지 않는다."""
+        parser = server.import_core("app.utils.excel_parser")
+        sync = server.import_core("app.services.daily_energy_sync_service")
+        frame = sync.pd.DataFrame({
+            "date": sync.pd.to_datetime(["2026-03-31", "2026-04-01", "2026-04-02"]),
+            **{column: [1.0, 2.0, 3.0] for column in parser.NUMERIC_COLUMNS},
+        })
+
+        cleaned, errors = sync._validate({"경산": frame})
+
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            [str(value)[:10] for value in cleaned["경산"]["date"]],
+            ["2026-04-01", "2026-04-02"],
+        )
+        self.assertEqual(cleaned["경산"]["total_power_kwh"].tolist(), [2.0, 3.0])
+
+    def test_manual_upload_rejects_gyeongsan_rows_before_factory_start(self) -> None:
+        """수동 Excel 업로드도 자동 동기화와 같은 경산 시작일을 강제한다."""
+        parser = server.import_core("app.utils.excel_parser")
+        validation = server.import_core("app.services.validation_service")
+        frame = validation.pd.DataFrame({
+            "date": validation.pd.to_datetime(["2026-03-31", "2026-04-01"]),
+            **{column: [1.0, 2.0] for column in parser.NUMERIC_COLUMNS},
+        })
+
+        cleaned, errors = validation.validate_all({"경산": frame})
+
+        self.assertEqual(cleaned, {})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("2026-04-01", errors[0].reason)
+
 
 if __name__ == "__main__":
     unittest.main()

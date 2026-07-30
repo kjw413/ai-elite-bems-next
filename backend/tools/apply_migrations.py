@@ -100,7 +100,7 @@ def main() -> int:
         return 1
 
     if pending == 0:
-        print("  (없음 — 이미 모두 적용됨)")
+        print("  (없음 - 이미 모두 적용됨)")
         return 0
 
     if args.dry_run:

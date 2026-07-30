@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Mapping
 
 import pandas as pd
@@ -24,6 +25,13 @@ FACTORY_MASTER: tuple[Factory, ...] = (
     Factory("논산", "F40", "부여", "#ef4444", "F40"),
     Factory("경산", "F50", "대구", "#14b8a6", "F50"),  # 2026-07 신규 (냉동)
 )
+
+# 공장별 에너지 실적의 유효 시작일.
+# 경산은 2026-04-01부터 운영 실적이 존재한다. 과거 RawDB 전환 과정에서 다른 기간의
+# 사용량이 경산으로 들어간 적이 있어, DB 정리 후에도 동기화 경계에서 다시 차단한다.
+ENERGY_ACTUAL_START_BY_FACTORY: dict[str, date] = {
+    "경산": date(2026, 4, 1),
+}
 
 FACTORY_PHYSICAL_DISPLAY_ORDER: tuple[str, ...] = tuple(f.label for f in FACTORY_MASTER)
 FACTORY_DISPLAY_ORDER: tuple[str, ...] = (
