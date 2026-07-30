@@ -1000,6 +1000,81 @@ class ServerHelperTests(unittest.TestCase):
         total_change = usage_curr / ton_curr - usage_prev / ton_prev
         self.assertAlmostEqual(usage_effect + production_effect, total_change, places=9)
 
+    # ── 에너지 비용 집계 규칙 ────────────────────────────────────
+
+    def test_cost_bridge_splits_change_without_residual(self) -> None:
+        """비용 3단 분해는 세 효과의 합이 정확히 비용 증감과 같아야 한다."""
+        service = server.import_core("app.services.energy_cost_service")
+        bridge = service.cost_bridge(
+            {"cost": 1_050_000_000.0, "usage": 6_000_000.0, "production_ton": 17_000.0},
+            {"cost": 900_000_000.0, "usage": 5_600_000.0, "production_ton": 16_000.0},
+        )
+        self.assertAlmostEqual(service.bridge_residual(bridge), 0.0, places=4)
+        # 항등식이 우연히 맞은 게 아님을 보이려고 각 효과의 부호도 확인한다.
+        # 세 요인이 모두 비용을 밀어올린 사례다 — 부호가 뒤집히면 분해가 잘못된 것이다.
+        self.assertGreater(bridge["productionEffect"], 0)   # 생산 16,000 → 17,000 ton
+        self.assertGreater(bridge["efficiencyEffect"], 0)   # 원단위 350.00 → 352.94 (악화)
+        self.assertGreater(bridge["priceEffect"], 0)        # 단가 160.71 → 175.00
+        self.assertAlmostEqual(bridge["intensityPrev"], 350.0)
+        self.assertAlmostEqual(bridge["pricePrev"], 900_000_000 / 5_600_000)
+
+    def test_cost_bridge_refuses_when_denominator_missing(self) -> None:
+        """분모가 0인 구간은 0이 아니라 None — 비율을 만들 수 없는 구간을 위장하지 않는다."""
+        service = server.import_core("app.services.energy_cost_service")
+        empty = {"cost": 0.0, "usage": 0.0, "production_ton": 0.0}
+        full = {"cost": 1.0, "usage": 1.0, "production_ton": 1.0}
+        self.assertIsNone(service.cost_bridge(full, empty))
+        self.assertIsNone(service.cost_bridge(empty, full))
+
+    def test_weighted_price_denominator_excludes_unpriced_usage(self) -> None:
+        """단가 분모는 비용이 매겨진 사용량만 — 섞이면 가중평균이 구성원 범위를 벗어난다.
+
+        실측 회귀: 경산은 사용량이 2021년부터 있으나 비용은 2026-04부터라, 전체 합으로
+        나누면 전사 단가가 모든 개별 공장보다 낮게 나왔다(166 vs 180~184).
+        """
+        service = server.import_core("app.services.energy_cost_service")
+        priced_cost, priced_usage = 1_800_000.0, 10_000.0    # 180원/kWh
+        unpriced_usage = 5_000.0                              # 비용 미적재분
+        self.assertAlmostEqual(service.weighted_price(priced_cost, priced_usage), 180.0)
+        # 오염된 분모를 쓰면 단가가 구성원(180) 아래로 내려간다 — 이것이 회귀의 증상.
+        self.assertLess(
+            service.weighted_price(priced_cost, priced_usage + unpriced_usage), 180.0,
+        )
+        self.assertAlmostEqual(
+            service.cost_coverage(priced_usage, priced_usage + unpriced_usage), 2 / 3,
+        )
+
+    def test_bridge_reliability_requires_every_period(self) -> None:
+        service = server.import_core("app.services.energy_cost_service")
+        self.assertTrue(service.is_bridge_reliable(1.0, 1.0))
+        self.assertFalse(service.is_bridge_reliable(1.0, 0.5))
+        self.assertFalse(service.is_bridge_reliable(1.0, None))
+
+    def test_cod_average_ignores_unmeasured_zero(self) -> None:
+        """COD는 합이 아니라 평균이고, 미측정 공장의 0(경산 원수)은 평균을 끌어내리면 안 된다."""
+        service = server.import_core("app.services.energy_cost_service")
+        self.assertAlmostEqual(service.average_concentration([520.0, 480.0]), 500.0)
+        self.assertAlmostEqual(service.average_concentration([520.0, 0.0, 480.0, None]), 500.0)
+        self.assertIsNone(service.average_concentration([0.0, None]))
+
+    def test_cost_metric_scope_excludes_water(self) -> None:
+        """용수·폐수 처리비는 시스템 관리 대상이 아니다 — 지표 목록에 없어야 한다."""
+        service = server.import_core("app.services.energy_cost_service")
+        self.assertEqual(set(service.COST_METRICS), {"power", "fuel"})
+        self.assertEqual(service.COST_METRIC_KEYS, ("power", "fuel", "total"))
+        self.assertIsNone(service.metric_spec(service.TOTAL_METRIC))
+        for absent in ("water", "wastewater"):
+            self.assertFalse(service.is_supported_metric(absent))
+
+    def test_energy_cost_rejects_unknown_metric_before_query(self) -> None:
+        with (
+            patch.object(server, "fetch_one") as fetch_one,
+            self.assertRaises(server.HTTPException) as raised,
+        ):
+            server.energy_cost(factory="전사", metric="water")
+        self.assertEqual(raised.exception.status_code, 400)
+        fetch_one.assert_not_called()
+
     # ── 에너지 비용·단가·COD 적재 (2026-07 MIS 화면 개편) ─────────────
     # 이 6개 컬럼은 컬럼 목록 3곳·한글 매핑·마이그레이션에 나뉘어 등록된다.
     # 어긋나면 예외가 아니라 "값이 조용히 사라지거나 다른 컬럼에 들어가는" 형태로

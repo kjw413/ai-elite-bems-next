@@ -27,7 +27,7 @@ import threading
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 import pymysql
@@ -347,6 +347,41 @@ def optional_scalar(value: Any) -> float | None:
         return None
 
 
+def _round_or_none(value: float | None, digits: int) -> float | None:
+    """None 을 보존하는 반올림 — 결측을 0으로 바꾸지 않는다.
+
+    비용 화면은 '데이터 없음'과 '실제 0원'을 구분해야 한다(2024-01 이전 구간).
+    """
+    if value is None:
+        return None
+    rounded = round(value, digits)
+    return int(rounded) if digits <= 0 else rounded
+
+
+def _percent_text(ratio: float | None) -> str:
+    """0~1 비율을 사용자 문구용 백분율로. 결측은 '알 수 없음'."""
+    return "알 수 없음" if ratio is None else f"{ratio * 100:.0f}%"
+
+
+def _serialize_bridge(bridge: dict[str, Any] | None) -> dict[str, Any] | None:
+    """비용 원인분해를 화면 단위로 변환 — 금액은 백만원, 비율은 소수 1자리."""
+    if bridge is None:
+        return None
+    to_million = (
+        "previous", "current", "productionEffect", "efficiencyEffect", "priceEffect",
+    )
+    result: dict[str, Any] = {
+        key: round(bridge[key] / 1_000_000, 1) for key in to_million
+    }
+    for key in ("tonPrev", "tonCurr", "usagePrev", "usageCurr"):
+        result[key] = round(bridge[key], 1)
+    for key in ("intensityPrev", "intensityCurr", "pricePrev", "priceCurr"):
+        result[key] = round(bridge[key], 2)
+    for key in ("tonChange", "intensityChange", "priceChange", "usageChange", "costChange"):
+        result[key] = _round_or_none(bridge[key], 1)
+    return result
+
+
 def normalize_date(value: Any) -> date | None:
     if isinstance(value, datetime):
         return value.date()
@@ -427,6 +462,10 @@ def resolve_production_period(
 
 ENERGY_RANGE_MAX_DAYS = 731
 ENERGY_YOY_METRICS = ("power", "fuel", "water", "wastewater")
+
+# 일별 단가 추이 조회 폭. 전력단가의 주중/주말·피크 파형이 보이려면 최소 두어 달이
+# 필요하고, 그보다 길면 일 단위 파형이 뭉개져 월별 차트와 다를 바 없어진다.
+COST_DAILY_PRICE_DAYS = 90
 
 
 def resolve_energy_window(base: date, date_from: date | None, date_to: date | None) -> tuple[date, date]:
@@ -1499,6 +1538,370 @@ def intensity_analysis(
         "matrix": matrix,
         "bridge": bridge,
         "coverage": period_coverage(factory, window_from, window_to),
+    })
+
+
+def _monthly_production_ton(
+    actual_records: list[dict[str, Any]], factory: str, date_from: date, date_to: date,
+) -> dict[tuple[int, int], float]:
+    """(연, 월) → 생산톤. 비용 원인분해와 톤당 비용의 분모."""
+    monthly: dict[tuple[int, int], float] = {}
+    for production_date, production_kg in actual_production_daily_kg(
+        actual_records, factory, date_from, date_to,
+    ).items():
+        key = (production_date.year, production_date.month)
+        monthly[key] = monthly.get(key, 0.0) + production_kg / 1000
+    return monthly
+
+
+# 단가의 분모는 "비용이 매겨진 사용량"이어야 한다 — 비용 미적재일의 사용량이
+# 섞이면 단가가 그만큼 낮아진다(경산 사례, energy_cost_service.weighted_price 참고).
+# priced_* 는 비용·사용량이 모두 있는 날만 짝지어 합산한 값이다.
+_COST_SUM_SQL = """
+    COALESCE(SUM(power_cost_krw),0) power_cost,
+    COALESCE(SUM(total_power_kwh),0) power_usage,
+    COALESCE(SUM(CASE WHEN power_cost_krw>0 AND total_power_kwh>0
+                      THEN power_cost_krw ELSE 0 END),0) power_priced_cost,
+    COALESCE(SUM(CASE WHEN power_cost_krw>0 AND total_power_kwh>0
+                      THEN total_power_kwh ELSE 0 END),0) power_priced_usage,
+    COALESCE(SUM(fuel_cost_krw),0) fuel_cost,
+    COALESCE(SUM(fuel_nm3),0) fuel_usage,
+    COALESCE(SUM(CASE WHEN fuel_cost_krw>0 AND fuel_nm3>0
+                      THEN fuel_cost_krw ELSE 0 END),0) fuel_priced_cost,
+    COALESCE(SUM(CASE WHEN fuel_cost_krw>0 AND fuel_nm3>0
+                      THEN fuel_nm3 ELSE 0 END),0) fuel_priced_usage
+"""
+
+
+def _cost_row_totals(row: Mapping[str, Any], metric: str) -> dict[str, float | None]:
+    """집계 행 → {cost, usage, pricedCost, pricedUsage, coverage}.
+
+    metric='total' 은 전력+연료 비용 합이다. 사용량은 kWh 와 Nm³ 라 더할 수 없어
+    0 으로 두고 단가도 만들지 않는다 — 커버리지는 두 에너지원 중 낮은 쪽을 쓴다.
+    """
+    cost_service = import_core("app.services.energy_cost_service")
+
+    def source(prefix: str) -> dict[str, float | None]:
+        cost = scalar(row.get(f"{prefix}_cost"))
+        usage = scalar(row.get(f"{prefix}_usage"))
+        priced_cost = scalar(row.get(f"{prefix}_priced_cost"))
+        priced_usage = scalar(row.get(f"{prefix}_priced_usage"))
+        return {
+            "cost": cost, "usage": usage,
+            "pricedCost": priced_cost, "pricedUsage": priced_usage,
+            "coverage": cost_service.cost_coverage(priced_usage, usage),
+        }
+
+    if metric == cost_service.TOTAL_METRIC:
+        power, fuel = source("power"), source("fuel")
+        coverages = [c for c in (power["coverage"], fuel["coverage"]) if c is not None]
+        return {
+            "cost": power["cost"] + fuel["cost"], "usage": 0.0,
+            "pricedCost": power["pricedCost"] + fuel["pricedCost"], "pricedUsage": 0.0,
+            "coverage": min(coverages) if coverages else None,
+        }
+    spec = cost_service.COST_METRICS[metric]
+    return source("power" if spec["usage_col"] == "total_power_kwh" else "fuel")
+
+
+def _cost_totals(
+    factory: str, metric: str, date_from: date, date_to: date,
+) -> dict[str, float | None]:
+    """기간 비용·사용량 합계."""
+    clause, values = factory_clause(factory)
+    row = fetch_one(
+        f"SELECT {_COST_SUM_SQL} FROM energy_daily WHERE date BETWEEN %s AND %s" + clause,
+        (date_from, date_to, *values),
+    ) or {}
+    return _cost_row_totals(row, metric)
+
+
+def _fully_priced_members(
+    factory: str, metric: str, periods: tuple[tuple[date, date], ...],
+) -> tuple[list[str], list[str]]:
+    """비교 대상 모든 기간에서 비용이 완전히 적재된 물리 공장만 골라낸다.
+
+    원인분해는 C = Q × P 관계에 기대므로, 비용이 붙지 않은 사용량이 섞이면 성립하지
+    않는다. 그렇다고 전사 분해를 통째로 포기하면 기본 화면에서 핵심 기능이 사라지므로,
+    **완전한 공장만으로 다시 집계하고 제외된 공장을 함께 알린다.**
+
+    실측(2026-07): 경산은 사용량이 2021년부터 있으나 비용은 2026-04부터라
+    2025년 커버리지가 0% 다. 나머지 5개 공장은 두 기간 모두 100%.
+
+    Returns
+    -------
+    (eligible, excluded) — 공장 라벨 목록
+    """
+    cost_service = import_core("app.services.energy_cost_service")
+    eligible: list[str] = []
+    excluded: list[str] = []
+    for member in physical_factory_members(factory):
+        coverages = [
+            _cost_totals(member, metric, period_from, period_to)["coverage"]
+            for period_from, period_to in periods
+        ]
+        # 사용량 자체가 없는 기간(신설 전)은 판정에서 빼고 남은 기간으로 본다.
+        observed = [c for c in coverages if c is not None]
+        if observed and cost_service.is_bridge_reliable(*observed):
+            eligible.append(member)
+        else:
+            excluded.append(member)
+    return eligible, excluded
+
+
+def _aggregate_cost_totals(
+    members: list[str], metric: str, date_from: date, date_to: date,
+) -> dict[str, float | None]:
+    """여러 물리 공장의 비용·사용량 합계 — 원인분해용 부분 집계."""
+    combined: dict[str, float | None] = {
+        "cost": 0.0, "usage": 0.0, "pricedCost": 0.0, "pricedUsage": 0.0, "coverage": None,
+    }
+    for member in members:
+        totals = _cost_totals(member, metric, date_from, date_to)
+        for key in ("cost", "usage", "pricedCost", "pricedUsage"):
+            combined[key] = (combined[key] or 0.0) + (totals[key] or 0.0)
+    cost_service = import_core("app.services.energy_cost_service")
+    combined["coverage"] = cost_service.cost_coverage(combined["pricedUsage"], combined["usage"])
+    return combined
+
+
+@app.get("/api/v1/energy-cost")
+def energy_cost(
+    factory: str = "전사",
+    metric: str = "power",
+    requested_date: date | None = Query(None, alias="date"),
+) -> dict[str, Any]:
+    """에너지 비용 분석: KPI · 월별 비용/단가 · 3단 원인분해 · 공장 매트릭스 · 일별 단가.
+
+    비용·단가는 MIS RPA 가 energy_daily 에 일별로 적재한 실적을 그대로 쓴다
+    (사람이 입력하는 경로 없음). 집계 규칙은 energy_cost_service 가 단일 출처다 —
+    비용은 SUM, 단가는 Σ비용÷Σ사용량 가중평균.
+    """
+    cost_service = import_core("app.services.energy_cost_service")
+    if not cost_service.is_supported_metric(metric):
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 지표입니다: {metric}")
+    is_total = metric == cost_service.TOTAL_METRIC
+    spec = cost_service.metric_spec(metric)
+    data_start: date = cost_service.COST_DATA_START
+
+    max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
+    base = bounded_base_date(requested_date, max_row.get("max_date"))
+    prev_base = previous_year_date(base)
+    history_start = date(base.year - 1, 1, 1)
+
+    actual_frame = fetch_actual_production_frame(history_start, base)
+    actual_records = actual_production_records(actual_frame)
+    monthly_ton = _monthly_production_ton(actual_records, factory, history_start, base)
+
+    clause, values = factory_clause(factory)
+    monthly_rows = fetch_all(
+        f"SELECT YEAR(date) y, MONTH(date) m, {_COST_SUM_SQL}"
+        " FROM energy_daily WHERE date BETWEEN %s AND %s" + clause + " GROUP BY y,m ORDER BY y,m",
+        (history_start, base, *values),
+    )
+    monthly_totals: dict[tuple[int, int], dict[str, float | None]] = {
+        (int(row["y"]), int(row["m"])): _cost_row_totals(row, metric) for row in monthly_rows
+    }
+
+    def month_totals(key: tuple[int, int]) -> dict[str, float | None] | None:
+        """비용 적재 이전 달은 0 이 아니라 None — 0으로 그리면 '비용 0원인 달'로 읽힌다."""
+        if date(key[0], key[1], 1) < data_start.replace(day=1):
+            return None
+        totals = monthly_totals.get(key)
+        return totals if totals and totals["cost"] else None
+
+    def month_price(totals: dict[str, float | None] | None) -> float | None:
+        return None if totals is None else cost_service.weighted_price(
+            totals["pricedCost"], totals["pricedUsage"])
+
+    monthly: list[dict[str, Any]] = []
+    for month in range(1, 13):
+        curr = month_totals((base.year, month))
+        prev = month_totals((base.year - 1, month))
+        curr_cost = curr["cost"] if curr else None
+        prev_cost = prev["cost"] if prev else None
+        curr_price, prev_price = month_price(curr), month_price(prev)
+        curr_ton = monthly_ton.get((base.year, month))
+        prev_ton = monthly_ton.get((base.year - 1, month))
+        monthly.append({
+            "month": f"{month}월",
+            "cost": _round_or_none(curr_cost / 1_000_000 if curr_cost else None, 1),
+            "previousCost": _round_or_none(prev_cost / 1_000_000 if prev_cost else None, 1),
+            "costChange": _round_or_none(cost_service.rate_change(curr_cost, prev_cost), 1),
+            "price": _round_or_none(curr_price, 2),
+            "previousPrice": _round_or_none(prev_price, 2),
+            "priceChange": _round_or_none(cost_service.rate_change(curr_price, prev_price), 1),
+            "costPerTon": _round_or_none(cost_service.cost_per_ton(curr_cost, curr_ton), 0),
+            "previousCostPerTon": _round_or_none(cost_service.cost_per_ton(prev_cost, prev_ton), 0),
+            # 비용이 붙지 않은 사용량이 있는 달은 단가를 신뢰할 수 없다 — 화면이 흐리게 처리한다.
+            "coverage": _round_or_none(curr["coverage"] if curr else None, 3),
+        })
+
+    # KPI — 연 누계/당월 비용과 가중평균 단가, 그리고 단가 효과(= 단가가 전년 그대로였다면 아꼈을 금액)
+    def period_block(start: date, end: date, prev_start: date, prev_end: date) -> dict[str, Any]:
+        curr = _cost_totals(factory, metric, start, end)
+        prev = _cost_totals(factory, metric, prev_start, prev_end)
+        curr_ton = actual_production_kg(actual_records, factory, start, end) / 1000
+        prev_ton = actual_production_kg(actual_records, factory, prev_start, prev_end) / 1000
+        # C = Q × P 관계는 모든 사용량에 비용이 붙어 있을 때만 성립한다. 비용이 붙지
+        # 않은 사용량이 섞인 공장은 분해에서 빼고, 남은 공장만으로 다시 집계한다.
+        bridge = None
+        bridge_note = None
+        comparable_note = None
+        if not is_total:
+            eligible, excluded = _fully_priced_members(
+                factory, metric, ((start, end), (prev_start, prev_end)),
+            )
+            # 전년비도 같은 왜곡을 받는다 — 한쪽 기간에만 비용이 적재된 공장이 있으면
+            # 그 공장 비용이 통째로 '증가'로 잡힌다. 실측: 경산이 2025년 0원이라
+            # 전사 전력비가 +13.9% 로 보이지만, 경산을 빼면 오히려 감소다.
+            if excluded:
+                comparable_note = (
+                    f"{' · '.join(excluded)}은(는) 비교 기간 중 한쪽에만 비용이 적재되어 "
+                    "전년비가 동일 기준 비교가 아닙니다 — 증감 해석은 아래 원인분해를 보세요."
+                )
+            if not eligible:
+                bridge_note = (
+                    "비용이 적재되지 않은 사용량이 있어 원인분해를 표시하지 않습니다"
+                    f" (비용 반영률 금년 {_percent_text(curr['coverage'])}"
+                    f" · 전년 {_percent_text(prev['coverage'])})."
+                )
+            else:
+                bridge_curr = _aggregate_cost_totals(eligible, metric, start, end)
+                bridge_prev = _aggregate_cost_totals(eligible, metric, prev_start, prev_end)
+                bridge = cost_service.cost_bridge(
+                    {
+                        "cost": bridge_curr["cost"], "usage": bridge_curr["usage"],
+                        "production_ton": sum(
+                            actual_production_kg(actual_records, member, start, end)
+                            for member in eligible
+                        ) / 1000,
+                    },
+                    {
+                        "cost": bridge_prev["cost"], "usage": bridge_prev["usage"],
+                        "production_ton": sum(
+                            actual_production_kg(actual_records, member, prev_start, prev_end)
+                            for member in eligible
+                        ) / 1000,
+                    },
+                )
+                if excluded:
+                    bridge_note = (
+                        f"{' · '.join(excluded)} 제외 — 비교 기간에 비용이 적재되지 않은 "
+                        "사용량이 있어 원인분해에서 뺐습니다. 위 비용·단가는 전체 기준입니다."
+                    )
+        return {
+            "cost": round(curr["cost"] / 1_000_000, 1),
+            "previousCost": round(prev["cost"] / 1_000_000, 1),
+            "costChange": _round_or_none(cost_service.rate_change(curr["cost"], prev["cost"]), 1),
+            "price": _round_or_none(cost_service.weighted_price(curr["pricedCost"], curr["pricedUsage"]), 2),
+            "previousPrice": _round_or_none(cost_service.weighted_price(prev["pricedCost"], prev["pricedUsage"]), 2),
+            "costPerTon": _round_or_none(cost_service.cost_per_ton(curr["cost"], curr_ton), 0),
+            "coverage": _round_or_none(curr["coverage"], 3),
+            "previousCoverage": _round_or_none(prev["coverage"], 3),
+            "priceEffect": round(bridge["priceEffect"] / 1_000_000, 1) if bridge else None,
+            "bridge": _serialize_bridge(bridge),
+            "bridgeNote": bridge_note,
+            # 전년비를 동일 기준으로 비교할 수 있는지. False면 화면이 증감률에 주의 표식을 붙인다.
+            "costChangeComparable": comparable_note is None,
+            "costChangeNote": comparable_note,
+        }
+
+    ytd = period_block(
+        base.replace(month=1, day=1), base,
+        prev_base.replace(month=1, day=1), prev_base,
+    )
+    mtd = period_block(
+        base.replace(day=1), base, prev_base.replace(day=1), prev_base,
+    )
+    ytd["priceChange"] = _round_or_none(
+        cost_service.rate_change(ytd["price"], ytd["previousPrice"]), 1)
+    mtd["priceChange"] = _round_or_none(
+        cost_service.rate_change(mtd["price"], mtd["previousPrice"]), 1)
+
+    # 에너지원별 비용 구성 — 용수·폐수는 시스템 관리 대상이 아니므로 전력+연료 합이 100%다.
+    composition: list[dict[str, Any]] = []
+    composition_total = 0.0
+    for key in ("power", "fuel"):
+        curr = _cost_totals(factory, key, base.replace(month=1, day=1), base)
+        prev = _cost_totals(factory, key, prev_base.replace(month=1, day=1), prev_base)
+        composition_total += curr["cost"]
+        composition.append({
+            "metric": key,
+            "label": cost_service.COST_METRICS[key]["label"],
+            "cost": round(curr["cost"] / 1_000_000, 1),
+            "change": _round_or_none(cost_service.rate_change(curr["cost"], prev["cost"]), 1),
+        })
+    for entry in composition:
+        entry["share"] = round(entry["cost"] * 1_000_000 / composition_total * 100, 1) if composition_total > 0 else None
+
+    # 공장별 비용·단가 매트릭스 (YTD)
+    matrix: list[dict[str, Any]] = []
+    for display_factory in DISPLAY_FACTORIES:
+        curr = _cost_totals(display_factory, metric, base.replace(month=1, day=1), base)
+        prev = _cost_totals(display_factory, metric, prev_base.replace(month=1, day=1), prev_base)
+        if curr["cost"] <= 0:
+            continue
+        ton = actual_production_kg(actual_records, display_factory, base.replace(month=1, day=1), base) / 1000
+        price = cost_service.weighted_price(curr["pricedCost"], curr["pricedUsage"])
+        previous_price = cost_service.weighted_price(prev["pricedCost"], prev["pricedUsage"])
+        matrix.append({
+            "factory": display_factory,
+            "usage": round(curr["usage"], 1),
+            "cost": round(curr["cost"] / 1_000_000, 1),
+            "price": _round_or_none(price, 2),
+            "previousPrice": _round_or_none(previous_price, 2),
+            "priceChange": _round_or_none(cost_service.rate_change(price, previous_price), 1),
+            "costPerTon": _round_or_none(cost_service.cost_per_ton(curr["cost"], ton), 0),
+            "coverage": _round_or_none(curr["coverage"], 3),
+        })
+
+    # 일별 단가 추이 — 전력단가는 일별로 변동하고 연료단가는 월 단위 고정이라,
+    # 월 평균만 보면 주말 저부하 하락과 피크 상승이 상쇄되어 사라진다.
+    daily_price: list[dict[str, Any]] = []
+    if not is_total:
+        window_from = max(data_start, base - timedelta(days=COST_DAILY_PRICE_DAYS - 1))
+        # 비용이 붙은 사용량만 짝지어 합산한다 — 비용 미적재 공장이 섞인 날의
+        # 사용량을 분모에 넣으면 그 날 단가만 뚝 떨어져 파형이 거짓으로 흔들린다.
+        daily_rows = fetch_all(
+            f"""
+            SELECT date,
+                   COALESCE(SUM(CASE WHEN {spec['cost_col']}>0 AND {spec['usage_col']}>0
+                                     THEN {spec['cost_col']} ELSE 0 END),0) cost_sum,
+                   COALESCE(SUM(CASE WHEN {spec['cost_col']}>0 AND {spec['usage_col']}>0
+                                     THEN {spec['usage_col']} ELSE 0 END),0) usage_sum
+            FROM energy_daily WHERE date BETWEEN %s AND %s
+            """ + clause + " GROUP BY date ORDER BY date",
+            (window_from, base, *values),
+        )
+        for row in daily_rows:
+            row_date = normalize_date(row.get("date"))
+            cost_sum, usage_sum = scalar(row.get("cost_sum")), scalar(row.get("usage_sum"))
+            if row_date is None or cost_sum <= 0 or usage_sum <= 0:
+                continue
+            daily_price.append({
+                "date": row_date.strftime("%m.%d"),
+                "price": round(cost_sum / usage_sum, 2),
+                "usage": round(usage_sum, 1),
+            })
+
+    return json_safe({
+        "baseDate": base,
+        "metric": metric,
+        "label": spec["label"] if spec else "합계",
+        "priceUnit": spec["price_unit"] if spec else None,
+        "usageUnit": spec["usage_unit"] if spec else None,
+        "year": base.year,
+        "dataStart": data_start,
+        # 화면이 전력·연료 합을 총 에너지비로 오독하지 않도록 범위를 명시해 내려보낸다.
+        "scopeNote": "용수·폐수 처리비는 시스템 관리 대상이 아닙니다 — 아래 금액은 전력·연료 합입니다.",
+        "ytd": ytd,
+        "mtd": mtd,
+        "monthly": monthly,
+        "composition": composition,
+        "matrix": matrix,
+        "dailyPrice": daily_price,
+        "coverage": period_coverage(factory, base.replace(month=1, day=1), base),
     })
 
 
