@@ -8,16 +8,15 @@ Query Service
 import pandas as pd
 import streamlit as st
 from app.domain.factories import (
-    ENERGY_UNIT_CALC_MAP,
+    ENERGY_UNIT_COLUMNS,
     FACTORY_FILTER_OPTIONS,
     FACTORY_QUERY_ORDER,
     YOY_FACTORY_DEFS,
     expand_factory_filter,
     filter_factory_frame,
-    recalc_unit_rates,
+    weighted_stored_unit_rate,
 )
 from app.database.db_connection import get_connection
-from app.services.production_actual_service import overlay_actual_production
 
 # 사용량 컬럼 (합계 대상)
 USAGE_COLUMNS = [
@@ -30,15 +29,27 @@ USAGE_COLUMNS = [
     "mix_prod_kg",
 ]
 
-# 원단위 컬럼 (폐수 원단위는 폐기 — 폐수/용수 비로 대체)
-UNIT_CONSUMPTION_COLUMNS = [
-    "power_per_ton_kwh",
-    "fuel_per_ton_nm3",
-    "water_per_ton_ton",
-]
+# 원단위 컬럼 (RawDB_에너지 수식 결과, 폐수 원단위는 폐기)
+UNIT_CONSUMPTION_COLUMNS = list(ENERGY_UNIT_COLUMNS)
 
-# 원단위 계산 매핑: 원단위 컬럼 → 사용량 컬럼
-UNIT_CALC_MAP = dict(ENERGY_UNIT_CALC_MAP)
+
+def _aggregate_energy_rows(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
+    """사용량은 합산하고 RawDB 수식 원단위는 생산량 가중 평균한다."""
+    if df.empty:
+        return pd.DataFrame()
+    rows: list[dict] = []
+    group_key = group_cols[0] if len(group_cols) == 1 else group_cols
+    for keys, group in df.groupby(group_key, dropna=False, sort=True):
+        if len(group_cols) == 1:
+            keys = (keys,)
+        row = dict(zip(group_cols, keys))
+        for col in USAGE_COLUMNS:
+            if col in group.columns:
+                row[col] = pd.to_numeric(group[col], errors="coerce").sum(min_count=1)
+        for unit_col in UNIT_CONSUMPTION_COLUMNS:
+            row[unit_col] = weighted_stored_unit_rate(group, unit_col)
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 # 일별 데이터 값을 가져옵니다.
@@ -91,13 +102,9 @@ def get_daily_data(
     finally:
         conn.close()
 
-    # 생산량은 전 공장 공통으로 DB_생산실적(production_daily.actual_qty) 합계로 교체한다.
-    # RawDB_에너지의 mix_prod_kg는 원본 보존용이며 화면·원단위 계산에는 사용하지 않는다.
-    df = overlay_actual_production(df)
-
-    # 필터 처리 및 계산 로직
+    # RawDB_에너지의 mix_prod_kg와 수식 원단위를 그대로 유지한다.
+    # 필터 처리 및 집계 로직
     if factories is not None:
-        num_cols = [c for c in df.columns if c not in ("date", "factory", "id", "created_at", "updated_at", "changed_by")]
         parts = []
 
         if "전체" in factories:
@@ -107,16 +114,14 @@ def get_daily_data(
             if not df.empty:
                 jeonsa_src = df.copy()
                 jeonsa_src["factory"] = "전사"
-                jeonsa_agg = jeonsa_src.groupby(["date", "factory"], as_index=False)[num_cols].sum()
-                jeonsa_agg = recalc_unit_rates(jeonsa_agg)
+                jeonsa_agg = _aggregate_energy_rows(jeonsa_src, ["date", "factory"])
                 parts.append(jeonsa_agg)
 
         if "남양주" in factories:
             f10_src = filter_factory_frame(df, "남양주").copy()
             if not f10_src.empty:
                 f10_src["factory"] = "남양주"
-                f10_agg = f10_src.groupby(["date", "factory"], as_index=False)[num_cols].sum()
-                f10_agg = recalc_unit_rates(f10_agg)
+                f10_agg = _aggregate_energy_rows(f10_src, ["date", "factory"])
                 parts.append(f10_agg)
                 
         # 개별 요청된 실제 공장 데이터 유지
@@ -144,7 +149,7 @@ def get_monthly_data(
     """
     월별 집계 데이터.
     사용량 = SUM(일별 값)
-    원단위 = SUM(사용량) / SUM(mix_prod_kg / 1000)  ← 재계산
+    원단위 = RawDB_에너지 수식 결과의 믹스생산량 가중 평균
     """
     daily = get_daily_data(factories, date_from, date_to)
     if daily.empty:
@@ -153,14 +158,8 @@ def get_monthly_data(
     daily["date"] = pd.to_datetime(daily["date"])
     daily["year_month"] = daily["date"].dt.to_period("M").astype(str)
 
-    # 사용량 합계
-    agg_dict = {col: "sum" for col in USAGE_COLUMNS if col in daily.columns}
-    monthly = daily.groupby(["factory", "year_month"]).agg(agg_dict).reset_index()
+    return _aggregate_energy_rows(daily, ["factory", "year_month"])
 
-    # 원단위 재계산: SUM(사용량) / SUM(mix_prod_kg / 1000)
-    monthly = recalc_unit_rates(monthly)
-
-    return monthly
 
 
 # 전년 대비 데이터 값을 가져옵니다.
@@ -214,21 +213,13 @@ def get_yoy_data(
     if df.empty:
         return pd.DataFrame()
 
-    # 전년 비교도 일별 집계 전에 DB_생산실적을 오버레이해 모든 화면의 분모를 통일한다.
-    df = overlay_actual_production(df)
 
     df["date"] = pd.to_datetime(df["date"])
     df["year"] = df["date"].dt.year
     df["month"] = df["date"].dt.month
 
-    # 월별 집계
-    agg_dict = {col: "sum" for col in USAGE_COLUMNS if col in df.columns}
-    monthly = df.groupby(["year", "month"]).agg(agg_dict).reset_index()
+    return _aggregate_energy_rows(df, ["year", "month"])
 
-    # 원단위 재계산
-    monthly = recalc_unit_rates(monthly)
-
-    return monthly
 
 
 # 공장 값을 가져옵니다.
@@ -287,12 +278,9 @@ FACTORY_ORDER = list(FACTORY_QUERY_ORDER)
 
 
 # calc 단위 rate 관련 처리를 담당합니다.
-def _calc_unit_rate(df: pd.DataFrame, usage_col: str, prod_col: str = "mix_prod_kg"):
-    """집계된 DF에서 원단위 계산: SUM(usage) / SUM(prod_kg/1000)"""
-    total_prod_ton = df[prod_col].sum() / 1000
-    if total_prod_ton <= 0:
-        return None
-    return df[usage_col].sum() / total_prod_ton
+def _stored_unit_rate(df: pd.DataFrame, unit_col: str):
+    """RawDB_에너지 수식 원단위를 믹스생산량으로 가중 집계."""
+    return weighted_stored_unit_rate(df, unit_col)
 
 
 # 필터 공장 관련 처리를 담당합니다.
@@ -337,20 +325,11 @@ def get_7day_trend(base_date: str, factory: str = "전사") -> pd.DataFrame:
 
     df["date"] = pd.to_datetime(df["date"])
 
-    agg = df.groupby("date").agg({
-        "mix_prod_kg": "sum",
-        "total_power_kwh": "sum",
-        "fuel_nm3": "sum",
-        "water_ton": "sum",
-        "wastewater_ton": "sum",
-    }).reset_index()
-
-    agg["power_per_ton"] = agg.apply(
-        lambda r: r["total_power_kwh"] / (r["mix_prod_kg"] / 1000) if r["mix_prod_kg"] > 0 else None, axis=1)
-    agg["fuel_per_ton"] = agg.apply(
-        lambda r: r["fuel_nm3"] / (r["mix_prod_kg"] / 1000) if r["mix_prod_kg"] > 0 else None, axis=1)
-    agg["water_per_ton"] = agg.apply(
-        lambda r: r["water_ton"] / (r["mix_prod_kg"] / 1000) if r["mix_prod_kg"] > 0 else None, axis=1)
+    agg = _aggregate_energy_rows(df, ["date"]).rename(columns={
+        "power_per_ton_kwh": "power_per_ton",
+        "fuel_per_ton_nm3": "fuel_per_ton",
+        "water_per_ton_ton": "water_per_ton",
+    })
     # 폐수/용수 = 폐수량 / 용수량 (소수점 비율). 용수량 0이면 산출 불가(None).
     agg["wastewater_ratio"] = agg.apply(
         lambda r: r["wastewater_ton"] / r["water_ton"] if r["water_ton"] > 0 else None, axis=1)
@@ -395,7 +374,7 @@ def _build_comparison_row(
             return None
         if is_usage:
             return sub[usage_col].sum()
-        return _calc_unit_rate(sub, usage_col)
+        return _stored_unit_rate(sub, usage_col)
 
     curr_ytd_val = get_val(df_curr_ytd)
     curr_mtd_val = get_val(df_curr_mtd)
@@ -482,11 +461,11 @@ def get_unit_rate_comparison(base_date: str) -> pd.DataFrame:
     df_prev_ytd = get_daily_data(date_from=p["prev_ytd"][0], date_to=p["prev_ytd"][1])
     df_prev_mtd = get_daily_data(date_from=p["prev_mtd"][0], date_to=p["prev_mtd"][1])
 
-    # (라벨, usage_col, ratio_spec). ratio_spec 이 있으면 원단위 대신 비율을 계산.
+    # (라벨, unit_col, ratio_spec). ratio_spec 이 있으면 원단위 대신 비율을 계산.
     unit_defs = [
-        ("전력 원단위\n[kWh/mix-ton]", "total_power_kwh", None),
-        ("연료 원단위\n[Nm³/mix-ton]", "fuel_nm3", None),
-        ("용수 원단위\n[ton/mix-ton]", "water_ton", None),
+        ("전력 원단위\n[kWh/mix-ton]", "power_per_ton_kwh", None),
+        ("연료 원단위\n[Nm³/mix-ton]", "fuel_per_ton_nm3", None),
+        ("용수 원단위\n[ton/mix-ton]", "water_per_ton_ton", None),
         ("폐수/용수", None, ("wastewater_ton", "water_ton", 1.0)),
     ]
 
@@ -518,7 +497,7 @@ def get_production_usage_comparison(base_date: str) -> pd.DataFrame:
     df_prev_mtd = get_daily_data(date_from=p["prev_mtd"][0], date_to=p["prev_mtd"][1])
 
     usage_defs = [
-        ("생산량(DB 실적)\n[ton]", "mix_prod_kg"),
+        ("생산량(RawDB 믹스)\n[ton]", "mix_prod_kg"),
         ("전력 사용량\n[kWh]", "total_power_kwh"),
         ("연료 사용량\n[Nm³]", "fuel_nm3"),
         ("용수 사용량\n[ton]", "water_ton"),
@@ -582,9 +561,9 @@ def get_monthly_yoy_summary(year: int, month: int, data_type: str) -> pd.DataFra
         unit_pairs = [("prod", "mix_prod_kg")]
     elif data_type == "원단위":
         unit_pairs = [
-            ("power", "total_power_kwh"),
-            ("fuel",  "fuel_nm3"),
-            ("water", "water_ton"),
+            ("power", "power_per_ton_kwh"),
+            ("fuel",  "fuel_per_ton_nm3"),
+            ("water", "water_per_ton_ton"),
             ("wwratio", None),
         ]
     else:  # "사용량"
@@ -609,10 +588,8 @@ def get_monthly_yoy_summary(year: int, month: int, data_type: str) -> pd.DataFra
                 if total_water <= 0:
                     return None
                 return sub["wastewater_ton"].sum() / total_water
-            total_prod_ton = sub["mix_prod_kg"].sum() / 1000
-            if total_prod_ton <= 0:
-                return None
-            return sub[usage_col].sum() / total_prod_ton
+            return _stored_unit_rate(sub, usage_col)
+
         elif data_type == "생산량":
             return sub[usage_col].sum() / 1000
         else: # "사용량"

@@ -450,18 +450,18 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
   const isOperating = (row: AnyData) => medianTon <= 0 || (Number(row.productionTon) || 0) >= operatingThreshold;
   const dailySeries = operatingOnly ? measuredDays.filter(isOperating) : measuredDays;
   const excludedDays = measuredDays.length - dailySeries.length;
-  // 연간 '누계 추이 보기' (legacy 규칙, 원단위 페이지) — 각 월을 1월부터의 가중
-  // 누계 원단위(Σ사용량 ÷ Σ생산톤)로 재계산한다. 단순 월 원단위 평균과 다르다.
+  // 누계도 RawDB 수식 원단위를 엑셀 믹스생산량으로 가중 평균한다.
   const monthlyBase = data.monthly ?? [];
   const monthlySeries = (() => {
     if (!showCumulative) return monthlyBase;
-    let curUsage = 0, curTon = 0, prevUsage = 0, prevTon = 0;
+    let curWeighted = 0, curTon = 0, prevWeighted = 0, prevTon = 0;
     const targetPct = data.targetPct;
     return monthlyBase.map((row: AnyData) => {
-      curUsage += Number(row.currentUsage) || 0; curTon += Number(row.currentTon) || 0;
-      prevUsage += Number(row.previousUsage) || 0; prevTon += Number(row.previousTon) || 0;
-      const current = curTon > 0 && row.current != null ? Math.round(curUsage / curTon * 100) / 100 : null;
-      const previous = prevTon > 0 ? Math.round(prevUsage / prevTon * 100) / 100 : null;
+      const rowCurTon = Number(row.currentTon) || 0, rowPrevTon = Number(row.previousTon) || 0;
+      if (row.current != null && rowCurTon > 0) { curWeighted += Number(row.current) * rowCurTon; curTon += rowCurTon; }
+      if (row.previous != null && rowPrevTon > 0) { prevWeighted += Number(row.previous) * rowPrevTon; prevTon += rowPrevTon; }
+      const current = curTon > 0 ? Math.round(curWeighted / curTon * 100) / 100 : null;
+      const previous = prevTon > 0 ? Math.round(prevWeighted / prevTon * 100) / 100 : null;
       const target = previous != null && targetPct != null ? Math.round(previous * (1 - targetPct / 100) * 100) / 100 : null;
       return { month: row.month, current, previous, target };
     });
@@ -472,12 +472,10 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
     change: row.current != null && row.previous > 0 ? Math.round((row.current / row.previous - 1) * 1000) / 10 : null,
   }));
   const cumulative = data.yoyCumulative;
-  // 일별 원단위 표의 누계는 단순 평균이 아니라 가중 누계(Σ사용량÷Σ생산톤) — 서버가
-  // 각 날짜에 실어 보내는 usage/productionTon 원자료로 클라이언트가 재계산한다.
-  // 차트에서 비가동일을 빼도 누계는 전체 기간 기준이어야 실제 실적과 맞는다.
-  const dailyUsageTotal = measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.usage) || 0), 0);
+  // 일별 누계는 저장 원단위×엑셀 생산량의 가중 평균이다.
   const dailyTonTotal = measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.productionTon) || 0), 0);
-  const dailyWeightedTotal = dailyTonTotal > 0 ? Math.round(dailyUsageTotal / dailyTonTotal * 100) / 100 : null;
+  const dailyWeightedSum = measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.value) || 0) * (Number(row.productionTon) || 0), 0);
+  const dailyWeightedTotal = dailyTonTotal > 0 ? Math.round(dailyWeightedSum / dailyTonTotal * 100) / 100 : null;
   const monthlyLegend = useSeriesToggle();
   const showMonthlyTotal = Boolean(cumulative) && !showCumulative;
   const intensityEvents = groupEventsByLabel(
@@ -521,7 +519,7 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
           { key: "change", label: "증감률(%)", values: yoyRows.map((row: AnyData) => row.change), total: showMonthlyTotal ? cumulative.change : null,
             format: value => value == null ? "-" : `${Number(value) > 0 ? "+" : ""}${fmt(Number(value))}`,
             className: value => value == null ? undefined : Number(value) > 0 ? "bad" : "good" },
-        ]}/><p className="quad-caption">누계 추이 보기는 각 월을 1월부터의 가중 평균(Σ사용량 ÷ Σ생산톤)으로 다시 그립니다.</p></DataToggle></article>
+        ]}/><p className="quad-caption">누계 추이 보기는 RawDB 수식 원단위를 엑셀 믹스생산량으로 가중 평균합니다.</p></DataToggle></article>
       {bridge && <article className="card chart-card span-all">
         <CardTitle title="원단위 변동 원인" meta={`${bridgeScope === "ytd" ? "연 누계" : "당월"} · 전년 동기 대비 · ${data.unit}`}/>
         <div className="segmented" role="group" aria-label="원인분해 기간">

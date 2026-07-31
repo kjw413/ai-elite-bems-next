@@ -7,8 +7,8 @@ Daily Energy Alert Report Builder
 기준일은 월요일이다(토·일요일은 세지 않음).
 
   1) 공장×지표 단일 스냅샷 표 — 가로축(컬럼)=사업장(전사·남양주1·남양주2·김해·
-     광주·논산·경산), 세로축(행)=생산량+원단위 6종(전력·냉동전력·공압기전력·연료·
-     용수·폐수/용수). 각 셀은 기준일 실적과 전주 동일 요일 대비 증감률.
+     광주·논산·경산), 세로축(행)=생산량+원단위 3종(전력·연료·용수)+폐수/용수.
+     각 셀은 기준일 실적과 전주 동일 요일 대비 증감률.
   2) 즉시 점검 대상
      - 최근 7일 중앙값의 1%를 유효 변화 기준으로 사용
      - 두 가지 역행 조합만 경고 테이블로 요약: 생산량 감소+사용량 증가,
@@ -17,8 +17,8 @@ Daily Energy Alert Report Builder
 
 주간/월간 메일은 period_report_builder.py가 본 모듈의 공용 집계 함수 +
 차트 렌더러(_render_metric_grid_chart)를 재사용한다(일간 자체는 표만 사용, 차트 없음).
-생산량은 DB_생산실적 완제품을 기준으로 하되 광주는 DB_재공품 7품목과
-생산실적으로 기록되는 재공품 2품목(129998·129999)의 믹스 환산 생산량을 합산한다.
+생산량과 원단위는 RawDB_에너지.xlsx 동기화 값을 사용한다. 원단위는 엑셀 수식값을
+그대로 보존하고 여러 행을 합칠 때만 엑셀 믹스생산량으로 가중 평균한다.
 """
 
 from __future__ import annotations
@@ -39,7 +39,6 @@ from tools.mail.config import (
 from tools.mail.logger import get_logger
 from tools.mail.mail_service import InlineImage
 from app.database.db_connection import get_connection
-from app.services.production_actual_service import overlay_actual_production_rows
 from app.services.v5_common import load_holidays_excel
 
 log = get_logger("daily_report")
@@ -84,20 +83,13 @@ FACTORY_DISPLAY_ORDER: List[Tuple[str, Optional[List[str]]]] = [
 # 이전 버전의 icon(⚡🔥💧🚿🍦)은 사내 그룹웨어 "전달" 시 Namo 에디터의 sanitizer가
 # Supplementary Plane 이모지를 통째로 잘라내 빈 칸으로 보이는 이슈가 있어 제거.
 # 시각 구분은 header_bg + border-top color 만으로 유지한다.
-# SUM(사용량)/SUM(생산톤) 구조의 원단위 3종.
+# RawDB_에너지 수식 결과 열을 그대로 사용하는 원단위 3종.
 INTENSITY_METRICS = [
     {"key": "power",      "label": "전력 원단위", "unit": "kWh/ton",
      "color": "#F6C90E", "chart_color": "#D97706", "header_bg": "#FDF4CF", "cell_bg": "#FEFAEC",
      "usage_col": "total_power_kwh", "unit_col": "power_per_ton_kwh",
      "decimals": 2, "chart_decimals": 0, "table_decimals": 1, "invert": False},
-    {"key": "freezing_power", "label": "냉동전력 원단위", "unit": "kWh/ton",
-     "color": "#F6C90E", "chart_color": "#D97706", "header_bg": "#FDF4CF", "cell_bg": "#FEFAEC",
-     "usage_col": "freezing_power_kwh", "unit_col": "freezing_power_per_ton_kwh",
-     "decimals": 2, "chart_decimals": 0, "table_decimals": 1, "invert": False},
-    {"key": "air_compressor", "label": "공압기전력 원단위", "unit": "kWh/ton",
-     "color": "#F6C90E", "chart_color": "#D97706", "header_bg": "#FDF4CF", "cell_bg": "#FEFAEC",
-     "usage_col": "air_compressor_kwh", "unit_col": "air_compressor_per_ton_kwh",
-     "decimals": 2, "chart_decimals": 0, "table_decimals": 1, "invert": False},
+
     {"key": "fuel",       "label": "연료 원단위", "unit": "Nm³/ton",
      "color": "#E8450A", "chart_color": "#E8450A", "header_bg": "#FADACE", "cell_bg": "#FDF0EB",
      "usage_col": "fuel_nm3",        "unit_col": "fuel_per_ton_nm3",
@@ -551,11 +543,12 @@ def _fetch_rows_range(
     date_to: date,
     factories: Optional[List[str]] = None,
 ) -> List[dict]:
-    """기간 내 에너지 행을 조회하고 생산량은 운영 기준 실적으로 교체."""
+    """기간 내 RawDB_에너지 동기화 행과 수식 원단위를 조회."""
     sql = """
         SELECT factory, date,
                total_power_kwh, freezing_power_kwh, air_compressor_kwh,
-               fuel_nm3, water_ton, wastewater_ton, mix_prod_kg
+               fuel_nm3, water_ton, wastewater_ton, mix_prod_kg,
+               power_per_ton_kwh, fuel_per_ton_nm3, water_per_ton_ton
         FROM energy_daily
         WHERE date BETWEEN %s AND %s
     """
@@ -575,18 +568,17 @@ def _fetch_rows_range(
         cursor.close()
         conn.close()
 
-    return overlay_actual_production_rows(rows, date_from, date_to)
+    return rows
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 집계 / 포맷팅
 # ─────────────────────────────────────────────────────────────────────────────
 def _aggregate_weighted(rows: List[dict]) -> Optional[dict]:
-    """공장 행들을 합산해 전사 가중평균 원단위 산출.
+    """공장 행들을 합산하고 RawDB 수식 원단위를 생산량 가중 집계한다.
 
-    공식: SUM(usage) / (SUM(mix_prod_kg) / 1000) — 대시보드 _calc_unit_rate 와 동일.
-    mix_prod_kg=0 인 날(주말/유휴)의 사용량도 분자에 포함해야 MTD/YTD가 실제 운영
-    데이터와 정합하므로 행 필터링하지 않는다. 대시보드와 동일한 원단위 값을 보장.
+    Python에서 사용량/생산량으로 원단위를 다시 만들지 않는다. 여러 일자·공장을
+    합칠 때만 엑셀 수식값을 같은 엑셀 믹스생산량으로 가중 평균한다.
     """
     if not rows:
         return None
@@ -602,7 +594,16 @@ def _aggregate_weighted(rows: List[dict]) -> Optional[dict]:
     }
     prod_ton = agg["mix_prod_kg"] / 1000.0
     for m in INTENSITY_METRICS:
-        agg[m["unit_col"]] = (agg[m["usage_col"]] / prod_ton) if prod_ton > 0 else None
+        weighted = [
+            (float(r.get(m["unit_col"])), float(r.get("mix_prod_kg") or 0))
+            for r in rows
+            if float(r.get(m["unit_col"]) or 0) > 0 and float(r.get("mix_prod_kg") or 0) > 0
+        ]
+        weight_total = sum(weight for _value, weight in weighted)
+        agg[m["unit_col"]] = (
+            sum(value * weight for value, weight in weighted) / weight_total
+            if weight_total > 0 else None
+        )
     # 폐수/용수 = 폐수량 / 용수량 (소수점 비). 용수량 0이면 산출 불가(None).
     water = agg["water_ton"]
     agg[WASTEWATER_RATIO_METRIC["unit_col"]] = (

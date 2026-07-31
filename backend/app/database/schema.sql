@@ -19,12 +19,9 @@ CREATE TABLE IF NOT EXISTS energy_daily (
     -- 생산량
     mix_prod_kg             DOUBLE NOT NULL DEFAULT 0,
 
-    -- 원단위 (폐수 원단위는 폐기 — 폐수/용수 비로 대체, 화면/메일에서 즉석 계산)
-    -- ※ 저장값은 아무도 읽지 않는다 — 소비처 전부(화면·분석·예측·메일)가
-    --   overlay_actual_production*() 으로 mix_prod_kg 를 production_daily.actual_qty
-    --   합계로 덮어쓴 뒤 recalc_unit_rates() 로 원단위를 재계산한다.
-    --   2026-07 MIS 화면 개편으로 믹스생산량·원단위 수집이 중단되어 신규 날짜는 0 이
-    --   들어오지만, 그 때문에 화면 원단위가 틀어지지는 않는다(overlay 가 덮으므로).
+    -- 원단위: RawDB_에너지.xlsx 수식 결과가 단일 기준이다.
+    -- Python은 일별 값을 다시 계산하거나 덮어쓰지 않는다. 여러 일자·공장 집계만
+    -- 같은 파일의 mix_prod_kg를 가중치로 사용한다. 폐수는 폐수/용수 비로 대체한다.
     power_per_ton_kwh       DOUBLE NOT NULL DEFAULT 0,
     fuel_per_ton_nm3        DOUBLE NOT NULL DEFAULT 0,
     water_per_ton_ton       DOUBLE NOT NULL DEFAULT 0,

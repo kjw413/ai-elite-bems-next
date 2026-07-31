@@ -761,7 +761,7 @@ class ServerHelperTests(unittest.TestCase):
         self.assertEqual(yoy[0]["wastewater"], {"current": 1.8, "previous": 2.0})
 
     def test_weighted_intensity_cumulative_uses_same_period_weighted_average(self) -> None:
-        usage = {
+        weighted_values = {
             (2026, 1): 1000.0, (2026, 2): 1200.0,
             (2025, 1): 1100.0, (2025, 2): 1300.0, (2025, 3): 900.0,
         }
@@ -769,7 +769,7 @@ class ServerHelperTests(unittest.TestCase):
             (2026, 1): 10_000.0, (2026, 2): 8_000.0,
             (2025, 1): 10_000.0, (2025, 2): 10_000.0, (2025, 3): 9_000.0,
         }
-        result = server.weighted_intensity_yoy(usage, production_kg, 2026)
+        result = server.weighted_intensity_yoy(weighted_values, production_kg, 2026)
         self.assertIsNotNone(result)
         # 금년 실적이 있는 1~2월만 합산: (1000+1200)/(18톤) vs (1100+1300)/(20톤)
         self.assertEqual(result["months"], 2)
@@ -780,12 +780,12 @@ class ServerHelperTests(unittest.TestCase):
         self.assertIsNone(server.weighted_intensity_yoy({}, production_kg, 2026))
 
     def test_factory_yoy_entry_builds_intensity_usage_production(self) -> None:
-        current = {"power": 100_000.0, "fuel": 5_000.0, "water": 2_000.0, "wastewater": 1_000.0, "production": 50_000.0}
-        previous = {"power": 120_000.0, "fuel": 6_000.0, "water": 0.0, "wastewater": 500.0, "production": 60_000.0}
+        current = {"power": 100_000.0, "fuel": 5_000.0, "water": 2_000.0, "wastewater": 1_000.0, "production": 50_000.0, "power_intensity": 321.0, "fuel_intensity": 12.3, "water_intensity": 4.5}
+        previous = {"power": 120_000.0, "fuel": 6_000.0, "water": 0.0, "wastewater": 500.0, "production": 60_000.0, "power_intensity": 299.0, "fuel_intensity": 11.0, "water_intensity": 4.0}
         entry = server.factory_yoy_entry("김해", current, previous)
         self.assertEqual(entry["factory"], "김해")
-        self.assertAlmostEqual(entry["intensity"]["power"]["current"], 2000.0)   # 100000/50톤
-        self.assertAlmostEqual(entry["intensity"]["power"]["previous"], 2000.0)  # 120000/60톤
+        self.assertAlmostEqual(entry["intensity"]["power"]["current"], 321.0)    # 저장 원단위
+        self.assertAlmostEqual(entry["intensity"]["power"]["previous"], 299.0)   # 사용량/생산량 재계산 금지
         self.assertAlmostEqual(entry["intensity"]["wwratio"]["current"], 0.5)
         self.assertIsNone(entry["intensity"]["wwratio"]["previous"])             # 용수 0 → None
         self.assertAlmostEqual(entry["usage"]["power"]["current"], 100.0)        # kWh → MWh

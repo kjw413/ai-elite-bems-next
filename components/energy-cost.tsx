@@ -13,6 +13,9 @@ import {
   YAxis,
 } from "recharts";
 import { apiGet, query } from "@/lib/bems-api";
+import { DataToggle } from "@/components/data-toggle";
+import { PivotTable } from "@/components/pivot-table";
+import { ToggleLegend, useSeriesToggle, type LegendItem } from "@/components/toggle-legend";
 
 type CostMetric = "total" | "power" | "fuel";
 type CostScope = "ytd" | "mtd";
@@ -40,6 +43,7 @@ type CostPeriod = {
   previousPrice: NullableNumber;
   priceChange: NullableNumber;
   costPerTon: NullableNumber;
+  previousCostPerTon: NullableNumber;
   coverage: NullableNumber;
   previousCoverage: NullableNumber;
   bridge: CostBridge | null;
@@ -104,6 +108,7 @@ const emptyPeriod = (): CostPeriod => ({
   previousPrice: null,
   priceChange: null,
   costPerTon: null,
+  previousCostPerTon: null,
   coverage: null,
   previousCoverage: null,
   bridge: null,
@@ -134,6 +139,8 @@ const fmt = (value: unknown, digits = 1) =>
   typeof value === "number" && Number.isFinite(value)
     ? value.toLocaleString("ko-KR", { maximumFractionDigits: digits })
     : "-";
+const toThousandWonPerTon = (value: NullableNumber) => value == null ? null : value / 1000;
+
 
 const tooltipStyle = {
   contentStyle: {
@@ -205,6 +212,7 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
   const [data, setData] = useState<EnergyCostData>(() => emptyData("total"));
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(false);
+  const monthlyLegend = useSeriesToggle();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -229,15 +237,27 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
   }, [factory, requestedDate, metric]);
 
   const period = data[scope];
-  const monthly = useMemo(
-    () => data.monthly.filter(row => row.cost != null || row.previousCost != null),
-    [data.monthly],
-  );
   const isTotal = metric === "total";
   const secondaryKey = isTotal ? "costPerTon" : "price";
   const previousSecondaryKey = isTotal ? "previousCostPerTon" : "previousPrice";
   const secondaryLabel = isTotal ? "톤당 비용" : `${data.label} 단가`;
-  const secondaryUnit = isTotal ? "원/ton" : data.priceUnit ?? "원";
+  const secondaryUnit = isTotal ? "천원/ton" : data.priceUnit ?? "원";
+  const monthly = useMemo(
+    () => data.monthly
+      .filter(row => row.cost != null || row.previousCost != null)
+      .map(row => isTotal ? {
+        ...row,
+        costPerTon: toThousandWonPerTon(row.costPerTon),
+        previousCostPerTon: toThousandWonPerTon(row.previousCostPerTon),
+      } : row),
+    [data.monthly, isTotal],
+  );
+  const monthlyLegendItems = useMemo<LegendItem[]>(() => [
+    { key: "previousCost", label: "전년 비용", color: "var(--chart-previous)" },
+    { key: "cost", label: "금년 비용", color: "var(--chart-power)" },
+    { key: previousSecondaryKey, label: `전년 ${secondaryLabel}`, color: "var(--chart-target)" },
+    { key: secondaryKey, label: `금년 ${secondaryLabel}`, color: "var(--chart-fuel)" },
+  ], [previousSecondaryKey, secondaryKey, secondaryLabel]);
   const coverageNote = period.coverage != null && period.coverage < 0.99
     ? `비용 반영률 ${(period.coverage * 100).toFixed(1)}%`
     : undefined;
@@ -263,8 +283,8 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
     <section className="kpi-grid">
       <CostKpi label="연 누계 비용" value={data.ytd.cost} unit="백만원" change={data.ytd.costChange} note={data.ytd.coverage != null && data.ytd.coverage < 0.99 ? `비용 반영률 ${(data.ytd.coverage * 100).toFixed(1)}%` : undefined} icon={CircleDollarSign}/>
       <CostKpi label="당월 비용" value={data.mtd.cost} unit="백만원" change={data.mtd.costChange} icon={CircleDollarSign}/>
-      <CostKpi label={`연 누계 ${secondaryLabel}`} value={isTotal ? data.ytd.costPerTon : data.ytd.price} unit={secondaryUnit} change={isTotal ? null : data.ytd.priceChange} icon={Gauge}/>
-      <CostKpi label={`당월 ${secondaryLabel}`} value={isTotal ? data.mtd.costPerTon : data.mtd.price} unit={secondaryUnit} change={isTotal ? null : data.mtd.priceChange} icon={Gauge}/>
+      <CostKpi label={`연 누계 ${secondaryLabel}`} value={isTotal ? toThousandWonPerTon(data.ytd.costPerTon) : data.ytd.price} unit={secondaryUnit} change={isTotal ? null : data.ytd.priceChange} icon={Gauge}/>
+      <CostKpi label={`당월 ${secondaryLabel}`} value={isTotal ? toThousandWonPerTon(data.mtd.costPerTon) : data.mtd.price} unit={secondaryUnit} change={isTotal ? null : data.mtd.priceChange} icon={Gauge}/>
     </section>
 
     <section className="content-grid">
@@ -274,12 +294,19 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
           <ComposedChart data={monthly}>
             <CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis yAxisId="cost"/><YAxis yAxisId="secondary" orientation="right"/>
             <Tooltip {...tooltipStyle} formatter={(value: unknown, name: unknown) => [fmt(value, 2), String(name ?? "")]}/>
-            <Bar yAxisId="cost" dataKey="previousCost" name="전년 비용(백만원)" fill="var(--chart-previous)" opacity={0.45} radius={[3,3,0,0]} maxBarSize={22}/>
-            <Bar yAxisId="cost" dataKey="cost" name="금년 비용(백만원)" fill="var(--chart-power)" radius={[3,3,0,0]} maxBarSize={22}/>
-            <Line yAxisId="secondary" type="linear" dataKey={previousSecondaryKey} name={`전년 ${secondaryLabel}(${secondaryUnit})`} stroke="var(--chart-previous)" strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls={false}/>
-            <Line yAxisId="secondary" type="linear" dataKey={secondaryKey} name={`금년 ${secondaryLabel}(${secondaryUnit})`} stroke="var(--chart-fuel)" strokeWidth={2} dot={{ r: 3, fill: "var(--chart-fuel)", stroke: "var(--card)", strokeWidth: 2 }} connectNulls={false}/>
+            {!monthlyLegend.isHidden("previousCost") && <Bar yAxisId="cost" dataKey="previousCost" name="전년 비용(백만원)" fill="var(--chart-previous)" opacity={0.45} radius={[3,3,0,0]} maxBarSize={22}/>}
+            {!monthlyLegend.isHidden("cost") && <Bar yAxisId="cost" dataKey="cost" name="금년 비용(백만원)" fill="var(--chart-power)" radius={[3,3,0,0]} maxBarSize={22}/>}
+            {!monthlyLegend.isHidden(previousSecondaryKey) && <Line yAxisId="secondary" type="linear" dataKey={previousSecondaryKey} name={`전년 ${secondaryLabel}(${secondaryUnit})`} stroke="var(--chart-target)" strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls={false}/>}
+            {!monthlyLegend.isHidden(secondaryKey) && <Line yAxisId="secondary" type="linear" dataKey={secondaryKey} name={`금년 ${secondaryLabel}(${secondaryUnit})`} stroke="var(--chart-fuel)" strokeWidth={2} dot={{ r: 3, fill: "var(--chart-fuel)", stroke: "var(--card)", strokeWidth: 2 }} connectNulls={false}/>}
           </ComposedChart>
         </ResponsiveContainer></div>
+        <ToggleLegend items={monthlyLegendItems} hidden={monthlyLegend.hidden} onToggle={monthlyLegend.toggle}/>
+        <DataToggle><PivotTable periods={monthly.map(row => row.month)} periodLabel="월" totalLabel="YTD 누계" rows={[
+          { key: "previousCost", label: "전년 비용(백만원)", values: monthly.map(row => row.previousCost), total: data.ytd.previousCost, format: value => value == null ? "-" : fmt(Number(value), 1) },
+          { key: "cost", label: "금년 비용(백만원)", values: monthly.map(row => row.cost), total: data.ytd.cost, format: value => value == null ? "-" : fmt(Number(value), 1) },
+          { key: previousSecondaryKey, label: `전년 ${secondaryLabel}(${secondaryUnit})`, values: monthly.map(row => row[previousSecondaryKey]), total: isTotal ? toThousandWonPerTon(data.ytd.previousCostPerTon) : data.ytd.previousPrice, format: value => value == null ? "-" : fmt(Number(value), 2) },
+          { key: secondaryKey, label: `금년 ${secondaryLabel}(${secondaryUnit})`, values: monthly.map(row => row[secondaryKey]), total: isTotal ? toThousandWonPerTon(data.ytd.costPerTon) : data.ytd.price, format: value => value == null ? "-" : fmt(Number(value), 2) },
+        ]}/></DataToggle>
       </article>
 
       <article className="card chart-card">
@@ -303,7 +330,7 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
       <article className="card table-card span-all">
         <header className="card-title"><h3>공장별 비용·단가 매트릭스</h3><div className="card-title-side"><span>YTD</span></div></header>
         <div className="table-wrap"><table className="cost-matrix"><thead><tr><th>공장</th><th>비용(백만원)</th>{!isTotal && <th>사용량({data.usageUnit})</th>}<th>{secondaryLabel}({secondaryUnit})</th>{!isTotal && <th>단가 전년비</th>}<th>비용 반영률</th></tr></thead><tbody>
-          {data.matrix.map(row => <tr key={row.factory}><td>{row.factory}</td><td>{fmt(row.cost)}</td>{!isTotal && <td>{fmt(row.usage)}</td>}<td>{fmt(isTotal ? row.costPerTon : row.price, 2)}</td>{!isTotal && <td className={row.priceChange != null && row.priceChange <= 0 ? "good" : "bad"}>{row.priceChange == null ? "-" : `${row.priceChange > 0 ? "+" : ""}${fmt(row.priceChange)}%`}</td>}<td>{row.coverage == null ? "-" : `${(row.coverage * 100).toFixed(1)}%`}</td></tr>)}
+          {data.matrix.map(row => <tr key={row.factory}><td>{row.factory}</td><td>{fmt(row.cost)}</td>{!isTotal && <td>{fmt(row.usage)}</td>}<td>{fmt(isTotal ? toThousandWonPerTon(row.costPerTon) : row.price, 2)}</td>{!isTotal && <td className={row.priceChange != null && row.priceChange <= 0 ? "good" : "bad"}>{row.priceChange == null ? "-" : `${row.priceChange > 0 ? "+" : ""}${fmt(row.priceChange)}%`}</td>}<td>{row.coverage == null ? "-" : `${(row.coverage * 100).toFixed(1)}%`}</td></tr>)}
         </tbody></table></div>
       </article>
 

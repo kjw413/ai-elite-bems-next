@@ -45,8 +45,8 @@
 | legacy 섹션 | 현재 상태 | 격차 내용 |
 |---|---|---|
 | MTD/YTD 요약, 연간 월별 추이(전년/목표/금년), 공장 매트릭스 | ✅ | — |
-| 일별/기간별 원단위 추이 (공장 선택, 누계 토글) | ❌→✅ | **P1 당월/기간 지정 + P2 누계 추이 토글(Σ사용량÷Σ생산톤) 완료** |
-| 전년대비 원단위 월별 테이블 + 누계 행(가중평균 Σ사용량÷Σ생산톤) | ❌→✅ | **P1 반영(2026-07-17).** 가중 동월 누계 서버 계산 |
+| 일별/기간별 원단위 추이 (공장 선택, 누계 토글) | ❌→✅ | **P1 당월/기간 지정 + P2 누계 추이 토글(RawDB 수식 원단위의 생산량 가중평균) 완료** |
+| 전년대비 원단위 월별 테이블 + 누계 행(RawDB 수식 원단위 가중평균) | ❌→✅ | **P1 반영(2026-07-17).** 가중 동월 누계 서버 계산 |
 
 ### 1.4 생산실적 분석 (legacy `app/pages/production_performance.py`)
 
@@ -113,7 +113,7 @@
   - [x] 에너지 전력 설비 분해 — 일별 추이에 전체/냉동/공압/기타 라인(`freezing/compressor/other`)
   - [x] 공장별 폐수/용수 비율 — 용수·폐수 선택 시 비율 막대+CSV
   - [x] 원단위 일별·기간별 추이(`date_from/date_to`) + 전년대비 월별 테이블·**가중 누계 행**
-    (Σ사용량÷Σ생산톤, 동월 누계 — `weighted_intensity_yoy`)
+    (RawDB 수식 원단위의 생산량 가중평균, 동월 누계 — `weighted_intensity_yoy`)
   - [x] 모델 변수 영향도 — `GET /api/v1/model/feature-importance`(v5_explainability 위임,
     Top 5 한국어 라벨+요약 문장) + 예측 화면 카드
   - [ ] 예측 입력 데이터 편집(생산량·기온 수정, 엑셀 복붙 그리드) — 규모가 커서 잔여 P1로 유지
@@ -122,7 +122,7 @@
   - [x] 대시보드 에너지 구성 도넛 — `/dashboard` `composition`(YTD) + 도넛 4종, 공장 아이덴티티 색
     (legacy DASHBOARD_FACTORY_COLORS; 연접 페어 CVD WARN 6.2는 슬라이스 % 라벨·범례·툴팁으로 relief)
   - [x] 에너지 공장별 비교 라인 — `dailyByFactory`(전사 조회) + '공장별 비교' 토글
-  - [x] 원단위 일자 누계 토글 — 일별 응답에 usage·productionTon 추가, 클라이언트 누계 재계산
+  - [x] 원단위 일자 누계 토글 — 엑셀 수식 원단위와 mix_prod_kg로 클라이언트 가중 누계
   - [x] 생산: 연간 월별 전년비(`monthlyYoy`) / 미달·초과 Top 탭(`underItems`·`overItems`) /
     자동 인사이트(`build_production_insights` — legacy _generate_insights 규칙)
   - [x] 예측 모델 성능 감지 — `GET /api/v1/predictions/monitoring`(prediction_monitoring_service 위임)

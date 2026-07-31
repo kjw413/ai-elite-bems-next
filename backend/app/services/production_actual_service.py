@@ -1,11 +1,9 @@
-"""운영 기준 실제 생산량 조회와 energy_daily 오버레이.
+"""운영 기준 실제 생산량 조회와 선택적 energy_daily 생산량 오버레이.
 
-에너지 사용량은 ``energy_daily``에서 조회하되 생산량 분모는
-``production_daily.actual_qty`` 합계를 기본으로 사용한다. 광주는 여기에
-``DB_재공품.xlsx``의 판매용 재공품 7개 품목과 생산실적으로 기록되는 재공품
-2개 품목(129998·129999)을 믹스 kg로 환산해 합산한다.
-``energy_daily.mix_prod_kg``는 RawDB_에너지 원본 보존용 컬럼이며
-화면·메일·분석 계산에는 사용하지 않는다.
+생산 KPI·예측 특성처럼 운영 생산량이 필요한 소비처만
+``production_daily.actual_qty`` 합계를 사용한다. 광주는 판매용 재공품 환산량을
+추가한다. 에너지 원단위는 ``RawDB_에너지.xlsx`` 수식 결과가 단일 기준이므로
+이 모듈이 ``power_per_ton_kwh`` 등 원단위 열을 다시 계산하거나 수정하지 않는다.
 """
 from __future__ import annotations
 
@@ -18,7 +16,6 @@ from app.database.db_connection import get_connection
 from app.domain.factories import (
     FACTORY_CODE_TO_KR,
     expand_factory_members,
-    recalc_unit_rates,
 )
 from app.services.production_correction_service import (
     get_wip_daily,
@@ -142,11 +139,11 @@ def overlay_actual_production(
     *,
     actual: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """energy DataFrame의 생산량을 운영 기준 생산량으로 교체하고 원단위를 재계산.
+    """energy DataFrame의 생산량만 운영 기준 생산량으로 교체한다.
 
     광주는 DB_생산실적+판매용 재공품 환산량, 그 외 공장은 DB_생산실적이다.
     생산실적 행이 없는 공장·일자는 RawDB 예측값으로 되돌아가지 않고 0으로 둔다.
-    따라서 원단위도 NaN이 되어 미확정 생산량이 실제값처럼 노출되지 않는다.
+    RawDB_에너지의 원단위 수식 결과 열은 수정하지 않는다.
     """
     if energy is None or energy.empty:
         return energy
@@ -160,7 +157,7 @@ def overlay_actual_production(
         valid_dates = normalized_dates.dropna()
         if valid_dates.empty:
             out["mix_prod_kg"] = 0.0
-            return recalc_unit_rates(out)
+            return out
         actual = fetch_actual_production(valid_dates.min(), valid_dates.max())
 
     production_by_key = _actual_map(actual)
@@ -168,7 +165,7 @@ def overlay_actual_production(
         production_by_key.get((d, str(factory)), 0.0)
         for d, factory in zip(normalized_dates, out["factory"])
     ]
-    return recalc_unit_rates(out)
+    return out
 
 
 def overlay_actual_production_rows(

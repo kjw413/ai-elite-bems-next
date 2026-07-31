@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Mapping
-
 import pandas as pd
 
 
@@ -158,13 +156,13 @@ YOY_FACTORY_DEFS: tuple[tuple[str, str | None], ...] = (
     ("경산", "경산"),
 )
 
-ENERGY_UNIT_CALC_MAP: dict[str, str] = {
-    "power_per_ton_kwh": "total_power_kwh",
-    "fuel_per_ton_nm3": "fuel_nm3",
-    "water_per_ton_ton": "water_ton",
+ENERGY_UNIT_COLUMNS: tuple[str, ...] = (
+    "power_per_ton_kwh",
+    "fuel_per_ton_nm3",
+    "water_per_ton_ton",
     # 폐수 원단위(wastewater_per_ton_ton)는 폐기됨 — 대신 화면/메일에서
     # 폐수/용수 비(폐수량/용수량, 소수점 2자리)를 즉석 계산해 표시한다.
-}
+)
 
 
 def expand_factory_members(factory: str) -> tuple[str, ...]:
@@ -194,20 +192,23 @@ def filter_factory_frame(df: pd.DataFrame, db_code: str | None) -> pd.DataFrame:
     return df[df["factory"] == members[0]]
 
 
-def recalc_unit_rates(
+def weighted_stored_unit_rate(
     df: pd.DataFrame,
+    unit_col: str,
     *,
     production_col: str = "mix_prod_kg",
-    unit_calc_map: Mapping[str, str] = ENERGY_UNIT_CALC_MAP,
-) -> pd.DataFrame:
-    """Recalculate unit rates as SUM(usage) / SUM(production kg / 1000)."""
-    if df.empty or production_col not in df.columns:
-        return df
+) -> float | None:
+    """RawDB_에너지 수식 원단위를 믹스생산량으로 가중 집계한다.
 
-    denom_ton = pd.to_numeric(df[production_col], errors="coerce") / 1000.0
-    for unit_col, usage_col in unit_calc_map.items():
-        if usage_col not in df.columns:
-            continue
-        usage = pd.to_numeric(df[usage_col], errors="coerce")
-        df[unit_col] = (usage / denom_ton).where(denom_ton > 0)
-    return df
+    일별 원단위를 사용량/생산량으로 다시 만들지 않는다. 엑셀 수식 결과를
+    단일 기준으로 삼고, 여러 일자·공장을 합칠 때만 같은 엑셀 생산량으로
+    가중 평균한다.
+    """
+    if df.empty or unit_col not in df.columns or production_col not in df.columns:
+        return None
+    values = pd.to_numeric(df[unit_col], errors="coerce")
+    weights = pd.to_numeric(df[production_col], errors="coerce")
+    valid = values.gt(0) & weights.gt(0)
+    if not valid.any():
+        return None
+    return float((values[valid] * weights[valid]).sum() / weights[valid].sum())

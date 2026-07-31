@@ -20,7 +20,7 @@ MIS 에너지 수집 화면이 `유틸리티 일자별 사용량 추이` → `�
 | **파일 단일화** | `RawDB_에너지.xlsx` **하나만** 남음 (행=일자, 열=항목). 중간 산출물 `DB_에너지.xlsx` 와 재가공 단계(`build_dataset`) **폐지** |
 | **웹앱 입력 경로** | `v5_common.PATH_ENERGY_SOURCE` 가 **`RawDB_에너지.xlsx`** 를 가리켜야 함 ⚠ |
 | 신규 항목 | 전력비·전력단가·연료비·연료단가·원수COD·배출수COD 열 추가 |
-| 믹스생산량·원단위 | **수집 중단.** 열은 과거 값 보존용으로 유지, 신규 날짜는 공백 |
+| 믹스생산량·원단위 | `RawDB_에너지.xlsx`에서 유지. 원단위는 엑셀 수식으로 자동 갱신되며 DB에 그대로 적재 |
 | 데이터 기간 | 생산실적과 시간축을 맞추기 위해 2021~2023 삭제 → **2024-01 부터** |
 
 ### 왜 파일을 단일화했나
@@ -41,26 +41,15 @@ is_transposed=False
 즉 **경로만 바꾸면 기존 10개 항목은 그대로 적재되고, 신규 6개는 조용히 무시**됩니다.
 이 작업은 그 6개를 매핑에 추가해 무시되지 않게 만드는 것입니다.
 
-### 믹스생산량·원단위 수집을 중단한 근거
+### 믹스생산량·원단위 기준 변경
 
-이 레포가 이미 생산실적을 분모로 쓰고 있기 때문입니다 —
-[`query_service.py`](../backend/app/services/query_service.py) 의 주석 그대로:
+유틸리티 실적이 수정되면 같은 파일의 원단위도 즉시 따라 바뀌도록
+`RawDB_에너지.xlsx`의 수식 결과를 단일 기준으로 사용합니다.
 
-```python
-# RawDB_에너지의 mix_prod_kg는 원본 보존용이며 화면·원단위 계산에는 사용하지 않는다.
-df = overlay_actual_production(df)
-```
-
-소비처 전부가 `overlay_actual_production*()` 로 `mix_prod_kg` 를
-`production_daily.actual_qty` 합계로 덮어쓴 뒤 `recalc_unit_rates()` 로 원단위를
-재계산합니다 — 화면(`query_service`), 분석(`anomaly_diagnosis_service`),
-예측(`usage_prediction_v5_service`), 메일(`daily_report_builder`).
-즉 `energy_daily` 에 저장된 원단위 3개 컬럼은 **이미 아무도 읽지 않습니다.**
-
-전환 전 검증: 믹스생산량[kg] 과 생산실적 `actual_qty` 합계는 6개 공장 전부 비율 **1.000**
-(남양주1 1.000 / 남양주2 1.003 / 김해 1.011 / 광주·논산·경산 1.000). 일별로는 약 6% 날짜가
-1% 이상 어긋나는데(믹스 제조일과 포장일의 시차), 이 레포가 이미 생산실적 기준으로 정의를
-확정해 놓았으므로 새로 결정할 사항은 없습니다.
+- 일별 `power_per_ton_kwh`, `fuel_per_ton_nm3`, `water_per_ton_ton`은 엑셀 수식 결과를 그대로 DB에 적재합니다.
+- Python 조회·메일·분석 계층은 사용량÷운영 생산량으로 일별 원단위를 다시 만들거나 덮어쓰지 않습니다.
+- 여러 날짜나 공장을 합칠 때만 `SUM(원단위 × mix_prod_kg) / SUM(mix_prod_kg)`로 저장값을 가중 집계합니다.
+- 생산 화면의 운영 생산량(`production_daily` 및 광주 WIP 보정)은 별도 KPI로 유지하며 원단위 분모와
 
 ## 3. 입력 파일 스펙 — `RawDB_에너지.xlsx`
 
@@ -173,25 +162,19 @@ A열에 항목명이 들어오면) 행 필터가 되살아나 신규 6개가 사
 
 - **비용**(`power_cost_krw`, `fuel_cost_krw`) → `sum` 이 맞습니다.
 - **단가**(`power_price_krw_kwh`, `fuel_price_krw_nm3`) → `sum` 은 **무의미합니다.**
-  `SUM(비용) / SUM(사용량)` 가중평균으로 재계산해야 합니다. `recalc_unit_rates()` 와 같은
-  패턴이므로 `UNIT_CALC_MAP` 방식을 참고해 단가용 재계산을 추가하는 편이 자연스럽습니다.
+  `SUM(비용) / SUM(사용량)` 가중평균으로 집계해야 합니다. 원단위 저장값과는 별개의
+  비용·사용량 집계 규칙입니다.
 - **COD**(`influent_cod_ppm`, `effluent_cod_ppm`) → 농도이므로 `sum` 이 아니라 `mean`
   (엄밀히는 유량가중이지만 일별 유량이 없으므로 단순평균).
 
 이 세 종류를 `USAGE_COLUMNS` 에 그냥 넣으면 단가·COD 가 합산돼 터무니없는 값이 나옵니다.
 
-## 5. (선택) 미사용 원단위 컬럼 정리
+## 5. 원단위 컬럼 운영 원칙
 
-`power_per_ton_kwh` · `fuel_per_ton_nm3` · `water_per_ton_ton` 은 매 조회마다
-`recalc_unit_rates()` 로 재계산되므로 저장값이 쓰이지 않습니다. 두 가지 선택:
+`power_per_ton_kwh` · `fuel_per_ton_nm3` · `water_per_ton_ton`은 미사용 컬럼이 아니라
+엑셀 수식 결과의 저장 컬럼입니다. 삭제 대상에 넣지 않습니다. 동기화 후에는 대표 일자의
+엑셀 캐시값과 DB 값이 같은지 확인하고, 수식 셀이 비어 있는 신규 행은 원단위 미확정으로
 
-- **최소(권장)**: `schema.sql` 22~25행 주석에 "저장값 미사용 — overlay 후 재계산" 을 명시
-- **정리**: `db_connection.py:264` `_PENDING_COLUMN_DROPS` 에 추가해 제거.
-  `wastewater_per_ton_ton` 선례가 바로 그 자리에 있습니다. 단 `EXPECTED_COLUMNS` ·
-  `validate_columns` 가 필수 컬럼으로 검사하므로 파서 3곳을 함께 손봐야 하고,
-  `mix_prod_kg` 는 overlay 의 **대입 대상이므로 반드시 남겨야 합니다.**
-
-`RawDB_에너지.xlsx` 의 믹스·원단위 열(N~Q)은 과거 값 보존용이므로 **엑셀 쪽은 건드리지 않습니다.**
 
 ## 6. 검증 절차
 
