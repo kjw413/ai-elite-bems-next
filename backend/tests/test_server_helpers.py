@@ -1128,6 +1128,15 @@ class ServerHelperTests(unittest.TestCase):
         `전력량` 이 앞서면 냉동 전력이 전체 전력으로 들어간다.
         """
         parser = server.import_core("app.utils.excel_parser")
+        self.assertEqual(
+            parser.KOR_SUBSTR_MAP["냉동원단위"], "freezing_power_per_ton_kwh",
+        )
+        self.assertEqual(
+            parser.KOR_SUBSTR_MAP["공압기원단위"],
+            "air_compressor_per_ton_kwh",
+        )
+        self.assertIn("freezing_power_per_ton_kwh", parser.EXPECTED_COLUMNS)
+        self.assertIn("air_compressor_per_ton_kwh", parser.EXPECTED_COLUMNS)
         keys = list(parser.KOR_SUBSTR_MAP)
         for general in keys:
             for specific in keys:

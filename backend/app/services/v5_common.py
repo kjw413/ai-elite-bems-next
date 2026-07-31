@@ -143,6 +143,8 @@ ENERGY_UPLOAD_TO_MODEL_COLUMNS = {
     "influent_cod_ppm": "원수COD[ppm]",
     "effluent_cod_ppm": "배출수COD[ppm]",
     "mix_prod_kg": "믹스생산량[kg]",
+    "freezing_power_per_ton_kwh": "냉동원단위[kWh/mix-ton]",
+    "air_compressor_per_ton_kwh": "공압기원단위[kWh/mix-ton]",
     "power_per_ton_kwh": "전력원단위[kWh/mix-ton]",
     "fuel_per_ton_nm3": "연료원단위[N㎥/mix-ton]",
     "water_per_ton_ton": "용수원단위[ton/mix-ton]",

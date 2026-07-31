@@ -27,6 +27,8 @@ EXPECTED_COLUMNS = [
     "water_ton",
     "wastewater_ton",
     "mix_prod_kg",
+    "freezing_power_per_ton_kwh",
+    "air_compressor_per_ton_kwh",
     "power_per_ton_kwh",
     "fuel_per_ton_nm3",
     "water_per_ton_ton",
@@ -53,6 +55,8 @@ COLUMN_DISPLAY_NAMES = {
     "water_ton": "용수량 (ton)",
     "wastewater_ton": "폐수량 (ton)",
     "mix_prod_kg": "믹스생산량 (kg)",
+    "freezing_power_per_ton_kwh": "냉동전력 원단위 (kWh/ton)",
+    "air_compressor_per_ton_kwh": "공압기전력 원단위 (kWh/ton)",
     "power_per_ton_kwh": "전력 원단위 (kWh/ton)",
     "fuel_per_ton_nm3": "연료 원단위 (Nm³/ton)",
     "water_per_ton_ton": "용수 원단위 (ton/ton)",
@@ -82,6 +86,11 @@ COLUMN_DISPLAY_NAMES = {
 KOR_SUBSTR_MAP = {
     "날짜": "date",
     "일자": "date",
+    # RawDB 수식 원단위를 사용량 열보다 먼저 분리해야 한다. 특히 `공압기원단위`를
+    # 분리하지 않으면 아래 `공압기` 부분매칭에 걸려 사용량 열과 중복된다.
+    # 파싱한 값은 energy_daily에 그대로 적재하며 Python에서 다시 계산하지 않는다.
+    "냉동원단위": "freezing_power_per_ton_kwh",
+    "공압기원단위": "air_compressor_per_ton_kwh",
     "냉동전력량": "freezing_power_kwh",
     "공압기": "air_compressor_kwh",
     "공업기": "air_compressor_kwh",

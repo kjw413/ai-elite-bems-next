@@ -45,7 +45,7 @@ from tools.mail.daily_report_builder import (
 
 log = get_logger("period_report")
 
-# 월간 월별 MTD 추이 차트는 생산량을 제외한 원단위 4종만 2×2로 그린다
+# 월간 월별 MTD 추이 차트는 생산량을 제외한 원단위 6종을 3×2로 그린다
 # (생산량 자체의 전년비는 이미 섹션1 표에 있어 중복 표시하지 않음). daily의
 # INTENSITY_CHART_METRICS 와 동일 정의를 재사용해 필터링 로직 중복을 피한다.
 MONTHLY_CHART_METRICS = INTENSITY_CHART_METRICS

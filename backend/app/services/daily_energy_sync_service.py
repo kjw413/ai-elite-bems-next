@@ -49,6 +49,7 @@ _INSERT_COLUMNS = [
     "factory", "date",
     "freezing_power_kwh", "air_compressor_kwh", "total_power_kwh",
     "fuel_nm3", "water_ton", "wastewater_ton", "mix_prod_kg",
+    "freezing_power_per_ton_kwh", "air_compressor_per_ton_kwh",
     "power_per_ton_kwh", "fuel_per_ton_nm3",
     "water_per_ton_ton",
     # 2026-07 MIS 신규 수집분 — 비용·단가·COD
@@ -164,7 +165,7 @@ def _parse_korean_excel(path: Path) -> dict[str, pd.DataFrame]:
 # Excel/openpyxl이 datetime으로 인식한 셀은 그대로, 텍스트(`'YY-MM-DD`)로 인식한 셀은
 # 아포스트로피를 떼고 명시 포맷으로 파싱한다.
 def _coerce_date(v: Any) -> Any:
-    if v is None:
+    if v is None or pd.isna(v):
         return pd.NaT
     if isinstance(v, (datetime, pd.Timestamp)):
         return pd.Timestamp(v).normalize()

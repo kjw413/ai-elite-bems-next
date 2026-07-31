@@ -250,6 +250,12 @@ _PENDING_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
     ("anomaly_analysis", "pred_p95",      "ADD COLUMN pred_p95 DOUBLE DEFAULT NULL AFTER pred_p05"),
     ("anomaly_analysis", "band_status",   "ADD COLUMN band_status VARCHAR(16) DEFAULT NULL AFTER mape"),
     ("anomaly_analysis", "band_position", "ADD COLUMN band_position DOUBLE DEFAULT NULL AFTER band_status"),
+    # RawDB_에너지.xlsx 수식 결과를 원본 그대로 저장하는 설비별 원단위.
+    ("energy_daily", "freezing_power_per_ton_kwh",
+     "ADD COLUMN freezing_power_per_ton_kwh DOUBLE NOT NULL DEFAULT 0 AFTER mix_prod_kg"),
+    ("energy_daily", "air_compressor_per_ton_kwh",
+     "ADD COLUMN air_compressor_per_ton_kwh DOUBLE NOT NULL DEFAULT 0 "
+     "AFTER freezing_power_per_ton_kwh"),
     # 2026-07 MIS '원단위 실적입력(일단위)' 화면 신규 수집분 — 비용·단가·COD.
     # AFTER 를 앞 컬럼에 이어 붙여 schema.sql 의 CREATE 순서와 동일하게 맞춘다.
     ("energy_daily", "power_cost_krw",

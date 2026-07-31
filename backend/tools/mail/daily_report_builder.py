@@ -7,8 +7,8 @@ Daily Energy Alert Report Builder
 기준일은 월요일이다(토·일요일은 세지 않음).
 
   1) 공장×지표 단일 스냅샷 표 — 가로축(컬럼)=사업장(전사·남양주1·남양주2·김해·
-     광주·논산·경산), 세로축(행)=생산량+원단위 3종(전력·연료·용수)+폐수/용수.
-     각 셀은 기준일 실적과 전주 동일 요일 대비 증감률.
+     광주·논산·경산), 세로축(행)=생산량+원단위 5종(전력·냉동전력·공압기전력·
+     연료·용수)+폐수/용수. 각 셀은 기준일 실적과 전주 동일 요일 대비 증감률.
   2) 즉시 점검 대상
      - 최근 7일 중앙값의 1%를 유효 변화 기준으로 사용
      - 두 가지 역행 조합만 경고 테이블로 요약: 생산량 감소+사용량 증가,
@@ -83,13 +83,21 @@ FACTORY_DISPLAY_ORDER: List[Tuple[str, Optional[List[str]]]] = [
 # 이전 버전의 icon(⚡🔥💧🚿🍦)은 사내 그룹웨어 "전달" 시 Namo 에디터의 sanitizer가
 # Supplementary Plane 이모지를 통째로 잘라내 빈 칸으로 보이는 이슈가 있어 제거.
 # 시각 구분은 header_bg + border-top color 만으로 유지한다.
-# RawDB_에너지 수식 결과 열을 그대로 사용하는 원단위 3종.
+# RawDB_에너지 수식 결과 열을 그대로 사용하는 원단위 5종.
 INTENSITY_METRICS = [
     {"key": "power",      "label": "전력 원단위", "unit": "kWh/ton",
      "color": "#F6C90E", "chart_color": "#D97706", "header_bg": "#FDF4CF", "cell_bg": "#FEFAEC",
      "usage_col": "total_power_kwh", "unit_col": "power_per_ton_kwh",
      "decimals": 2, "chart_decimals": 0, "table_decimals": 1, "invert": False},
 
+    {"key": "freezing_power", "label": "냉동전력 원단위", "unit": "kWh/ton",
+     "color": "#F6C90E", "chart_color": "#D97706", "header_bg": "#FDF4CF", "cell_bg": "#FEFAEC",
+     "usage_col": "freezing_power_kwh", "unit_col": "freezing_power_per_ton_kwh",
+     "decimals": 2, "chart_decimals": 0, "table_decimals": 1, "invert": False},
+    {"key": "air_compressor", "label": "공압기전력 원단위", "unit": "kWh/ton",
+     "color": "#F6C90E", "chart_color": "#D97706", "header_bg": "#FDF4CF", "cell_bg": "#FEFAEC",
+     "usage_col": "air_compressor_kwh", "unit_col": "air_compressor_per_ton_kwh",
+     "decimals": 2, "chart_decimals": 0, "table_decimals": 1, "invert": False},
     {"key": "fuel",       "label": "연료 원단위", "unit": "Nm³/ton",
      "color": "#E8450A", "chart_color": "#E8450A", "header_bg": "#FADACE", "cell_bg": "#FDF0EB",
      "usage_col": "fuel_nm3",        "unit_col": "fuel_per_ton_nm3",
@@ -126,7 +134,7 @@ PRODUCTION_METRIC = {
 
 # 일일·주간·월간 메일 공통 — 사업장별 원단위 표 & 추이 차트의 지표 컬럼 정의.
 FACTORY_TABLE_METRICS = [PRODUCTION_METRIC] + INTENSITY_METRICS + [WASTEWATER_RATIO_METRIC]
-# 원단위 4종(생산량 제외) — 추이 차트 전용. 일간/주간/월간 차트 모두 생산량을 별도
+# 원단위 6종(생산량 제외) — 추이 차트 전용. 일간/주간/월간 차트 모두 생산량을 별도
 # 서브플롯으로 그리지 않고, 각 원단위 차트에 배경 막대로 함께 표시해(_render_metric_grid_chart
 # 의 overlay_series) 생산↕·원단위↕ 조합을 한 차트에서 바로 비교할 수 있게 한다.
 INTENSITY_CHART_METRICS = [m for m in FACTORY_TABLE_METRICS if m["key"] != "production"]
@@ -548,6 +556,7 @@ def _fetch_rows_range(
         SELECT factory, date,
                total_power_kwh, freezing_power_kwh, air_compressor_kwh,
                fuel_nm3, water_ton, wastewater_ton, mix_prod_kg,
+               freezing_power_per_ton_kwh, air_compressor_per_ton_kwh,
                power_per_ton_kwh, fuel_per_ton_nm3, water_per_ton_ton
         FROM energy_daily
         WHERE date BETWEEN %s AND %s
