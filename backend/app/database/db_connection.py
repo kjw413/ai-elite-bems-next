@@ -264,12 +264,58 @@ _PENDING_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
      "ADD COLUMN influent_cod_ppm DOUBLE NOT NULL DEFAULT 0 AFTER fuel_price_krw_nm3"),
     ("energy_daily", "effluent_cod_ppm",
      "ADD COLUMN effluent_cod_ppm DOUBLE NOT NULL DEFAULT 0 AFTER influent_cod_ppm"),
+    # energy_monthly/production_monthly 는 최초 CREATE 에 changed_by 를 빠뜨렸다가
+    # 곧바로 추가했다 — 다른 관리자 편집 테이블(savings_target 등)과 감사 추적
+    # 관례를 맞추기 위함. _PENDING_TABLE_CREATES 의 CREATE 문은 이미 changed_by 를
+    # 포함하므로 신규 설치에는 이 항목이 필요 없고, 먼저 만들어진 기존 DB에만 적용된다.
+    ("energy_monthly", "changed_by", "ADD COLUMN changed_by TEXT"),
+    ("production_monthly", "changed_by", "ADD COLUMN changed_by TEXT"),
 ]
 
 _PENDING_INDEX_MIGRATIONS: list[tuple[str, str, str]] = [
     # (table, index_name, CREATE INDEX fragment)
     ("prediction_log", "idx_pred_band_status",
      "CREATE INDEX idx_pred_band_status ON prediction_log (band_status, pred_date)"),
+]
+
+# 신규 테이블(멱등). schema.sql 에도 같은 DDL 을 넣어 신규 설치를 커버하고,
+# 기존 DB 에는 이 목록을 통해 apply_migrations.py 가 생성한다 — 두 곳이 단일
+# 출처가 아니라는 점은 감수한다(_PENDING_COLUMN_MIGRATIONS 와 같은 기존 관례).
+# CREATE TABLE IF NOT EXISTS 자체가 멱등이라 여러 번 실행해도 안전하다.
+_PENDING_TABLE_CREATES: list[tuple[str, str]] = [
+    ("energy_monthly", """
+        CREATE TABLE IF NOT EXISTS energy_monthly (
+            id              INT AUTO_INCREMENT PRIMARY KEY,
+            factory         VARCHAR(50) NOT NULL,
+            month_key       CHAR(7)     NOT NULL,
+            total_power_kwh DOUBLE NOT NULL DEFAULT 0,
+            fuel_nm3        DOUBLE NOT NULL DEFAULT 0,
+            water_ton       DOUBLE NOT NULL DEFAULT 0,
+            wastewater_ton  DOUBLE NOT NULL DEFAULT 0,
+            power_cost_krw  DOUBLE NOT NULL DEFAULT 0,
+            fuel_cost_krw   DOUBLE NOT NULL DEFAULT 0,
+            source          VARCHAR(20) NOT NULL DEFAULT 'manual',
+            created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            changed_by      TEXT,
+            UNIQUE KEY uq_energy_monthly (factory, month_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """),
+    ("production_monthly", """
+        CREATE TABLE IF NOT EXISTS production_monthly (
+            id          INT AUTO_INCREMENT PRIMARY KEY,
+            factory     VARCHAR(20) NOT NULL,
+            month_key   CHAR(7)     NOT NULL,
+            category2   VARCHAR(50) NOT NULL,
+            planned_qty DOUBLE NOT NULL DEFAULT 0,
+            actual_qty  DOUBLE NOT NULL DEFAULT 0,
+            source      VARCHAR(20) NOT NULL DEFAULT 'manual',
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            changed_by  TEXT,
+            UNIQUE KEY uq_production_monthly (factory, month_key, category2)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """),
 ]
 
 # 폐기된 컬럼의 멱등 DROP. 컬럼이 존재할 때만 ALTER DROP 을 1회 수행한다.
@@ -282,8 +328,21 @@ _PENDING_COLUMN_DROPS: list[tuple[str, str, str]] = [
 
 
 def _apply_idempotent_migrations() -> None:
-    """INFORMATION_SCHEMA 기반으로 ALTER 누락분만 적용."""
+    """INFORMATION_SCHEMA 기반으로 ALTER/CREATE 누락분만 적용."""
     with managed_cursor(with_db=True, admin=True) as (conn, cur):
+        for table, create_sql in _PENDING_TABLE_CREATES:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+                """,
+                (DB_NAME, table),
+            )
+            (exists_count,) = cur.fetchone()
+            if exists_count == 0:
+                cur.execute(create_sql)
+                print(f"  migration: table {table} created")
+
         for table, column, alter_fragment in _PENDING_COLUMN_MIGRATIONS:
             cur.execute(
                 """

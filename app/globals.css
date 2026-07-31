@@ -351,3 +351,60 @@ nav button.unsupported:hover{background:transparent;color:#a9b6c9}
 .cost-matrix th,.cost-matrix td{text-align:right;white-space:nowrap}
 .cost-matrix th:first-child,.cost-matrix td:first-child{text-align:left;font-weight:700}
 @media(max-width:760px){.cost-toolbar .period-chip{width:100%;margin-left:0}.cost-monthly-chart{height:280px}.cost-bridge-basis{display:grid}.energy-view-switch{display:flex}.energy-view-switch button{flex:1}}
+/* 월별 실적 백필(경산 등 일단위 실적 없는 구간) — 엑셀형 입력 그리드 */
+.admin-grid.single{grid-template-columns:1fr}
+.monthly-backfill{padding:20px;min-width:0}
+.backfill-filters{display:flex;flex-wrap:wrap;gap:10px;margin:15px 0 12px}
+.backfill-filters .field{min-width:136px;flex:0 1 auto}
+.backfill-hint{display:flex;align-items:flex-start;gap:9px;border:1px dashed #b8cdf0;background:#f2f7ff;color:#38547e;border-radius:9px;padding:10px 13px;margin-bottom:14px}
+.backfill-hint svg{flex:none;margin-top:1px}
+.backfill-hint p{margin:0;font-size:11.5px;line-height:1.65}
+.backfill-hint b{font-weight:800;color:#264a7d}
+
+/* 셀 사이 여백 없이 맞붙는 격자 — border-spacing:0 + 셀 자체에 경계선.
+   sticky 헤더·첫 열이 border-collapse:collapse 에서 경계선을 잃는 문제를 피한다. */
+.backfill-grid-wrap{overflow:auto;max-height:60vh;border:1px solid var(--line);border-radius:9px;background:var(--card)}
+/* min-width 가 없으면 table-layout:fixed 가 좁은 화면에서 열을 눌러 값이 잘린다 —
+   가로 스크롤이 생기도록 최소 너비를 colgroup 합계로 잡아 둔다. */
+.backfill-grid{width:100%;min-width:1050px;border-collapse:separate;border-spacing:0;table-layout:fixed}
+.backfill-grid th,.backfill-grid td{padding:0;border:0;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.backfill-grid th:last-child,.backfill-grid td:last-child{border-right:0}
+.backfill-grid tbody tr:last-child th,.backfill-grid tbody tr:last-child td{border-bottom:0}
+.backfill-grid thead th{position:sticky;top:0;z-index:2;background:#f4f6fa;padding:8px 9px;text-align:center;
+  white-space:nowrap;font-size:10.5px;font-weight:700;color:#57667e;line-height:1.4}
+.backfill-grid thead th small{display:block;font-weight:500;font-size:9.5px;color:var(--muted);font-family:var(--mono);margin-top:1px}
+.backfill-grid th.col-month{position:sticky;left:0;background:var(--card);border-right:1px solid #cfd8e4;
+  text-align:left;font-weight:600;padding:0 10px;z-index:1}
+.backfill-grid thead th.col-month{z-index:3;background:#f4f6fa;text-align:center;padding:8px 9px}
+/* th 자체에 display:flex 를 주면 테이블 레이아웃에서 빠져 열 정렬이 깨진다 —
+   내부 래퍼로 flex 를 준다. */
+.backfill-grid tbody th.col-month{vertical-align:middle;font-family:var(--mono);font-size:11px;color:#3d4a5f}
+.backfill-grid .month-cell{display:flex;align-items:center;gap:6px;height:34px;white-space:nowrap}
+.backfill-grid .month-cell em{font-style:normal;font-size:9px;font-weight:800;color:#8a94a5;
+  background:#eef1f6;border-radius:5px;padding:2px 5px;letter-spacing:.2px;cursor:help}
+.backfill-grid tbody tr:hover th.col-month,.backfill-grid tbody tr:hover td{background:#f7f9fc}
+.backfill-grid input{width:100%;height:34px;border:0;background:transparent;padding:0 9px;font:inherit;
+  font-size:11.5px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text);outline:0}
+.backfill-grid input:focus{background:#e9f0ff;box-shadow:inset 0 0 0 2px var(--accent)}
+.backfill-grid input:disabled{background:#f6f7fa;color:#8b95a6}
+.backfill-grid input.invalid{background:#fff0f2;color:#ae2638;font-weight:700}
+.backfill-grid tr.covered th.col-month{color:#98a1b0}
+.backfill-grid tr.covered input{color:#98a1b0}
+
+.backfill-footer{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px}
+.backfill-count{font-size:11.5px;color:var(--muted)}
+.backfill-count b{color:var(--text)}
+.backfill-count em{font-style:normal;color:var(--red);font-weight:700}
+@media(max-width:760px){.backfill-filters .field{flex:1 1 140px}.backfill-grid-wrap{max-height:52vh}}
+
+[data-theme="dark"] .backfill-hint{border-color:#2c4270;background:#17294c;color:var(--tint-blue-tx)}
+[data-theme="dark"] .backfill-hint b{color:#cfe0ff}
+[data-theme="dark"] .backfill-grid thead th,[data-theme="dark"] .backfill-grid thead th.col-month{background:#18202f}
+[data-theme="dark"] .backfill-grid th,[data-theme="dark"] .backfill-grid td{border-color:var(--soft)}
+[data-theme="dark"] .backfill-grid th.col-month{background:var(--card);border-right-color:#33405a}
+[data-theme="dark"] .backfill-grid tbody th.col-month{color:#b6c1d4}
+[data-theme="dark"] .backfill-grid .month-cell em{background:var(--chip);color:var(--chip-tx)}
+[data-theme="dark"] .backfill-grid tbody tr:hover th.col-month,[data-theme="dark"] .backfill-grid tbody tr:hover td{background:#1a2334}
+[data-theme="dark"] .backfill-grid input:focus{background:#1c2b51}
+[data-theme="dark"] .backfill-grid input:disabled{background:#1a2130;color:#77849b}
+[data-theme="dark"] .backfill-grid input.invalid{background:#33161c;color:#f09aa6}

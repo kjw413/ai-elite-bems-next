@@ -702,6 +702,14 @@ def _prod_factory_codes(f: str) -> list[str]:
             FACTORY_KR_TO_CODE[factory]
             for factory in FACTORY_PHYSICAL_DISPLAY_ORDER
         ] + [NAMYANGJU_PARENT_CODE]
+    # "전사(경산 제외)" — 이 함수는 딕셔너리 폴백이 없어(마지막 줄이 [f] 리터럴
+    # 반환) 다른 라벨처럼 자동으로 처리되지 않는다. 명시 분기가 필요하다.
+    # (f는 위에서 이미 upper() 처리됨 — 한글은 대소문자가 없어 원문과 동일)
+    if f == "전사(경산 제외)":
+        return [
+            FACTORY_KR_TO_CODE[factory]
+            for factory in FACTORY_PHYSICAL_DISPLAY_ORDER if factory != "경산"
+        ] + [NAMYANGJU_PARENT_CODE]
     return [f]
 
 

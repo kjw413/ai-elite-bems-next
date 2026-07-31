@@ -17,7 +17,6 @@ import pandas as pd
 from app.database.db_connection import get_connection
 from app.domain.factories import (
     FACTORY_CODE_TO_KR,
-    FACTORY_PHYSICAL_DISPLAY_ORDER,
     expand_factory_members,
     recalc_unit_rates,
 )
@@ -197,10 +196,12 @@ def get_actual_production_kg(factory: str, target_date: date | str) -> float | N
     actual = fetch_actual_production(target_date, target_date)
     if actual.empty:
         return None
-    if factory in ("전사", "전체"):
-        members = set(FACTORY_PHYSICAL_DISPLAY_ORDER)
-    else:
-        members = set(expand_factory_members(factory))
+    # expand_factory_members("전사") 는 AGGREGATE_FACTORY_MEMBERS 를 통해 이미
+    # FACTORY_PHYSICAL_DISPLAY_ORDER 와 동일한 튜플을 반환한다 — 예전엔 이 함수가
+    # "전사"/"전체"를 별도 분기로 하드코딩했는데, 그러면 "전사(경산 제외)" 같은
+    # 새 집계 라벨이 이 분기를 타지 않아도 결과가 같아 버그가 드러나지 않는다.
+    # 딕셔너리 조회 하나로 합쳐 새 라벨도 자동으로 옳게 동작하게 한다.
+    members = set(expand_factory_members(factory))
     selected = actual[actual["factory"].isin(members)]
     if selected.empty:
         return None

@@ -243,7 +243,22 @@ FACTORY_MEMBERS = {
     "전사": [],
     "전체": [],
     "남양주": ["남양주1", "남양주2"],
+    # 경산은 실적 시작일이 2026-04라 5개 공장과 전년비 동일 기준 비교가 안 된다
+    # (경산만 전년 실적이 없어 증가분이 통째로 얹힘 — energy_cost() 의 costChangeNote
+    # 참고). 딕셔너리 조회 기반인 factory_clause()/physical_factory_members() 는
+    # 이 등록만으로 자동으로 5개 공장만 필터링한다.
+    "전사(경산 제외)": ["남양주1", "남양주2", "김해", "광주", "논산"],
 }
+
+# server.py는 app/domain/factories.py를 import하지 않고(그 모듈은 import_core로
+# 동적 로드되는 "core" 서비스들만 쓴다) 자체 상수를 둔다 — FACTORY_MEMBERS/
+# PRODUCTION_FACTORY_CODES 등 이미 있는 중복과 같은 패턴. "전사 전용 기능을
+# 켤 것인가"라는 동작 분기 전용이며, 필터는 위 FACTORY_MEMBERS(딕셔너리 조회)가 담당한다.
+COMPANY_WIDE_LABELS = frozenset({"전사", "전체", "전사(경산 제외)"})
+
+
+def is_company_wide(factory: str) -> bool:
+    return factory in COMPANY_WIDE_LABELS
 PHYSICAL_FACTORIES = ["남양주1", "남양주2", "김해", "광주", "논산", "경산"]
 DISPLAY_FACTORIES = ["남양주", "김해", "광주", "논산", "경산"]
 
@@ -254,6 +269,7 @@ PREDICTION_FACTORIES = ["남양주1", "남양주2", "김해", "광주", "논산"
 PRODUCTION_FACTORY_CODES: dict[str, tuple[str, ...]] = {
     "전사": ("F10", "F10A", "F10B", "F20", "F30", "F40", "F50"),
     "전체": ("F10", "F10A", "F10B", "F20", "F30", "F40", "F50"),
+    "전사(경산 제외)": ("F10", "F10A", "F10B", "F20", "F30", "F40"),
     "남양주": ("F10", "F10A", "F10B"),
     "남양주1": ("F10A", "F10"),
     "남양주2": ("F10B", "F10"),
@@ -486,6 +502,48 @@ def resolve_energy_window(base: date, date_from: date | None, date_to: date | No
             detail=f"조회 기간은 최대 {ENERGY_RANGE_MAX_DAYS}일까지 지정할 수 있습니다.",
         )
     return date_from, date_to
+
+
+def _apply_monthly_energy_fallback(
+    rows: list[dict[str, Any]],
+    factory: str,
+    month_from: date,
+    month_to: date,
+    column_map: dict[str, str],
+    *,
+    scale: float = 1.0,
+) -> list[dict[str, Any]]:
+    """월 경계 GROUP BY y,m 집계에 경산 등 결측 구간의 월별 폴백을 얹는다.
+
+    ⚠ 반드시 월 경계 집계(GROUP BY YEAR(date), MONTH(date))에서만 호출할 것 —
+    monthly_fallback_service 의 규칙 3. 임의 기간 WHERE date BETWEEN 합계에
+    쓰면 부분월이 통째로 월 총량(폴백값)으로 부풀려진다.
+
+    폴백이 필요한 (연,월)은 원본 SQL 행을 "더하지" 않고 통째로 교체한다 —
+    monthly_fallback_service.monthly_energy() 가 그 달의 모든 물리 공장을
+    이미 다시 합산해서 반환하므로(일별 소스든 월별 테이블 소스든), 부분
+    합산을 더하면 이미 일별로 잡힌 다른 공장분이 두 번 들어간다.
+
+    column_map: {행에 쓸 키: monthly_fallback_service 컬럼명}, 예)
+      {"power": "total_power_kwh", "fuel": "fuel_nm3", "water": "water_ton"}
+    scale: monthly_fallback_service 는 raw 단위(kWh 등)를 반환한다 — 호출부
+      SQL이 이미 /1000 등으로 스케일했으면 같은 배율을 넘긴다.
+    폴백 대상 달이 없으면(가장 흔한 경우) 원본 rows 를 그대로 반환한다 —
+    추가 쿼리는 fallback_months() 조회 하나뿐이다.
+    """
+    fb_service = import_core("app.services.monthly_fallback_service")
+    fallback = fb_service.fallback_months(factory, month_from, month_to)
+    if not fallback:
+        return rows
+    totals = fb_service.monthly_energy(factory, month_from, month_to)
+    by_key = {(int(row["y"]), int(row["m"])): row for row in rows}
+    for year, month in fallback:
+        source = totals[(year, month)]
+        by_key[(year, month)] = {
+            "y": year, "m": month,
+            **{alias: source[col] * scale for alias, col in column_map.items()},
+        }
+    return list(by_key.values())
 
 
 def build_energy_yoy(rows: list[dict[str, Any]], year: int) -> list[dict[str, Any]]:
@@ -1132,6 +1190,10 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
         """ + yoy_clause + " GROUP BY y,m ORDER BY y,m",
         (date(base.year - 1, 1, 1), base, *yoy_values),
     )
+    yoy_rows = _apply_monthly_energy_fallback(
+        yoy_rows, factory, date(base.year - 1, 1, 1), base,
+        {"power": "total_power_kwh", "fuel": "fuel_nm3", "water": "water_ton"},
+    )
     monthly_production: dict[tuple[int, int], float] = {}
     for production_date, production_kg in actual_production_daily_kg(
         actual_records, factory, date(base.year - 1, 1, 1), base,
@@ -1316,17 +1378,25 @@ def energy(
         """ + clause + " GROUP BY y, m ORDER BY y, m",
         (date(base.year - 1, 1, 1), date(base.year, 12, 31), *values),
     )
-    # 공장별 비교 라인(legacy compare_factories) — 전사 조회일 때만 제공.
+    yoy_rows = _apply_monthly_energy_fallback(
+        yoy_rows, factory, date(base.year - 1, 1, 1), date(base.year, 12, 31),
+        {"power": "total_power_kwh", "fuel": "fuel_nm3", "water": "water_ton", "wastewater": "wastewater_ton"},
+        scale=1 / 1000,
+    )
+    # 공장별 비교 라인(legacy compare_factories) — 전사 성격 조회일 때만 제공.
+    # 쿼리에 factory_clause를 반드시 붙여야 한다 — "전사"는 빈 필터(전체 6개 공장),
+    # "전사(경산 제외)"는 5개 공장 필터가 되도록. 조건만 is_company_wide로 바꾸고
+    # 필터를 안 붙이면 "경산 제외"를 골라도 비교 라인에 경산이 그대로 그려진다.
     daily_by_factory: list[dict[str, Any]] = []
-    if factory in ("전사", "전체"):
+    if is_company_wide(factory):
+        compare_clause, compare_values = factory_clause(factory)
         per_factory_rows = fetch_all(
             """
             SELECT date, factory, SUM(total_power_kwh)/1000 power, SUM(fuel_nm3)/1000 fuel,
                    SUM(water_ton)/1000 water, SUM(wastewater_ton)/1000 wastewater
             FROM energy_daily WHERE date BETWEEN %s AND %s
-            GROUP BY date, factory ORDER BY date
-            """,
-            (window_from, window_to),
+            """ + compare_clause + " GROUP BY date, factory ORDER BY date",
+            (window_from, window_to, *compare_values),
         )
         merged: dict[date, dict[str, Any]] = {}
         for row in per_factory_rows:
@@ -1419,12 +1489,12 @@ def intensity_analysis(
         """ + clause + " GROUP BY y,m ORDER BY y,m",
         (history_start, base, *values),
     )
-    monthly_production: dict[tuple[int, int], float] = {}
-    for production_date, production_kg in actual_production_daily_kg(
-        actual_records, factory, history_start, base,
-    ).items():
-        key = (production_date.year, production_date.month)
-        monthly_production[key] = monthly_production.get(key, 0.0) + production_kg
+    # 원단위는 분자(사용량)와 분모(생산량)를 모두 폴백해야 한다 — 한쪽만 채우면
+    # 그 달의 원단위가 통째로 왜곡된다(분모만 채우면 0에 가깝게, 분자만 채우면 발산).
+    monthly_rows = _apply_monthly_energy_fallback(
+        monthly_rows, factory, history_start, base, {"usage_sum": usage_col},
+    )
+    monthly_production = _monthly_production_kg(actual_records, factory, history_start, base)
     monthly_usage: dict[tuple[int, int], float] = {}
     monthly_map: dict[tuple[int, int], float] = {}
     for row in monthly_rows:
@@ -1434,7 +1504,9 @@ def intensity_analysis(
         if prod_ton > 0:
             monthly_map[key] = scalar(row.get("usage_sum")) / prod_ton
 
-    target_factory = "ALL" if factory in ("전사", "전체") else factory
+    # savings_target 은 "경산 제외" 전용 목표 행을 따로 두지 않는다 — 전사 성격
+    # 라벨은 모두 같은 "ALL" 목표를 공유한다(target_service.TARGET_FACTORIES 참고).
+    target_factory = "ALL" if is_company_wide(factory) else factory
     target_row = fetch_one(
         "SELECT target_pct FROM savings_target WHERE factory=%s AND year=%s AND metric=%s",
         (target_factory, base.year, spec["target"]),
@@ -1541,17 +1613,40 @@ def intensity_analysis(
     })
 
 
-def _monthly_production_ton(
+def _monthly_production_kg(
     actual_records: list[dict[str, Any]], factory: str, date_from: date, date_to: date,
 ) -> dict[tuple[int, int], float]:
-    """(연, 월) → 생산톤. 비용 원인분해와 톤당 비용의 분모."""
+    """(연, 월) → 생산 kg. 월별 생산량 분모를 만드는 단일 관문 —
+    원단위 월별 추이·생산실적 월별 전년비·비용 원인분해가 모두 여기를 지난다.
+
+    경산처럼 production_daily 에 실적이 아예 없는 달(2025-01~2026-03)은
+    actual_records 에 행이 없어 조용히 0으로 빠진다 — production_monthly 에
+    적재된 값이 있으면 그 달만 교체한다(월 경계 집계이므로 규칙 3 충족).
+    """
     monthly: dict[tuple[int, int], float] = {}
     for production_date, production_kg in actual_production_daily_kg(
         actual_records, factory, date_from, date_to,
     ).items():
         key = (production_date.year, production_date.month)
-        monthly[key] = monthly.get(key, 0.0) + production_kg / 1000
+        monthly[key] = monthly.get(key, 0.0) + production_kg
+
+    fb_service = import_core("app.services.monthly_fallback_service")
+    fb_months = fb_service.production_fallback_months(factory, date_from, date_to)
+    if fb_months:
+        fb_kg = fb_service.monthly_production_kg(factory, date_from, date_to)
+        for key in fb_months:
+            monthly[key] = fb_kg[key]
     return monthly
+
+
+def _monthly_production_ton(
+    actual_records: list[dict[str, Any]], factory: str, date_from: date, date_to: date,
+) -> dict[tuple[int, int], float]:
+    """(연, 월) → 생산톤. _monthly_production_kg 의 단위 변환 래퍼."""
+    return {
+        key: value / 1000
+        for key, value in _monthly_production_kg(actual_records, factory, date_from, date_to).items()
+    }
 
 
 # 단가의 분모는 "비용이 매겨진 사용량"이어야 한다 — 비용 미적재일의 사용량이
@@ -1702,6 +1797,24 @@ def energy_cost(
     monthly_totals: dict[tuple[int, int], dict[str, float | None]] = {
         (int(row["y"]), int(row["m"])): _cost_row_totals(row, metric) for row in monthly_rows
     }
+
+    # 월별 폴백 — 경산처럼 일별 실적이 없는 달은 energy_monthly 값으로 채운다.
+    # _COST_SUM_SQL 과 같은 별칭 모양의 합성 행을 만들어 _cost_row_totals()에
+    # 그대로 흘려보낸다 — total/power/fuel 분기 로직을 다시 쓰지 않기 위함.
+    # 월 총량으로 채운 달은 전부 비용이 반영된 것으로 본다(priced == raw).
+    fb_service = import_core("app.services.monthly_fallback_service")
+    fb_months = fb_service.fallback_months(factory, history_start, base)
+    if fb_months:
+        fb_totals = fb_service.monthly_energy(factory, history_start, base)
+        for key in fb_months:
+            source = fb_totals[key]
+            synthetic_row = {
+                "power_cost": source["power_cost_krw"], "power_usage": source["total_power_kwh"],
+                "power_priced_cost": source["power_cost_krw"], "power_priced_usage": source["total_power_kwh"],
+                "fuel_cost": source["fuel_cost_krw"], "fuel_usage": source["fuel_nm3"],
+                "fuel_priced_cost": source["fuel_cost_krw"], "fuel_priced_usage": source["fuel_nm3"],
+            }
+            monthly_totals[key] = _cost_row_totals(synthetic_row, metric)
 
     def month_totals(key: tuple[int, int]) -> dict[str, float | None] | None:
         """비용 적재 이전 달은 0 이 아니라 None — 0으로 그리면 '비용 0원인 달'로 읽힌다."""
@@ -3019,6 +3132,86 @@ def save_targets(payload: TargetSaveRequest, request: Request) -> dict[str, Any]
         ],
         note=payload.note,
     )
+    return {"affected": int(affected)}
+
+
+# ── 월별 실적 수기 입력 (경산 등 일별 실적이 없는 구간) ──────────────
+# 전사_경산구분_및_월별적재_계획.md B-4 — 원본 파일이 없어 관리자 수기 입력
+# 화면으로 대체한다. 저장한 값은 monthly_fallback_service 의 규칙 1(일별 우선)
+# 을 그대로 따른다 — 그 달에 energy_daily/production_daily 행이 이미 있으면
+# 화면에 반영되지 않으므로, 조회 응답에 hasDailyData 플래그를 함께 내려보내
+# 착오 입력을 사용자가 스스로 알아챌 수 있게 한다.
+
+@app.get("/api/v1/monthly-input/energy")
+def get_monthly_energy_input(factory: str) -> dict[str, Any]:
+    service = import_core("app.services.monthly_input_service")
+    rows = service.list_energy_monthly(factory)
+    # coveredMonths 는 저장된 행과 무관하게 내려보낸다 — 화면은 사용자가 값을
+    # 넣기 전에 "이 달은 일별이 우선이라 반영 안 된다"를 알려줘야 한다.
+    covered = sorted(service.energy_daily_covered_months(factory))
+    return json_safe({"factory": factory, "rows": rows, "coveredMonths": covered})
+
+
+class EnergyMonthlyItem(BaseModel):
+    factory: str
+    month_key: str
+    total_power_kwh: float | None = None
+    fuel_nm3: float | None = None
+    water_ton: float | None = None
+    wastewater_ton: float | None = None
+    power_cost_krw: float | None = None
+    fuel_cost_krw: float | None = None
+
+
+class EnergyMonthlySaveRequest(BaseModel):
+    items: list[EnergyMonthlyItem]
+
+
+@app.put("/api/v1/monthly-input/energy")
+def save_monthly_energy_input(payload: EnergyMonthlySaveRequest, request: Request) -> dict[str, Any]:
+    require_admin(request)
+    service = import_core("app.services.monthly_input_service")
+    affected = service.upsert_energy_monthly([
+        item.model_dump() if hasattr(item, "model_dump") else item.dict()
+        for item in payload.items
+    ])
+    return {"affected": int(affected)}
+
+
+@app.get("/api/v1/monthly-input/production")
+def get_monthly_production_input(factory: str) -> dict[str, Any]:
+    service = import_core("app.services.monthly_input_service")
+    rows = service.list_production_monthly(factory)
+    # production_daily 는 F-code 를 쓴다 — PRODUCTION_FACTORY_CODES 로 해당 공장의
+    # 코드를 구해 이미 일별 실적이 있는 달을 표시한다(물리 공장 단일 라벨 기준
+    # 이므로 코드가 여러 개라도 안전하다 — 예: 남양주1 → F10A, F10).
+    codes = PRODUCTION_FACTORY_CODES.get(factory, (factory,))
+    covered = service.production_monthly_covered_months(codes)
+    for row in rows:
+        row["hasDailyData"] = row["month_key"] in covered
+    return json_safe({"factory": factory, "rows": rows, "coveredMonths": sorted(covered)})
+
+
+class ProductionMonthlyItem(BaseModel):
+    factory: str
+    month_key: str
+    category2: str
+    planned_qty: float | None = None
+    actual_qty: float | None = None
+
+
+class ProductionMonthlySaveRequest(BaseModel):
+    items: list[ProductionMonthlyItem]
+
+
+@app.put("/api/v1/monthly-input/production")
+def save_monthly_production_input(payload: ProductionMonthlySaveRequest, request: Request) -> dict[str, Any]:
+    require_admin(request)
+    service = import_core("app.services.monthly_input_service")
+    affected = service.upsert_production_monthly([
+        item.model_dump() if hasattr(item, "model_dump") else item.dict()
+        for item in payload.items
+    ])
     return {"affected": int(affected)}
 
 

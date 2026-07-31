@@ -78,7 +78,21 @@ AGGREGATE_FACTORY_MEMBERS: dict[str, tuple[str, ...]] = {
     "남양주": ("남양주1", "남양주2"),
     "전사": FACTORY_PHYSICAL_DISPLAY_ORDER,
     "전체": FACTORY_PHYSICAL_DISPLAY_ORDER,
+    # 경산은 시작일이 다른 5개 공장과 달라(2026-04) 전년비·원인분해가 동일 기준
+    # 비교가 되지 않는다(경산 쪽만 전년 실적이 없어 증가분이 통째로 얹힘).
+    # 이 라벨로 조회하면 경산을 뺀 5개 공장만 집계한다 — 기본 "전사"는 그대로 둔다.
+    "전사(경산 제외)": tuple(f for f in FACTORY_PHYSICAL_DISPLAY_ORDER if f != "경산"),
 }
+
+# "전사" 성격의 집계 라벨(경산 포함/미포함 모두) — 필터가 아니라 "전사 전용 기능을
+# 켤 것인가"라는 동작 분기에 쓴다. 어떤 공장을 조회할지는 AGGREGATE_FACTORY_MEMBERS /
+# expand_factory_members 가 이미 딕셔너리 조회로 처리하므로 건드릴 필요가 없다.
+COMPANY_WIDE_LABELS: frozenset[str] = frozenset({"전사", "전체", "ALL", "전사(경산 제외)"})
+
+
+def is_company_wide(factory: str | None) -> bool:
+    """전사 성격의 집계 라벨인지(경산 포함/미포함 모두 True)."""
+    return factory in COMPANY_WIDE_LABELS
 
 FACTORY_CODE_TO_KR: dict[str, str] = {f.f_code: f.label for f in FACTORY_MASTER}
 FACTORY_KR_TO_CODE: dict[str, str] = {f.label: f.f_code for f in FACTORY_MASTER}

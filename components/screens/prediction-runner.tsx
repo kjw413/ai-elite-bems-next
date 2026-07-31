@@ -24,7 +24,7 @@ function messageOf(error: unknown) {
 }
 
 export function PredictionRunner({ factory, date, isAdmin }: { factory: string; date: string; isAdmin: boolean }) {
-  const aggregate = factory === "전사" || factory === "남양주";
+  const aggregate = factory === "전사" || factory === "전사(경산 제외)" || factory === "남양주";
   const [productionKg, setProductionKg] = useState("");
   const [results, setResults] = useState<PredictionResult[]>([]);
   const [running, setRunning] = useState(false);

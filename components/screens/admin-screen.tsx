@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, CloudSun, Database, Eye, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
+import { BrainCircuit, ClipboardPaste, CloudSun, Database, Eye, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
 import { apiRequest, isAbortError, query } from "@/lib/bems-api";
 import { factories } from "@/lib/bems-data";
 import { PAGE_DEFS } from "@/lib/bems-pages";
 
 type AnyRow = Record<string, unknown>;
-type AdminTab = "events" | "targets" | "data" | "predictions" | "mail" | "visibility";
+type AdminTab = "events" | "targets" | "monthly" | "data" | "predictions" | "mail" | "visibility";
 
 function messageOf(error: unknown) {
   return error instanceof Error ? error.message : "요청을 처리하지 못했습니다.";
@@ -150,7 +150,9 @@ const targetMetrics = [
 
 function TargetsPanel({ factory, date, isAdmin }: { factory: string; date: string; isAdmin: boolean }) {
   const year = Number(date.slice(0, 4));
-  const targetFactory = factory === "전사" ? "ALL" : factory === "남양주1" || factory === "남양주2" ? "남양주" : factory;
+  // savings_target 은 "경산 제외" 전용 목표 행이 없다 — 전사 성격 라벨은 모두
+  // 같은 "ALL" 목표를 공유한다(backend server.py의 is_company_wide 판단과 동일).
+  const targetFactory = factory === "전사" || factory === "전사(경산 제외)" ? "ALL" : factory === "남양주1" || factory === "남양주2" ? "남양주" : factory;
   const targetScopeLabel = targetFactory === "ALL" ? "전사" : targetFactory === "남양주" ? "남양주 (1·2 공통)" : targetFactory;
   const [rows, setRows] = useState<AnyRow[]>([]);
   const [metric, setMetric] = useState("power_per_ton");
@@ -238,6 +240,290 @@ function TargetsPanel({ factory, date, isAdmin }: { factory: string; date: strin
     <article className="card admin-list">
       <header className="panel-header"><div><span className="eyebrow">TARGET MATRIX</span><h3>등록된 목표</h3></div><button type="button" className="secondary-button" onClick={() => void load()}><RefreshCw size={15}/>새로고침</button></header>
       {loading ? <div className="loading inline-loading"><RefreshCw className="spin"/>불러오는 중입니다.</div> : <div className="table-wrap"><table><thead><tr><th>공장</th><th>지표</th><th>목표율(%)</th><th>메모</th><th>갱신</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.factory}-${row.metric}-${index}`}><td>{row.factory === "ALL" ? "전사" : display(row.factory)}</td><td>{targetMetrics.find(item => item.value === row.metric)?.label ?? display(row.metric)}</td><td>{row.target_pct == null ? "-" : `${display(row.target_pct)}% ${row.metric === "mix_prod" ? "증가" : "절감"}`}</td><td>{display(row.note)}</td><td>{display(row.updated_at)}</td></tr>)}</tbody></table></div>}
+    </article>
+  </div>;
+}
+
+// 'YYYY-MM' ~ 'YYYY-MM' 사이 월 목록. 시작이 종료보다 늦으면 빈 배열(그리드가
+// 조용히 비게 되고, 아래 안내로 이유를 알린다).
+function monthRange(from: string, to: string): string[] {
+  const [fromYear, fromMonth] = from.split("-").map(Number);
+  const [toYear, toMonth] = to.split("-").map(Number);
+  if (!fromYear || !fromMonth || !toYear || !toMonth) return [];
+  const months: string[] = [];
+  let year = fromYear, month = fromMonth;
+  while (year < toYear || (year === toYear && month <= toMonth)) {
+    months.push(`${year}-${String(month).padStart(2, "0")}`);
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+    if (months.length > 60) break; // 오입력으로 범위가 폭주하는 것을 막는 상한
+  }
+  return months;
+}
+
+type EnergyMonthlyRow = {
+  month_key: string;
+  total_power_kwh?: number | null; fuel_nm3?: number | null;
+  water_ton?: number | null; wastewater_ton?: number | null;
+  power_cost_krw?: number | null; fuel_cost_krw?: number | null;
+  hasDailyData?: boolean;
+};
+type ProductionMonthlyRow = {
+  month_key: string; category2: string;
+  planned_qty?: number | null; actual_qty?: number | null;
+  hasDailyData?: boolean;
+};
+type MonthlyEnergyForm = Record<string, string>; // "2025-06:total_power_kwh" -> 입력값 문자열
+
+// 그리드 열 정의 — 화면에 보이는 왼→오 순서 그대로다. 엑셀 붙여넣기가 이
+// 순서를 기준으로 열을 채우므로, 순서를 바꾸면 붙여넣기 대응도 함께 바뀐다.
+const backfillColumns: { key: string; label: string; unit: string; width: number }[] = [
+  { key: "total_power_kwh", label: "전력량", unit: "kWh", width: 118 },
+  { key: "fuel_nm3", label: "연료량", unit: "Nm³", width: 108 },
+  { key: "water_ton", label: "용수량", unit: "ton", width: 100 },
+  { key: "wastewater_ton", label: "폐수량", unit: "ton", width: 100 },
+  { key: "power_cost_krw", label: "전력비", unit: "원", width: 142 },
+  { key: "fuel_cost_krw", label: "연료비", unit: "원", width: 142 },
+  { key: "planned_qty", label: "계획 생산량", unit: "ton", width: 112 },
+  { key: "actual_qty", label: "실적 생산량", unit: "ton", width: 112 },
+];
+const energyColumnKeys = backfillColumns.slice(0, 6).map(column => column.key);
+const productionCategories = [
+  { value: "IC", label: "IC (아이스크림)" }, { value: "MY", label: "MY (유음료)" },
+  { value: "FM", label: "FM (발효유)" }, { value: "SN", label: "SN (스낵)" }, { value: "ETC", label: "기타" },
+];
+
+// 엑셀에서 복사한 값은 천단위 콤마·통화기호·공백을 달고 온다("206,412,000", "₩1,234").
+// type="number" 입력은 그런 문자열을 통째로 거부해 값이 조용히 비므로, 텍스트로
+// 받아 여기서 숫자만 남긴다. 빈 문자열은 "입력 안 함"(null)이고, 숫자로 해석되지
+// 않는 값은 undefined 로 구분해 화면에서 붉게 표시한다.
+function parseNumericCell(value: string): number | null | undefined {
+  const cleaned = value.replace(/[,\s₩]/g, "");
+  if (cleaned === "") return null;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+// 클립보드 TSV(엑셀 복사 형식) → 2차원 배열. 엑셀은 끝에 개행을 붙이므로 마지막
+// 빈 줄을 버린다.
+function parseClipboardGrid(text: string): string[][] {
+  const rows = text.replace(/\r\n?/g, "\n").split("\n");
+  while (rows.length > 0 && rows[rows.length - 1].trim() === "") rows.pop();
+  return rows.map(row => row.split("\t"));
+}
+
+// 경산처럼 일단위 실적이 없는 구간(전사_경산구분_및_월별적재_계획.md B-4)의
+// 월별 실적을 관리자가 직접 입력한다. 저장한 값은 monthly_fallback_service 의
+// 규칙 1(일별 우선)을 그대로 따른다 — 그 달에 일별 실적이 이미 있으면 화면에
+// 반영되지 않으므로, 그런 달은 행을 흐리게 표시하고 이유를 알린다.
+function MonthlyBackfillPanel({ isAdmin }: { isAdmin: boolean }) {
+  const [factory, setFactory] = useState("경산");
+  const [monthFrom, setMonthFrom] = useState("2025-01");
+  const [monthTo, setMonthTo] = useState("2026-03");
+  const [category, setCategory] = useState("IC");
+  const months = useMemo(() => monthRange(monthFrom, monthTo), [monthFrom, monthTo]);
+
+  const [coveredMonths, setCoveredMonths] = useState<Set<string>>(() => new Set());
+  const [form, setForm] = useState<MonthlyEnergyForm>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const loadController = useRef<AbortController | null>(null);
+
+  const load = useCallback(async () => {
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    setLoading(true); setError(""); setNotice("");
+    try {
+      const [energyResult, productionResult] = await Promise.all([
+        apiRequest<{ rows: EnergyMonthlyRow[]; coveredMonths: string[] }>(`/monthly-input/energy?${query({ factory })}`, { signal: controller.signal }),
+        apiRequest<{ rows: ProductionMonthlyRow[]; coveredMonths: string[] }>(`/monthly-input/production?${query({ factory })}`, { signal: controller.signal }),
+      ]);
+      if (controller.signal.aborted) return;
+      const nextForm: MonthlyEnergyForm = {};
+      for (const row of energyResult.rows) {
+        for (const key of energyColumnKeys) {
+          const value = row[key as keyof EnergyMonthlyRow];
+          if (typeof value === "number" && value !== 0) nextForm[`${row.month_key}:${key}`] = String(value);
+        }
+      }
+      for (const row of productionResult.rows) {
+        if (row.category2 !== category) continue;
+        // 저장 단위는 kg, 화면 입력 단위는 ton — 여기서 되돌린다.
+        if (row.planned_qty) nextForm[`${row.month_key}:planned_qty`] = String(row.planned_qty / 1000);
+        if (row.actual_qty) nextForm[`${row.month_key}:actual_qty`] = String(row.actual_qty / 1000);
+      }
+      setForm(nextForm);
+      setCoveredMonths(new Set([...energyResult.coveredMonths, ...productionResult.coveredMonths]));
+    } catch (requestError) {
+      if (isAbortError(requestError)) return;
+      setError(messageOf(requestError));
+    } finally {
+      if (loadController.current === controller) setLoading(false);
+    }
+  }, [factory, category]);
+
+  useEffect(() => {
+    void load();
+    return () => loadController.current?.abort();
+  }, [load]);
+
+  const cell = useCallback((month: string, field: string) => form[`${month}:${field}`] ?? "", [form]);
+  function setCell(month: string, field: string, value: string) {
+    setForm(current => ({ ...current, [`${month}:${field}`]: value }));
+  }
+
+  // 엑셀에서 범위를 복사해 붙여넣으면 시작 셀부터 오른쪽·아래로 채운다.
+  // 그리드 밖으로 넘치는 부분은 버린다(잘린 개수를 안내로 알린다).
+  function handlePaste(event: React.ClipboardEvent<HTMLInputElement>, monthIndex: number, columnIndex: number) {
+    const text = event.clipboardData.getData("text/plain");
+    if (!text.includes("\t") && !text.includes("\n")) return; // 단일 셀은 기본 동작에 맡긴다
+    event.preventDefault();
+    const grid = parseClipboardGrid(text);
+    if (grid.length === 0) return;
+    const updates: MonthlyEnergyForm = {};
+    let overflowRows = 0, overflowColumns = 0;
+    grid.forEach((rowValues, rowOffset) => {
+      const month = months[monthIndex + rowOffset];
+      if (month === undefined) { overflowRows += 1; return; }
+      rowValues.forEach((rawValue, columnOffset) => {
+        const column = backfillColumns[columnIndex + columnOffset];
+        if (column === undefined) { overflowColumns += 1; return; }
+        const trimmed = rawValue.trim();
+        // 콤마·통화기호를 벗겨 저장한다 — 원문 그대로 두면 저장 시 숫자로 안 읽힌다.
+        const parsed = parseNumericCell(trimmed);
+        updates[`${month}:${column.key}`] = parsed == null ? "" : String(parsed);
+      });
+    });
+    setForm(current => ({ ...current, ...updates }));
+    const filled = Object.keys(updates).length;
+    const skipped = overflowRows > 0 || overflowColumns > 0
+      ? ` (범위를 벗어난 ${overflowRows > 0 ? `${overflowRows}행` : ""}${overflowRows > 0 && overflowColumns > 0 ? " · " : ""}${overflowColumns > 0 ? `${overflowColumns}칸` : ""}은 무시)`
+      : "";
+    setNotice(`${filled}개 셀을 붙여넣었습니다${skipped}. 저장하지 않으면 반영되지 않습니다.`);
+    setError("");
+  }
+
+  const invalidCells = useMemo(
+    () => Object.entries(form).filter(([, value]) => parseNumericCell(value) === undefined).map(([key]) => key),
+    [form],
+  );
+  const filledMonths = useMemo(
+    () => months.filter(month => backfillColumns.some(column => cell(month, column.key) !== "")).length,
+    [months, cell],
+  );
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    if (invalidCells.length > 0) {
+      setError(`숫자로 읽을 수 없는 값이 ${invalidCells.length}칸 있습니다. 붉게 표시된 칸을 확인하세요.`);
+      return;
+    }
+    setSaving(true); setError(""); setNotice("");
+    const numeric = (month: string, field: string) => {
+      const parsed = parseNumericCell(cell(month, field));
+      return parsed === undefined ? null : parsed;
+    };
+    try {
+      const energyItems = months.map(month => ({
+        factory, month_key: month,
+        ...Object.fromEntries(energyColumnKeys.map(key => [key, numeric(month, key)])),
+      }));
+      const productionItems = months.map(month => {
+        const planned = numeric(month, "planned_qty");
+        const actual = numeric(month, "actual_qty");
+        return {
+          factory, month_key: month, category2: category,
+          // 화면은 ton으로 입력받는다 — production_daily.actual_qty와 단위를 맞추려 저장은 kg(×1000).
+          planned_qty: planned == null ? null : planned * 1000,
+          actual_qty: actual == null ? null : actual * 1000,
+        };
+      });
+      await apiRequest("/monthly-input/energy", { method: "PUT", body: JSON.stringify({ items: energyItems }) });
+      await apiRequest("/monthly-input/production", { method: "PUT", body: JSON.stringify({ items: productionItems }) });
+      setNotice("저장했습니다.");
+      await load();
+    } catch (requestError) {
+      if (!isAbortError(requestError)) setError(messageOf(requestError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <div className="admin-grid single">
+    <article className="card monthly-backfill">
+      <header className="panel-header">
+        <div><span className="eyebrow">MONTHLY BACKFILL</span><h3>월별 실적 백필</h3></div>
+        <button type="button" className="secondary-button" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/>새로고침</button>
+      </header>
+      <p className="panel-copy">경산처럼 일단위 실적이 없는 구간의 월 총량을 입력합니다. 이미 일별 실적이 있는 달은 그 값이 우선 적용되므로 여기 입력해도 화면에 반영되지 않습니다.</p>
+
+      <div className="backfill-filters">
+        <label className="field"><span>공장</span><select value={factory} onChange={event => setFactory(event.target.value)}>{eventFactories.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="field"><span>제품유형</span><select value={category} onChange={event => setCategory(event.target.value)}>{productionCategories.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+        <label className="field"><span>시작월</span><input type="month" value={monthFrom} onChange={event => setMonthFrom(event.target.value)}/></label>
+        <label className="field"><span>종료월</span><input type="month" value={monthTo} onChange={event => setMonthTo(event.target.value)}/></label>
+      </div>
+
+      <div className="backfill-hint">
+        <ClipboardPaste size={15}/>
+        <p><b>엑셀에서 여러 셀을 복사해 붙여넣을 수 있습니다.</b> 붙여넣을 위치의 칸을 클릭한 뒤 <b>Ctrl+V</b> 하면 그 칸부터 오른쪽·아래로 채워집니다. 천단위 콤마·통화기호는 자동으로 제거됩니다.</p>
+      </div>
+
+      {months.length === 0
+        ? <div className="form-message error">시작월이 종료월보다 늦습니다.</div>
+        : loading
+        ? <div className="loading inline-loading"><RefreshCw className="spin"/>불러오는 중입니다.</div>
+        : <form onSubmit={save}>
+          <div className="backfill-grid-wrap">
+            <table className="backfill-grid">
+              <colgroup><col style={{ width: 116 }}/>{backfillColumns.map(column => <col key={column.key} style={{ width: column.width }}/>)}</colgroup>
+              <thead><tr>
+                <th className="col-month" scope="col">월</th>
+                {backfillColumns.map(column => <th key={column.key} scope="col">{column.label}<small>{column.unit}</small></th>)}
+              </tr></thead>
+              <tbody>
+                {months.map((month, monthIndex) => {
+                  const covered = coveredMonths.has(month);
+                  return <tr key={month} className={covered ? "covered" : ""}>
+                    <th className="col-month" scope="row">
+                      <div className="month-cell">
+                        <span>{month}</span>
+                        {covered && <em title="이 달은 이미 일별 실적이 있어 여기 입력한 값이 화면에 반영되지 않습니다.">일별 우선</em>}
+                      </div>
+                    </th>
+                    {backfillColumns.map((column, columnIndex) => {
+                      const key = `${month}:${column.key}`;
+                      return <td key={column.key}>
+                        <input
+                          type="text" inputMode="decimal" autoComplete="off"
+                          aria-label={`${month} ${column.label}(${column.unit})`}
+                          className={invalidCells.includes(key) ? "invalid" : undefined}
+                          disabled={!isAdmin}
+                          value={cell(month, column.key)}
+                          onChange={event => setCell(month, column.key, event.target.value)}
+                          onPaste={event => handlePaste(event, monthIndex, columnIndex)}
+                          onFocus={event => event.currentTarget.select()}
+                        />
+                      </td>;
+                    })}
+                  </tr>;
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="backfill-footer">
+            {isAdmin
+              ? <button className="primary-button" type="submit" disabled={saving}><Save size={16}/>{saving ? "저장 중..." : "일괄 저장"}</button>
+              : <div className="permission-note">조회 사용자는 월별 실적을 확인만 할 수 있습니다.</div>}
+            <span className="backfill-count">{months.length}개월 중 <b>{filledMonths}개월</b> 입력됨{invalidCells.length > 0 && <em> · 숫자 아닌 값 {invalidCells.length}칸</em>}</span>
+          </div>
+          {error && <div className="form-message error">{error}</div>}{notice && <div className="form-message success">{notice}</div>}
+        </form>}
     </article>
   </div>;
 }
@@ -719,16 +1005,17 @@ function PageVisibilityPanel() {
 }
 
 export function AdminScreen({ factory, date, isAdmin }: { factory: string; date: string; isAdmin: boolean }) {
-  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "data", "predictions", "mail", "visibility"] : ["events", "targets"], [isAdmin]);
+  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "monthly", "data", "predictions", "mail", "visibility"] : ["events", "targets"], [isAdmin]);
   const [tab, setTab] = useState<AdminTab>("events");
   useEffect(() => { if (!allowedTabs.includes(tab)) setTab("events"); }, [allowedTabs, tab]);
-  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", data: "데이터·동기화", predictions: "예측·모델 운영", mail: "메일 리포트", visibility: "페이지 노출 설정" };
+  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", monthly: "월별 실적 백필", data: "데이터·동기화", predictions: "예측·모델 운영", mail: "메일 리포트", visibility: "페이지 노출 설정" };
 
   return <section className="screen-stack">
     {!isAdmin && <div className="permission-banner"><ShieldAlert size={21}/><div><strong>조회 사용자 모드</strong><p>이벤트와 절감 목표는 열람만 가능하며 모든 변경 작업은 서버에서 차단됩니다.</p></div></div>}
     <div className="admin-tabs" role="tablist">{allowedTabs.map(item => <button type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{labels[item]}</button>)}</div>
     {tab === "events" && <EventsPanel factory={factory} date={date} isAdmin={isAdmin}/>}
     {tab === "targets" && <TargetsPanel factory={factory} date={date} isAdmin={isAdmin}/>}
+    {tab === "monthly" && isAdmin && <MonthlyBackfillPanel isAdmin={isAdmin}/>}
     {tab === "data" && isAdmin && <DataPanel/>}
     {tab === "predictions" && isAdmin && <PredictionOpsPanel factory={factory} date={date}/>}
     {tab === "mail" && isAdmin && <MailPanel date={date}/>}

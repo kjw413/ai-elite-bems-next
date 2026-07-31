@@ -218,3 +218,53 @@ CREATE TABLE IF NOT EXISTS page_visibility (
     UNIQUE KEY uq_page_visibility (page_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 11. 일별 실적이 없는 구간(경산 2025-01~2026-03 등)의 월 단위 에너지 실적.
+--     energy_daily 와 달리 일 축이 없다 — 월 총량을 일별 대표행/균등분배로
+--     흉내내면 7일 추이·이상탐지 등에 존재하지 않는 실측처럼 보이는 값이
+--     섞이므로, 별도 테이블로 분리하고 월 경계 집계에서만 폴백으로 합산한다
+--     (app.services.monthly_fallback_service 참고).
+--     단가(원/kWh)·생산량은 저장하지 않는다 — 전자는 비용÷사용량으로 언제나
+--     계산 가능해 저장하면 두 값이 어긋날 여지가 생기고(energy_daily 원단위
+--     컬럼의 전철), 후자는 production_monthly 가 단일 출처이기 때문이다.
+CREATE TABLE IF NOT EXISTS energy_monthly (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    factory         VARCHAR(50) NOT NULL,
+    month_key       CHAR(7)     NOT NULL,       -- 'YYYY-MM' (YEAR_MONTH는 예약어라 회피)
+
+    total_power_kwh DOUBLE NOT NULL DEFAULT 0,
+    fuel_nm3        DOUBLE NOT NULL DEFAULT 0,
+    water_ton       DOUBLE NOT NULL DEFAULT 0,
+    wastewater_ton  DOUBLE NOT NULL DEFAULT 0,
+    power_cost_krw  DOUBLE NOT NULL DEFAULT 0,
+    fuel_cost_krw   DOUBLE NOT NULL DEFAULT 0,
+
+    source          VARCHAR(20) NOT NULL DEFAULT 'manual',
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    changed_by      TEXT,
+
+    UNIQUE KEY uq_energy_monthly (factory, month_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 12. 일별 실적이 없는 구간의 월 단위 생산 실적. 품목 축은 원본에 없으므로
+--     버리고 제품유형(category2)까지만 받는다 — 경산은 IC(아이스크림) 단일
+--     유형 공장이라 총량을 그대로 category2='IC' 로 적재하면 안분·추정 없이
+--     정확하다(factories.py FACTORY_MASTER 의 "경산" 항목 주석 참고).
+--     category2 를 NOT NULL 로 둔 이유: MySQL UNIQUE 인덱스는 NULL을 서로 다른
+--     값으로 취급해 중복 행이 조용히 들어올 수 있다.
+CREATE TABLE IF NOT EXISTS production_monthly (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    factory     VARCHAR(20) NOT NULL,           -- 한글 라벨('경산') — energy_monthly 와 통일
+    month_key   CHAR(7)     NOT NULL,
+    category2   VARCHAR(50) NOT NULL,           -- 경산은 항상 'IC'
+    planned_qty DOUBLE NOT NULL DEFAULT 0,      -- 월 계획(없으면 0)
+    actual_qty  DOUBLE NOT NULL DEFAULT 0,      -- 월 실적 (kg — production_daily.actual_qty 와 동일 단위)
+
+    source      VARCHAR(20) NOT NULL DEFAULT 'manual',
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    changed_by  TEXT,
+
+    UNIQUE KEY uq_production_monthly (factory, month_key, category2)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+

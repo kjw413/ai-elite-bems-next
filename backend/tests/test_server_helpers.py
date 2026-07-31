@@ -1217,6 +1217,330 @@ class ServerHelperTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("2026-04-01", errors[0].reason)
 
+    # ── 전사(경산 제외) 집계 라벨 ──────────────────────────────
+    # 경산은 실적 시작일이 2026-04라 5개 공장과 전년비 동일 기준 비교가 안 된다
+    # (경산만 전년 실적이 없어 증가분이 통째로 얹힘). 새 라벨이 기존 "전사"와
+    # 같은 딕셔너리 조회 경로를 타는지, 그리고 실제로 경산만 빠지는지를 고정한다.
+
+    GYEONGSAN_EXCLUDED_LABEL = "전사(경산 제외)"
+
+    def test_company_wide_label_registered_everywhere_needed(self) -> None:
+        domain = server.import_core("app.domain.factories")
+        label = self.GYEONGSAN_EXCLUDED_LABEL
+
+        self.assertTrue(server.is_company_wide(label))
+        self.assertTrue(server.is_company_wide("전사"))
+        self.assertTrue(server.is_company_wide("전체"))
+        self.assertFalse(server.is_company_wide("김해"))
+        self.assertTrue(domain.is_company_wide(label))
+
+        self.assertIn(label, server.FACTORY_MEMBERS)
+        self.assertNotIn("경산", server.FACTORY_MEMBERS[label])
+        self.assertEqual(set(server.FACTORY_MEMBERS[label]), {"남양주1", "남양주2", "김해", "광주", "논산"})
+
+        self.assertIn(label, server.PRODUCTION_FACTORY_CODES)
+        self.assertNotIn("F50", server.PRODUCTION_FACTORY_CODES[label])
+
+        self.assertIn(label, domain.AGGREGATE_FACTORY_MEMBERS)
+        self.assertNotIn("경산", domain.AGGREGATE_FACTORY_MEMBERS[label])
+
+    def test_physical_factory_members_untouched_by_design(self) -> None:
+        """physical_factory_members()는 손대지 않는다 — 딕셔너리 조회라 등록만으로 옳게 동작.
+
+        여기서 "전사"에 6개(경산 포함)가, 새 라벨에 5개(경산 제외)가 나오는 것이
+        핵심 불변식이다 — 뒤바뀌면 다른 모든 헬퍼(actual_production_kg 등)가 함께 깨진다.
+        """
+        label = self.GYEONGSAN_EXCLUDED_LABEL
+        self.assertEqual(set(server.physical_factory_members("전사")), set(server.PHYSICAL_FACTORIES))
+        self.assertEqual(
+            set(server.physical_factory_members(label)),
+            set(server.PHYSICAL_FACTORIES) - {"경산"},
+        )
+
+    def test_factory_clause_excludes_gyeongsan_for_new_label(self) -> None:
+        label = self.GYEONGSAN_EXCLUDED_LABEL
+        clause, values = server.factory_clause(label)
+        self.assertIn("factory IN", clause)
+        self.assertNotIn("경산", values)
+        self.assertEqual(set(values), {"남양주1", "남양주2", "김해", "광주", "논산"})
+        # 회귀 방지 — 기존 "전사"는 필터 없음(빈 문자열)이어야 한다(현행 동작 불변).
+        self.assertEqual(server.factory_clause("전사"), ("", []))
+
+    def test_target_factory_lookup_shares_all_row_with_plain_company_wide(self) -> None:
+        """savings_target 조회는 "경산 제외"도 "전사"와 같은 'ALL' 행을 본다(전용 목표 없음)."""
+        label = self.GYEONGSAN_EXCLUDED_LABEL
+        self.assertEqual("ALL" if server.is_company_wide(label) else label, "ALL")
+        self.assertEqual("ALL" if server.is_company_wide("전사") else "전사", "ALL")
+        self.assertEqual("ALL" if server.is_company_wide("김해") else "김해", "김해")
+
+    def test_production_correction_energy_codes_need_no_explicit_branch(self) -> None:
+        """_energy_factory_codes 는 expand_factory_filter 로 폴백해 새 라벨도 자동 처리한다.
+
+        production_actual_service.get_actual_production_kg 와 같은 이유로 손대지
+        않았다 — 이 테스트가 그 판단이 틀리지 않았음을 고정한다.
+        """
+        service = server.import_core("app.services.production_correction_service")
+        label = self.GYEONGSAN_EXCLUDED_LABEL
+        codes = service._energy_factory_codes(label)
+        self.assertNotIn("경산", codes)
+        self.assertEqual(set(codes), {"남양주1", "남양주2", "김해", "광주", "논산"})
+
+    def test_production_correction_prod_codes_exclude_gyeongsan_f_code(self) -> None:
+        """_prod_factory_codes 는 폴백이 없어(마지막 줄이 리터럴 반환) 명시 분기가 필요했다."""
+        service = server.import_core("app.services.production_correction_service")
+        label = self.GYEONGSAN_EXCLUDED_LABEL
+        codes = service._prod_factory_codes(label)
+        self.assertNotIn("F50", codes)
+        self.assertEqual(set(codes), {"F10", "F10A", "F10B", "F20", "F30", "F40"})
+        # 대조군 — 기존 "전사"는 F50(경산)을 포함해야 한다(회귀 방지).
+        self.assertIn("F50", service._prod_factory_codes("전사"))
+
+    def test_actual_production_service_drops_hardcoded_company_wide_branch(self) -> None:
+        """get_actual_production_kg 는 이제 하드코딩 분기 없이 expand_factory_members 하나로 처리한다.
+
+        예전 코드는 "전사"/"전체"를 별도로 FACTORY_PHYSICAL_DISPLAY_ORDER 리터럴로
+        반환했다 — 그 분기가 남아 있었다면 새 라벨이 안 걸려도 결과가 우연히 같아
+        버그가 안 드러났을 것이다. 소스에 하드코딩 분기가 없는지까지 확인한다.
+        """
+        import inspect
+
+        service = server.import_core("app.services.production_actual_service")
+        source = inspect.getsource(service.get_actual_production_kg)
+        self.assertNotIn('"전사", "전체"', source)
+        # 함수 본문(주석 제외)이 expand_factory_members 하나만 무조건 호출하는지 —
+        # 주석에는 예전 분기를 설명하려고 상수 이름을 그대로 남겼으므로, 코드
+        # 줄만 걸러서 확인한다.
+        code_lines = [line for line in source.splitlines() if not line.strip().startswith("#")]
+        self.assertNotIn("FACTORY_PHYSICAL_DISPLAY_ORDER", "\n".join(code_lines))
+        self.assertIn("expand_factory_members(factory)", source)
+
+    def test_events_endpoint_filters_gyeongsan_for_new_label_without_code_change(self) -> None:
+        """이벤트 목록도 factory_clause 딕셔너리 조회 하나로 경산이 자동 제외된다."""
+        label = self.GYEONGSAN_EXCLUDED_LABEL
+        with patch.object(server, "fetch_all", return_value=[]) as fetch_all:
+            server.list_events(factory=label)
+        sql = fetch_all.call_args.args[0]
+        params = fetch_all.call_args.args[1]
+        self.assertIn("factory IN", sql)
+        self.assertNotIn("경산", params)
+
+    def test_compare_factory_lines_query_filters_gyeongsan_for_new_label(self) -> None:
+        """energy() 의 공장별 비교 라인 쿼리는 반드시 factory_clause 필터가 붙어야 한다.
+
+        조건만 is_company_wide 로 바꾸고 쿼리에 필터를 안 붙이면 "경산 제외"를
+        골라도 비교 라인에 경산이 그대로 나온다 — 이게 이번 작업의 핵심 함정이었다.
+        """
+        label = self.GYEONGSAN_EXCLUDED_LABEL
+        with (
+            patch.object(server, "fetch_one", return_value={"max_date": date(2026, 7, 28)}),
+            patch.object(server, "fetch_all", return_value=[]) as fetch_all,
+            patch.object(server, "period_coverage", return_value={"expectedDays": 0, "presentDays": 0, "missingDays": 0}),
+        ):
+            # date_from/date_to는 FastAPI Query() 기본값을 갖는다 — 라우트 밖에서
+            # 직접 호출할 때는 명시적으로 None을 넘겨야 실제 None으로 들어간다
+            # (안 넘기면 Query 마커 객체 그대로 남아 날짜 비교에서 TypeError가 난다).
+            server.energy(factory=label, requested_date=date(2026, 7, 28), date_from=None, date_to=None)
+        compare_call = next(
+            call for call in fetch_all.call_args_list
+            if "GROUP BY date, factory" in call.args[0]
+        )
+        self.assertIn("factory IN", compare_call.args[0])
+        self.assertNotIn("경산", compare_call.args[1])
+
+    def test_compare_factory_lines_still_unfiltered_for_plain_company_wide(self) -> None:
+        """대조군 — 기존 "전사"는 여전히 필터 없이 6개 전 공장을 가져와야 한다(회귀 방지)."""
+        with (
+            patch.object(server, "fetch_one", return_value={"max_date": date(2026, 7, 28)}),
+            patch.object(server, "fetch_all", return_value=[]) as fetch_all,
+            patch.object(server, "period_coverage", return_value={"expectedDays": 0, "presentDays": 0, "missingDays": 0}),
+        ):
+            server.energy(factory="전사", requested_date=date(2026, 7, 28), date_from=None, date_to=None)
+        compare_call = next(
+            call for call in fetch_all.call_args_list
+            if "GROUP BY date, factory" in call.args[0]
+        )
+        self.assertNotIn("factory IN", compare_call.args[0])
+        self.assertEqual(compare_call.args[1], (date(2026, 7, 1), date(2026, 7, 28)))
+
+    # ── monthly_fallback_service ────────────────────────────────
+    # 경산 월별 폴백의 세 규칙(전사_경산구분_및_월별적재_계획.md B-5)을 고정한다.
+    # managed_cursor 를 페이크 컨텍스트 매니저로 바꿔치기해 순수하게 병합 로직만
+    # 검증한다 — 실DB 검증은 별도로 이미 수행했다(빈 테이블에서 회귀 없음 확인).
+
+    class _FakeCursor:
+        def __init__(self, batches: list[list[dict]]) -> None:
+            self._batches = list(batches)
+            self._current: list[dict] = []
+
+        def execute(self, _sql, _params=None) -> None:
+            self._current = self._batches.pop(0) if self._batches else []
+
+        def fetchall(self) -> list[dict]:
+            return self._current
+
+    class _FakeManagedCursor:
+        """monthly_fallback_service.managed_cursor 를 대체하는 페이크.
+
+        호출 순서대로 batches 를 하나씩 소비한다 — 이 서비스가 쿼리를 부르는
+        순서(daily 먼저, monthly 나중)에 맞춰 batches 를 준비해야 한다.
+        """
+
+        def __init__(self, *all_batches: list[dict]) -> None:
+            self._cursor = ServerHelperTests._FakeCursor(list(all_batches))
+
+        def __call__(self, *_args, **_kwargs):
+            return self
+
+        def __enter__(self):
+            return (None, self._cursor)
+
+        def __exit__(self, *_exc) -> bool:
+            return False
+
+    def test_month_range_crosses_year_boundary(self) -> None:
+        service = server.import_core("app.services.monthly_fallback_service")
+        months = service._month_range(date(2025, 11, 1), date(2026, 2, 1))
+        self.assertEqual(months, [(2025, 11), (2025, 12), (2026, 1), (2026, 2)])
+
+    def test_monthly_energy_rule1_prefers_daily_over_monthly_table(self) -> None:
+        """규칙 1 — 같은 (공장,월)에 일별 행이 있으면 월별 테이블 값은 무시된다."""
+        service = server.import_core("app.services.monthly_fallback_service")
+        daily_rows = [{
+            "factory": "경산", "y": 2026, "m": 4, "n": 30,
+            "total_power_kwh": 100.0, "fuel_nm3": 10.0, "water_ton": 1.0,
+            "wastewater_ton": 1.0, "power_cost_krw": 1000.0, "fuel_cost_krw": 100.0,
+        }]
+        # 월별 테이블에 같은 (경산, 2026-04) 행이 있어도(이중 계상 방지 검증용
+        # 함정 데이터), 일별이 있으므로 이 값은 절대 쓰이면 안 된다.
+        monthly_rows = [{
+            "factory": "경산", "month_key": "2026-04",
+            "total_power_kwh": 999999.0, "fuel_nm3": 999999.0, "water_ton": 999999.0,
+            "wastewater_ton": 999999.0, "power_cost_krw": 999999.0, "fuel_cost_krw": 999999.0,
+        }]
+        fake = self._FakeManagedCursor(daily_rows, monthly_rows)
+        with patch.object(service, "managed_cursor", fake), \
+             patch.object(service, "expand_factory_members", return_value=("경산",)):
+            result = service.monthly_energy("경산", date(2026, 4, 1), date(2026, 4, 30))
+        self.assertEqual(result[(2026, 4)]["total_power_kwh"], 100.0)
+
+    def test_monthly_energy_rule1_falls_back_when_no_daily_rows(self) -> None:
+        """규칙 1 — 일별 행이 0건인 달만 월별 테이블 값을 쓴다."""
+        service = server.import_core("app.services.monthly_fallback_service")
+        fake = self._FakeManagedCursor([], [{
+            "factory": "경산", "month_key": "2025-06",
+            "total_power_kwh": 50.0, "fuel_nm3": 5.0, "water_ton": 0.5,
+            "wastewater_ton": 0.5, "power_cost_krw": 500.0, "fuel_cost_krw": 50.0,
+        }])
+        with patch.object(service, "managed_cursor", fake), \
+             patch.object(service, "expand_factory_members", return_value=("경산",)):
+            result = service.monthly_energy("경산", date(2025, 6, 1), date(2025, 6, 30))
+        self.assertEqual(result[(2025, 6)]["total_power_kwh"], 50.0)
+
+    def test_monthly_energy_rule2_aggregates_per_physical_factory(self) -> None:
+        """규칙 2 — 집계 라벨은 물리 공장별로 각각 판단한 뒤 합산해야 한다.
+
+        여기서는 남양주1은 일별(정상 실적), 남양주2는 폴백(월별 테이블)인
+        섞인 상황을 만들어, 합계가 두 값의 합인지 확인한다. 전사 단위로
+        "일별 데이터가 있다"고 뭉뚱그려 판정했다면 남양주2도 일별 취급되어
+        (없는 데이터라) 0으로 빠졌을 것이다.
+        """
+        service = server.import_core("app.services.monthly_fallback_service")
+        daily_rows = [{
+            "factory": "남양주1", "y": 2025, "m": 6, "n": 30,
+            "total_power_kwh": 100.0, "fuel_nm3": 0.0, "water_ton": 0.0,
+            "wastewater_ton": 0.0, "power_cost_krw": 0.0, "fuel_cost_krw": 0.0,
+        }]
+        monthly_rows = [{
+            "factory": "남양주2", "month_key": "2025-06",
+            "total_power_kwh": 40.0, "fuel_nm3": 0.0, "water_ton": 0.0,
+            "wastewater_ton": 0.0, "power_cost_krw": 0.0, "fuel_cost_krw": 0.0,
+        }]
+        fake = self._FakeManagedCursor(daily_rows, monthly_rows)
+        with patch.object(service, "managed_cursor", fake), \
+             patch.object(service, "expand_factory_members", return_value=("남양주1", "남양주2")):
+            result = service.monthly_energy("남양주", date(2025, 6, 1), date(2025, 6, 30))
+        self.assertEqual(result[(2025, 6)]["total_power_kwh"], 140.0)
+
+    def test_fallback_months_reports_only_table_backed_months(self) -> None:
+        service = server.import_core("app.services.monthly_fallback_service")
+        fake = self._FakeManagedCursor([], [{
+            "factory": "경산", "month_key": "2025-03",
+            "total_power_kwh": 1.0, "fuel_nm3": 0.0, "water_ton": 0.0,
+            "wastewater_ton": 0.0, "power_cost_krw": 0.0, "fuel_cost_krw": 0.0,
+        }])
+        with patch.object(service, "managed_cursor", fake), \
+             patch.object(service, "expand_factory_members", return_value=("경산",)):
+            months = service.fallback_months("경산", date(2025, 3, 1), date(2025, 3, 31))
+        self.assertEqual(months, {(2025, 3)})
+
+    def test_month_key_sql_avoids_percent_placeholder_collision(self) -> None:
+        """'YYYY-MM' 생성에 DATE_FORMAT('%Y-%m') 을 쓰면 안 된다.
+
+        파라미터가 있는 쿼리에서 드라이버가 '%' 를 자기 자리표시자로 해석해,
+        '%%' 로 이스케이프하면 MySQL 에는 '%%Y-%%m' 이 도착하고 리터럴 문자열
+        '%Y-%m' 이 돌아온다 — 커버리지 판정이 통째로 무력화되면서도 예외는 나지
+        않아 조용히 실패한다(2026-07-31 실측). CONCAT 방식인지 고정한다.
+        """
+        service = server.import_core("app.services.monthly_input_service")
+        fragment = service._MONTH_KEY_SQL.format(column="date")
+        self.assertNotIn("%", fragment)
+        self.assertIn("CONCAT", fragment)
+        self.assertIn("LPAD", fragment)
+
+    def test_production_daily_code_uses_kr_to_code_mapping(self) -> None:
+        service = server.import_core("app.services.monthly_fallback_service")
+        self.assertEqual(service._production_daily_code("경산"), "F50")
+        self.assertEqual(service._production_daily_code("남양주1"), "F10A")
+        self.assertIsNone(service._production_daily_code("존재안함"))
+
+    # ── server.py 배선: _apply_monthly_energy_fallback ────────────
+    # B-6 의 핵심 함정 — 폴백 달을 원본 행에 "더하면" 이미 일별로 잡힌 다른
+    # 공장분이 두 번 들어간다. 반드시 그 달의 행을 통째로 "교체"해야 한다.
+
+    def test_monthly_fallback_wiring_skips_query_when_nothing_to_backfill(self) -> None:
+        """폴백 대상 달이 없으면(가장 흔한 경우) monthly_energy() 자체를 부르지 않는다."""
+        rows = [{"y": 2026, "m": 7, "power": 100.0}]
+        fake_service = SimpleNamespace(
+            fallback_months=Mock(return_value=set()),
+            monthly_energy=Mock(side_effect=AssertionError("불필요한 조회")),
+        )
+        with patch.object(server, "import_core", return_value=fake_service):
+            result = server._apply_monthly_energy_fallback(
+                rows, "경산", date(2026, 1, 1), date(2026, 7, 31), {"power": "total_power_kwh"},
+            )
+        self.assertEqual(result, rows)
+
+    def test_monthly_fallback_wiring_replaces_not_adds(self) -> None:
+        """폴백 달의 행은 monthly_energy() 결과로 완전히 교체된다 — 원본 값과 더하지 않는다.
+
+        원본 SQL 행에 이미 (2025,6) 이 100.0 으로 잡혀 있어도(다른 물리 공장의
+        일별 합), monthly_energy() 가 이미 그 달의 전체 공장을 다시 합산해
+        돌려주므로 그 값을 그대로 써야 한다. 더했다면 240.0 이 나왔을 것이다.
+        """
+        rows = [{"y": 2025, "m": 6, "power": 100.0}]
+        fake_service = SimpleNamespace(
+            fallback_months=Mock(return_value={(2025, 6)}),
+            monthly_energy=Mock(return_value={(2025, 6): {"total_power_kwh": 140.0}}),
+        )
+        with patch.object(server, "import_core", return_value=fake_service):
+            result = server._apply_monthly_energy_fallback(
+                rows, "남양주", date(2025, 6, 1), date(2025, 6, 30), {"power": "total_power_kwh"},
+            )
+        self.assertEqual(result, [{"y": 2025, "m": 6, "power": 140.0}])
+
+    def test_monthly_fallback_wiring_applies_scale(self) -> None:
+        """energy() 의 yoy_rows 는 /1000 스케일이다 — 폴백값도 같은 배율이 적용돼야 한다."""
+        fake_service = SimpleNamespace(
+            fallback_months=Mock(return_value={(2025, 6)}),
+            monthly_energy=Mock(return_value={(2025, 6): {"total_power_kwh": 140_000.0}}),
+        )
+        with patch.object(server, "import_core", return_value=fake_service):
+            result = server._apply_monthly_energy_fallback(
+                [], "경산", date(2025, 6, 1), date(2025, 6, 30),
+                {"power": "total_power_kwh"}, scale=1 / 1000,
+            )
+        self.assertEqual(result, [{"y": 2025, "m": 6, "power": 140.0}])
+
 
 if __name__ == "__main__":
     unittest.main()

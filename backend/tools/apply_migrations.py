@@ -1,17 +1,21 @@
-r"""energy_daily 등 멱등 ALTER 마이그레이션 적용 스크립트.
+r"""energy_daily 등 멱등 ALTER/CREATE TABLE 마이그레이션 적용 스크립트.
 
 배경
 ----
 ``db_connection._apply_idempotent_migrations()`` 는 ``init_db()`` 안에서만 호출되는데,
 ``init_db()`` 를 부르는 코드가 저장소에 없다 — legacy Streamlit 앱이 기동 시 호출하던
 함수이고, 현재 배포는 ``uvicorn backend.server:app`` 뿐이라 아무도 부르지 않는다.
-그래서 ``_PENDING_COLUMN_MIGRATIONS`` 에 항목을 추가해도 **자동으로 적용되지 않는다.**
+그래서 ``_PENDING_COLUMN_MIGRATIONS``/``_PENDING_TABLE_CREATES`` 에 항목을 추가해도
+**자동으로 적용되지 않는다.**
 
 컬럼을 추가한 뒤 이 스크립트를 실행하지 않으면, 다음 동기화의 INSERT 가
 ``Unknown column 'power_cost_krw' in 'field list'`` 로 실패한다. 조용히 넘어가지 않고
 동기화 전체가 멈추므로, 신규 컬럼 작업의 마지막 단계로 반드시 실행해야 한다.
+신규 테이블(예: ``energy_monthly``)을 참조하는 서비스는 테이블이 없으면
+``Table 'energy_monthly' doesn't exist`` 로 실패한다 — schema.sql 의 CREATE 만으로는
+운영 DB에 반영되지 않으므로 이 스크립트가 유일한 적용 경로다.
 
-멱등하다 — INFORMATION_SCHEMA 로 컬럼 존재를 확인한 뒤 없는 것만 ALTER 한다.
+멱등하다 — INFORMATION_SCHEMA 로 컬럼·테이블 존재를 확인한 뒤 없는 것만 적용한다.
 몇 번 실행해도 안전하고, 이미 적용됐으면 아무 것도 하지 않는다.
 
 실행 (쓰기에는 관리자 계정 필요 — backend/.env 의 DB_ADMIN_* 를 읽는다)
@@ -35,6 +39,11 @@ PowerShell::
       DROP COLUMN power_cost_krw,      DROP COLUMN power_price_krw_kwh,
       DROP COLUMN fuel_cost_krw,       DROP COLUMN fuel_price_krw_nm3,
       DROP COLUMN influent_cod_ppm,    DROP COLUMN effluent_cod_ppm;
+
+신규 테이블은 ``DROP TABLE`` 이 데이터까지 지운다 — 적재된 내용이 있다면 먼저
+백업하세요::
+
+    DROP TABLE IF EXISTS energy_monthly, production_monthly;
 """
 from __future__ import annotations
 
@@ -51,6 +60,7 @@ from app.database.db_connection import (  # noqa: E402
     _apply_idempotent_migrations,
     _PENDING_COLUMN_DROPS,
     _PENDING_COLUMN_MIGRATIONS,
+    _PENDING_TABLE_CREATES,
     managed_cursor,
 )
 
@@ -67,10 +77,26 @@ def _column_exists(cursor, table: str, column: str) -> bool:
     return count > 0
 
 
+def _table_exists(cursor, table: str) -> bool:
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+        """,
+        (DB_NAME, table),
+    )
+    (count,) = cursor.fetchone()
+    return count > 0
+
+
 def report_pending() -> int:
     """적용 대기 중인 항목을 출력하고 그 개수를 반환한다."""
     pending = 0
     with managed_cursor(with_db=True, admin=True) as (_conn, cursor):
+        for table, _create_sql in _PENDING_TABLE_CREATES:
+            if not _table_exists(cursor, table):
+                print(f"  CREATE TABLE {table}")
+                pending += 1
         for table, column, _fragment in _PENDING_COLUMN_MIGRATIONS:
             if not _column_exists(cursor, table, column):
                 print(f"  ADD  {table}.{column}")
