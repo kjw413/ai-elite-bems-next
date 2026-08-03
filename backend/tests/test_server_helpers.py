@@ -1141,6 +1141,307 @@ class ServerHelperTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 400)
         fetch_one.assert_not_called()
 
+    # ── 절감 검증(원단위 전후 비교) — savings_verification_service 순수 계산 ──
+
+    @staticmethod
+    def _window(usage: float, ton: float) -> dict[str, float]:
+        return {"usage": usage, "productionTon": ton}
+
+    def test_verify_theme_marks_verified_when_intensity_gain_explains_actual(self) -> None:
+        """전년 대비 원단위가 개선되고, 그 회피량이 등록 실적의 70% 이상을 설명하면 검증됨."""
+        verify_service = server.import_core("app.services.savings_verification_service")
+        before = self._window(1000.0, 100.0)       # I=10, 전년 대비 변화 없음
+        before_prev = self._window(1000.0, 100.0)  # I=10 → r_before=0
+        after = self._window(900.0, 100.0)          # I=9
+        after_prev = self._window(1000.0, 100.0)    # I=10 → r_after=-0.1
+        result = verify_service.verify_theme(
+            before, after, before_prev, after_prev, actual_qty_after=90.0, after_months=6,
+        )
+        # avoided = 0.1 * 10 * 100 = 100, explainPct = 100/90*100 ≈ 111.1%
+        self.assertEqual(result["status"], "verified")
+        self.assertAlmostEqual(result["avoidedQty"], 100.0)
+        self.assertAlmostEqual(result["explainPct"], 100.0 / 90.0 * 100)
+
+    def test_verify_theme_marks_unverified_when_intensity_worsens(self) -> None:
+        """시행 후 원단위가 전년 동기 대비 오히려 나빠지면(Δ>0) 절감이 뒷받침되지 않는다."""
+        verify_service = server.import_core("app.services.savings_verification_service")
+        before = self._window(1000.0, 100.0)
+        before_prev = self._window(1000.0, 100.0)   # r_before = 0
+        after = self._window(1100.0, 100.0)          # I=11
+        after_prev = self._window(1000.0, 100.0)     # I=10 → r_after=0.1 > r_before
+        result = verify_service.verify_theme(
+            before, after, before_prev, after_prev, actual_qty_after=50.0, after_months=6,
+        )
+        self.assertEqual(result["status"], "unverified")
+        self.assertIn("나빠져", result["reason"])
+
+    def test_verify_theme_marks_review_when_explain_pct_is_partial(self) -> None:
+        """개선은 있지만 등록 실적의 30~70%만 설명되면 재확인 대기."""
+        verify_service = server.import_core("app.services.savings_verification_service")
+        before = self._window(1000.0, 100.0)
+        before_prev = self._window(1000.0, 100.0)    # r_before = 0
+        after = self._window(950.0, 100.0)             # I=9.5
+        after_prev = self._window(1000.0, 100.0)       # I=10 → r_after=-0.05
+        # avoided = 0.05 * 10 * 100 = 50, actual=100 → explainPct=50%
+        result = verify_service.verify_theme(
+            before, after, before_prev, after_prev, actual_qty_after=100.0, after_months=6,
+        )
+        self.assertEqual(result["status"], "review")
+        self.assertAlmostEqual(result["explainPct"], 50.0)
+
+    def test_verify_theme_marks_review_when_after_months_too_short(self) -> None:
+        """설명률은 충분해도 후 구간 실측이 3개월 미만이면 계절 1순환도 못 채워 재확인."""
+        verify_service = server.import_core("app.services.savings_verification_service")
+        before = self._window(1000.0, 100.0)
+        before_prev = self._window(1000.0, 100.0)
+        after = self._window(900.0, 100.0)
+        after_prev = self._window(1000.0, 100.0)
+        result = verify_service.verify_theme(
+            before, after, before_prev, after_prev, actual_qty_after=90.0, after_months=2,
+        )
+        self.assertEqual(result["status"], "review")
+        self.assertIn("2개월", result["reason"])
+
+    def test_verify_theme_pending_when_actual_qty_missing(self) -> None:
+        """원단위는 계산돼도 등록 실적이 없으면(None 또는 0 이하) 설명률을 매길 수 없어 보류."""
+        verify_service = server.import_core("app.services.savings_verification_service")
+        window = self._window(1000.0, 100.0)
+        for actual_qty in (None, 0.0, -1.0):
+            with self.subTest(actual_qty=actual_qty):
+                result = verify_service.verify_theme(
+                    window, window, window, window, actual_qty_after=actual_qty, after_months=6,
+                )
+                self.assertEqual(result["status"], "pending")
+
+    def test_verify_theme_pending_when_production_is_zero(self) -> None:
+        """생산실적이 0인 구간은 원단위를 만들 수 없어(분모 0) 판정 자체를 보류한다."""
+        verify_service = server.import_core("app.services.savings_verification_service")
+        zero_ton = self._window(0.0, 0.0)
+        normal = self._window(1000.0, 100.0)
+        result = verify_service.verify_theme(
+            normal, zero_ton, normal, normal, actual_qty_after=90.0, after_months=6,
+        )
+        self.assertEqual(result["status"], "pending")
+        self.assertNotIn("avoidedQty", result)
+
+    def test_reconcile_factory_energy_type_verdicts(self) -> None:
+        """공장×에너지원 총량 대사 — 사용량 증가(역행)·등록 과대(과대)·정상 범위(정합)를 구분한다."""
+        verify_service = server.import_core("app.services.savings_verification_service")
+        current = self._window(800.0, 0.0)
+        previous = self._window(1000.0, 0.0)  # 사용량 200 감소 → 회피 200
+
+        consistent = verify_service.reconcile_factory_energy_type(current, previous, registered_qty=150.0)
+        self.assertEqual(consistent["verdict"], "정합")
+        self.assertAlmostEqual(consistent["avoidedUsage"], 200.0)
+
+        overclaimed = verify_service.reconcile_factory_energy_type(current, previous, registered_qty=300.0)
+        self.assertEqual(overclaimed["verdict"], "과대")  # 300/200=150% > 130%
+
+        worsened_current = self._window(1200.0, 0.0)  # 전년보다 오히려 사용량 증가
+        regressed = verify_service.reconcile_factory_energy_type(worsened_current, previous, registered_qty=50.0)
+        self.assertEqual(regressed["verdict"], "역행")
+        self.assertIsNone(regressed["avoidedUsage"])
+
+        no_registration = verify_service.reconcile_factory_energy_type(worsened_current, previous, registered_qty=0.0)
+        self.assertEqual(no_registration["verdict"], "해당없음")
+
+    # ── 절감 검증 — server.py 오케스트레이션(원단위 구간 집계 · 중복 감지) ──
+
+    def test_month_end_returns_last_calendar_day(self) -> None:
+        self.assertEqual(server._month_end(2026, 1), date(2026, 1, 31))
+        self.assertEqual(server._month_end(2026, 2), date(2026, 2, 28))  # 2026 평년
+        self.assertEqual(server._month_end(2024, 2), date(2024, 2, 29))  # 2024 윤년
+
+    def test_theme_window_totals_sums_only_measured_months(self) -> None:
+        """생산량이 0인 달은 원단위 분모가 없어 사용량·생산량 합산에서 함께 빠진다."""
+        rows = [
+            {"y": 2026, "m": 1, "usage_sum": 1000.0},
+            {"y": 2026, "m": 2, "usage_sum": 1100.0},
+            {"y": 2026, "m": 3, "usage_sum": 900.0},
+        ]
+        ton_by_month = {(2026, 1): 100.0, (2026, 2): 0.0, (2026, 3): 90.0}
+        fb_stub = SimpleNamespace(fallback_months=lambda *a, **k: set(), monthly_energy=lambda *a, **k: {})
+        with (
+            patch.object(server, "fetch_all", return_value=rows),
+            patch.object(server, "import_core", return_value=fb_stub),
+            patch.object(server, "_monthly_production_ton", return_value=ton_by_month),
+        ):
+            result = server._theme_window_totals(
+                "남양주1", "power", date(2026, 1, 1), date(2026, 3, 31), actual_records=[],
+            )
+        self.assertEqual(result["usage"], 1000.0 + 900.0)
+        self.assertEqual(result["productionTon"], 100.0 + 90.0)
+        self.assertEqual(result["measuredMonths"], 2)
+
+    def test_theme_window_totals_applies_gap_month_fallback(self) -> None:
+        """경산처럼 daily 데이터가 없는 달은 monthly_fallback_service 값으로 채운다."""
+        rows = [{"y": 2026, "m": 1, "usage_sum": 1000.0}]  # 2월은 daily에 아예 없음
+        ton_by_month = {(2026, 1): 100.0, (2026, 2): 110.0}
+        fb_stub = SimpleNamespace(
+            fallback_months=lambda factory, date_from, date_to: {(2026, 2)},
+            monthly_energy=lambda factory, date_from, date_to: {(2026, 2): {"total_power_kwh": 1200.0}},
+        )
+        with (
+            patch.object(server, "fetch_all", return_value=rows),
+            patch.object(server, "import_core", return_value=fb_stub),
+            patch.object(server, "_monthly_production_ton", return_value=ton_by_month),
+        ):
+            result = server._theme_window_totals(
+                "경산", "power", date(2026, 1, 1), date(2026, 2, 28), actual_records=[],
+            )
+        self.assertEqual(result["usage"], 1000.0 + 1200.0)
+        self.assertEqual(result["productionTon"], 100.0 + 110.0)
+        self.assertEqual(result["measuredMonths"], 2)
+
+    def test_theme_actual_qty_in_window_spans_years(self) -> None:
+        """시행 +6개월 후 구간이 해를 넘으면(예: 11월 시행) 두 해 모두 조회해 합산한다."""
+        records_by_year = {
+            2025: {11: {"actual": 100.0}, 12: {"actual": 120.0}},
+            2026: {1: {"actual": 90.0}, 2: {"actual": 80.0}},
+        }
+
+        def records_by_theme(theme_ids: list[int], year: int) -> dict[int, dict[int, dict[str, float]]]:
+            return {theme_ids[0]: records_by_year.get(year, {})}
+
+        service = SimpleNamespace(records_by_theme=records_by_theme)
+        total = server._theme_actual_qty_in_window(service, 1, date(2025, 11, 1), date(2026, 2, 28))
+        self.assertEqual(total, 100.0 + 120.0 + 90.0 + 80.0)
+
+    def test_theme_actual_qty_in_window_only_sums_months_in_range(self) -> None:
+        def records_by_theme(theme_ids: list[int], year: int) -> dict[int, dict[int, dict[str, float]]]:
+            return {theme_ids[0]: {2: {"actual": 50.0}, 3: {"actual": 60.0}, 4: {"actual": 70.0}}}
+
+        service = SimpleNamespace(records_by_theme=records_by_theme)
+        total = server._theme_actual_qty_in_window(service, 1, date(2026, 3, 1), date(2026, 3, 31))
+        self.assertEqual(total, 60.0)
+
+    def test_theme_actual_qty_in_window_none_when_unentered(self) -> None:
+        """실적을 아무 달도 입력하지 않았으면 0이 아니라 None — 검증을 '판정 보류'로 유도한다."""
+        def records_by_theme(theme_ids: list[int], year: int) -> dict[int, dict[int, dict[str, float]]]:
+            return {theme_ids[0]: {3: {"actual": None}, 4: {"actual": None}}}
+
+        service = SimpleNamespace(records_by_theme=records_by_theme)
+        total = server._theme_actual_qty_in_window(service, 1, date(2026, 3, 1), date(2026, 4, 30))
+        self.assertIsNone(total)
+
+    def test_theme_verification_pending_when_start_ym_missing(self) -> None:
+        theme = self._savings_theme(start_ym=None)
+        result = server._theme_verification(theme, SimpleNamespace(), date(2026, 7, 15), actual_records=[])
+        self.assertEqual(result["status"], "pending")
+        self.assertIsNone(result["window"])
+
+    def test_theme_verification_pending_when_not_yet_started(self) -> None:
+        theme = self._savings_theme(start_ym="2026-08")
+        result = server._theme_verification(theme, SimpleNamespace(), date(2026, 7, 15), actual_records=[])
+        self.assertEqual(result["status"], "pending")
+        self.assertIn("시작되지", result["reason"])
+
+    def test_theme_verification_clips_after_window_to_base_date(self) -> None:
+        """2026-02 시행 + 이상적 6개월 후 구간은 2026-07까지지만, base가 그보다 빠르면 거기서 잘린다."""
+        theme = self._savings_theme(start_ym="2026-02", factory="남양주1", energy_type="power")
+        base = date(2026, 5, 20)
+        window_calls: list[tuple[date, date]] = []
+
+        def fake_window_totals(factory: str, energy_type: str, date_from: date, date_to: date,
+                                actual_records: list[dict[str, object]]) -> dict[str, float]:
+            window_calls.append((date_from, date_to))
+            return {"usage": 1000.0, "productionTon": 100.0, "measuredMonths": 3}
+
+        service = SimpleNamespace()
+        with (
+            patch.object(server, "_theme_window_totals", side_effect=fake_window_totals),
+            patch.object(server, "_theme_actual_qty_in_window", return_value=50.0) as actual_qty_mock,
+        ):
+            result = server._theme_verification(theme, service, base, actual_records=[])
+
+        # 호출 순서: after, before, after_prev, before_prev (server.py 구현 순서 그대로)
+        self.assertEqual(window_calls[0], (date(2026, 2, 1), base))            # 이상적 종료(2026-07-31) 대신 base로 클리핑
+        self.assertEqual(window_calls[1], (date(2025, 8, 1), date(2026, 1, 31)))
+        self.assertEqual(window_calls[2], (date(2025, 2, 1), date(2025, 5, 20)))  # after 구간의 전년 동기
+        self.assertEqual(window_calls[3], (date(2024, 8, 1), date(2025, 1, 31)))  # before 구간의 전년 동기
+        actual_qty_mock.assert_called_once_with(service, 1, date(2026, 2, 1), base)
+        self.assertEqual(result["window"], {
+            "beforeFrom": date(2025, 8, 1), "beforeTo": date(2026, 1, 31),
+            "afterFrom": date(2026, 2, 1), "afterTo": base,
+        })
+        self.assertEqual(result["actualQtyAfter"], 50.0)
+        self.assertNotIn("intensities", result)
+
+    def test_theme_verification_uses_ideal_window_when_not_clipped(self) -> None:
+        """base가 이상적 후 구간 종료보다 늦으면 클리핑 없이 6개월 그대로 쓴다."""
+        theme = self._savings_theme(start_ym="2026-01", factory="남양주1", energy_type="power")
+        base = date(2026, 12, 31)
+        window_calls: list[tuple[date, date]] = []
+
+        def fake_window_totals(factory: str, energy_type: str, date_from: date, date_to: date,
+                                actual_records: list[dict[str, object]]) -> dict[str, float]:
+            window_calls.append((date_from, date_to))
+            return {"usage": 1000.0, "productionTon": 100.0, "measuredMonths": 6}
+
+        with (
+            patch.object(server, "_theme_window_totals", side_effect=fake_window_totals),
+            patch.object(server, "_theme_actual_qty_in_window", return_value=50.0),
+        ):
+            server._theme_verification(theme, SimpleNamespace(), base, actual_records=[])
+        self.assertEqual(window_calls[0], (date(2026, 1, 1), date(2026, 6, 30)))
+
+    def test_mark_duplicate_verifications_flags_overlapping_active_themes(self) -> None:
+        """같은 물리공장·에너지원의 진행/완료 테마 중 검증 구간이 겹치면 둘 다 '중복 구간'으로 대체된다."""
+        service = server.import_core("app.services.savings_theme_service")
+        themes = [
+            {"id": 1, "status": "ongoing", "factory": "남양주1", "energy_type": "power"},
+            {"id": 2, "status": "ongoing", "factory": "남양주1", "energy_type": "power"},
+        ]
+        verifications = {
+            1: {"status": "verified", "statusLabel": "검증됨",
+                "window": {"beforeFrom": date(2025, 8, 1), "afterTo": date(2026, 7, 31)}},
+            2: {"status": "review", "statusLabel": "재확인",
+                "window": {"beforeFrom": date(2026, 1, 1), "afterTo": date(2026, 12, 31)}},
+        }
+        server._mark_duplicate_verifications(themes, verifications, service)
+        self.assertEqual(verifications[1]["status"], "duplicate")
+        self.assertEqual(verifications[2]["status"], "duplicate")
+        self.assertIn("겹치는", verifications[1]["reason"])
+
+    def test_mark_duplicate_verifications_ignores_non_overlapping_and_other_scope(self) -> None:
+        service = server.import_core("app.services.savings_theme_service")
+        themes = [
+            {"id": 1, "status": "ongoing", "factory": "남양주1", "energy_type": "power"},
+            {"id": 2, "status": "ongoing", "factory": "남양주1", "energy_type": "power"},  # 구간 안 겹침
+            {"id": 3, "status": "ongoing", "factory": "김해", "energy_type": "power"},     # 다른 공장
+        ]
+        verifications = {
+            1: {"status": "verified", "statusLabel": "검증됨",
+                "window": {"beforeFrom": date(2025, 1, 1), "afterTo": date(2025, 6, 30)}},
+            2: {"status": "verified", "statusLabel": "검증됨",
+                "window": {"beforeFrom": date(2026, 1, 1), "afterTo": date(2026, 6, 30)}},
+            3: {"status": "verified", "statusLabel": "검증됨",
+                "window": {"beforeFrom": date(2025, 1, 1), "afterTo": date(2025, 6, 30)}},
+        }
+        server._mark_duplicate_verifications(themes, verifications, service)
+        for theme_id in (1, 2, 3):
+            self.assertNotEqual(verifications[theme_id]["status"], "duplicate")
+
+    def test_mark_duplicate_verifications_skips_planned_status_and_pending_window(self) -> None:
+        """계획 단계(진행/완료가 아님) 테마와, 검증 자체가 보류(window 없음)인 테마는 대상에서 빠진다."""
+        service = server.import_core("app.services.savings_theme_service")
+        themes = [
+            {"id": 1, "status": "ongoing", "factory": "남양주1", "energy_type": "power"},
+            {"id": 2, "status": "planned", "factory": "남양주1", "energy_type": "power"},
+            {"id": 3, "status": "ongoing", "factory": "논산", "energy_type": "fuel"},
+        ]
+        verifications = {
+            1: {"status": "verified", "statusLabel": "검증됨",
+                "window": {"beforeFrom": date(2025, 8, 1), "afterTo": date(2026, 7, 31)}},
+            2: {"status": "verified", "statusLabel": "검증됨",
+                "window": {"beforeFrom": date(2025, 8, 1), "afterTo": date(2026, 7, 31)}},
+            3: {"status": "pending", "statusLabel": "판정 보류", "window": None},
+        }
+        server._mark_duplicate_verifications(themes, verifications, service)
+        self.assertEqual(verifications[1]["status"], "verified")
+        self.assertEqual(verifications[2]["status"], "verified")
+        self.assertEqual(verifications[3]["status"], "pending")
+
     # ── 전사(경산 제외) 구분 · 경산 월별 폴백 (전사_경산구분_및_월별적재_계획.md) ──
 
     def test_monthly_fallback_production_query_excludes_gwangju_wip_items(self) -> None:

@@ -2294,6 +2294,183 @@ def _savings_theme_amounts(
     }
 
 
+def _month_end(year: int, month: int) -> date:
+    return date(year, month, calendar.monthrange(year, month)[1])
+
+
+def _theme_window_totals(
+    physical_factory: str, energy_type: str, date_from: date, date_to: date,
+    actual_records: list[dict[str, Any]],
+) -> dict[str, float]:
+    """물리 공장 1곳의 [date_from, date_to] 월 경계 구간 (Σ사용량, Σ생산톤, 실측월수).
+
+    ⚠ physical_factory 는 반드시 물리 공장 1곳이어야 한다 — 아래 폴백은 REPLACE
+    방식이라, 집계 라벨을 넣으면 다른 공장 몫까지 raw 재계산돼 버린다
+    (_monthly_intensity_fallback_sources 의 교훈과 같은 함정 — savings_theme 은
+    애초에 물리 공장에만 귀속되므로(server.py의 _validated_theme_payload) 이
+    경로에서는 항상 안전하다).
+    """
+    spec = INTENSITY_METRICS[energy_type]
+    usage_col = spec["column"]
+    clause, values = factory_clause(physical_factory)
+    rows = fetch_all(
+        # 'usage' 는 MySQL 예약어라 별칭으로 쓰면 문법 오류가 난다 — usage_sum 사용.
+        f"SELECT YEAR(date) y, MONTH(date) m, SUM({usage_col}) usage_sum"
+        " FROM energy_daily WHERE date BETWEEN %s AND %s" + clause + " GROUP BY y,m",
+        (date_from, date_to, *values),
+    )
+    monthly_usage: dict[tuple[int, int], float] = {
+        (int(row["y"]), int(row["m"])): scalar(row.get("usage_sum")) for row in rows
+    }
+    fb_service = import_core("app.services.monthly_fallback_service")
+    fb_months = fb_service.fallback_months(physical_factory, date_from, date_to)
+    if fb_months:
+        fb_energy = fb_service.monthly_energy(physical_factory, date_from, date_to)
+        for key in fb_months:
+            monthly_usage[key] = fb_energy[key][usage_col]
+    monthly_ton = _monthly_production_ton(actual_records, physical_factory, date_from, date_to)
+
+    total_usage, total_ton, measured_months = 0.0, 0.0, 0
+    year, month = date_from.year, date_from.month
+    end_index = date_to.year * 12 + date_to.month
+    while year * 12 + month <= end_index:
+        key = (year, month)
+        usage = monthly_usage.get(key)
+        ton = monthly_ton.get(key, 0.0)
+        if usage is not None and ton > 0:
+            total_usage += usage
+            total_ton += ton
+            measured_months += 1
+        year, month = shift_month(year, month, 1)
+    return {"usage": total_usage, "productionTon": total_ton, "measuredMonths": measured_months}
+
+
+def _theme_actual_qty_in_window(
+    service: Any, theme_id: int, date_from: date, date_to: date,
+) -> float | None:
+    """[date_from, date_to] 구간에 등록된 실적 절감량 합 — 미입력만 있으면 None.
+
+    savings_record 는 자체 year 컬럼을 갖는다(테마의 관리연도와 별개) — 구간이
+    연도 경계를 넘으면(예: 11월 시행 + 6개월 후 구간) 두 해를 모두 조회해야 한다.
+    """
+    total = 0.0
+    entered = False
+    for year in range(date_from.year, date_to.year + 1):
+        records = service.records_by_theme([theme_id], year).get(theme_id, {})
+        for month, values in records.items():
+            month_date = date(year, month, 1)
+            if date_from <= month_date <= date_to and values.get("actual") is not None:
+                total += values["actual"]
+                entered = True
+    return total if entered else None
+
+
+def _theme_verification(
+    theme: dict[str, Any], service: Any, base: date, actual_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """테마 1건의 원단위 전후 비교 검증. 계산은 savings_verification_service 가
+    맡고, 여기서는 4개 구간의 (usage, productionTon)을 만들어 넘긴다."""
+    verify_service = import_core("app.services.savings_verification_service")
+    start_ym = theme.get("start_ym")
+    if not start_ym:
+        return {
+            "status": "pending", "statusLabel": verify_service.STATUS_LABELS["pending"],
+            "reason": "시행월이 입력되지 않아 검증할 수 없습니다.", "window": None,
+        }
+    start_year, start_month = (int(part) for part in str(start_ym).split("-"))
+    after_from = date(start_year, start_month, 1)
+    if after_from > base:
+        return {
+            "status": "pending", "statusLabel": verify_service.STATUS_LABELS["pending"],
+            "reason": "시행월이 아직 시작되지 않았습니다.", "window": None,
+        }
+
+    physical_factory = str(theme["factory"])
+    energy_type = str(theme["energy_type"])
+
+    ideal_after_to_year, ideal_after_to_month = shift_month(start_year, start_month, verify_service.WINDOW_MONTHS - 1)
+    after_to = min(_month_end(ideal_after_to_year, ideal_after_to_month), base)
+
+    before_to_year, before_to_month = shift_month(start_year, start_month, -1)
+    before_to = _month_end(before_to_year, before_to_month)
+    before_from_year, before_from_month = shift_month(start_year, start_month, -verify_service.WINDOW_MONTHS)
+    before_from = date(before_from_year, before_from_month, 1)
+
+    after_prev_from, after_prev_to = previous_year_date(after_from), previous_year_date(after_to)
+    before_prev_from, before_prev_to = previous_year_date(before_from), previous_year_date(before_to)
+
+    after = _theme_window_totals(physical_factory, energy_type, after_from, after_to, actual_records)
+    before = _theme_window_totals(physical_factory, energy_type, before_from, before_to, actual_records)
+    after_prev = _theme_window_totals(physical_factory, energy_type, after_prev_from, after_prev_to, actual_records)
+    before_prev = _theme_window_totals(physical_factory, energy_type, before_prev_from, before_prev_to, actual_records)
+
+    actual_qty_after = _theme_actual_qty_in_window(service, int(theme["id"]), after_from, after_to)
+
+    result = verify_service.verify_theme(
+        before, after, before_prev, after_prev,
+        actual_qty_after=actual_qty_after, after_months=after["measuredMonths"],
+    )
+    result["window"] = {
+        "beforeFrom": before_from, "beforeTo": before_to,
+        "afterFrom": after_from, "afterTo": after_to,
+    }
+    result["beforeIntensity"] = _round_or_none(result["intensities"].get("before"), 2)
+    result["afterIntensity"] = _round_or_none(result["intensities"].get("after"), 2)
+    result["beforePrevIntensity"] = _round_or_none(result["intensities"].get("beforePrev"), 2)
+    result["afterPrevIntensity"] = _round_or_none(result["intensities"].get("afterPrev"), 2)
+    result.pop("intensities", None)
+    result["rBeforePct"] = _round_or_none(result.get("rBeforePct"), 1)
+    result["rAfterPct"] = _round_or_none(result.get("rAfterPct"), 1)
+    result["deltaPct"] = _round_or_none(result.get("deltaPct"), 1)
+    result["avoidedQty"] = _round_or_none(result.get("avoidedQty"), 1)
+    result["explainPct"] = _round_or_none(result.get("explainPct"), 1)
+    result["actualQtyAfter"] = _round_or_none(actual_qty_after, 1)
+    return result
+
+
+def _mark_duplicate_verifications(
+    themes: list[dict[str, Any]], verifications: dict[int, dict[str, Any]], service: Any,
+) -> None:
+    """같은 물리공장·에너지원에서 검증 구간이 겹치는 진행/완료 테마에 '중복' 표식.
+
+    개별 테마 검증은 그 구간의 원단위 변화를 통째로 해당 테마 하나의 몫으로
+    돌린다 — 같은 구간에 다른 테마가 더 있으면 원리적으로 귀속이 불가능하다.
+    computed 값(Δ·설명률 등)은 참고용으로 남기고 status/reason 만 대체한다
+    (총량 대사가 이 경우의 최종 신뢰 구간이 된다, 설계서 §6-⑥).
+    """
+    windows_by_key: dict[tuple[str, str], list[tuple[int, date, date]]] = {}
+    for theme in themes:
+        if theme["status"] not in service.ACTIVE_STATUSES:
+            continue
+        verification = verifications.get(int(theme["id"]))
+        window = verification.get("window") if verification else None
+        if not window:
+            continue
+        key = (str(theme["factory"]), str(theme["energy_type"]))
+        windows_by_key.setdefault(key, []).append(
+            (int(theme["id"]), window["beforeFrom"], window["afterTo"]),
+        )
+
+    duplicate_ids: set[int] = set()
+    for entries in windows_by_key.values():
+        for i in range(len(entries)):
+            id_a, from_a, to_a = entries[i]
+            for id_b, from_b, to_b in entries[i + 1:]:
+                if from_a <= to_b and from_b <= to_a:
+                    duplicate_ids.add(id_a)
+                    duplicate_ids.add(id_b)
+
+    for theme_id in duplicate_ids:
+        verification = verifications[theme_id]
+        if verification["status"] in ("verified", "review", "unverified"):
+            verification["status"] = "duplicate"
+            verification["statusLabel"] = "중복 구간"
+            verification["reason"] = (
+                "같은 공장·에너지원에 검증 구간이 겹치는 테마가 더 있어 이 테마만의 몫으로"
+                " 나누기 어렵습니다. 아래 공장별 총량 대사를 함께 확인하세요."
+            )
+
+
 @app.get("/api/v1/savings")
 def savings(
     factory: str = "전사",
@@ -2328,17 +2505,33 @@ def savings(
     themes = service.list_themes(members, year, energy_type, statuses)
     records = service.records_by_theme([t["id"] for t in themes], year)
 
+    # 검증(원단위 전후 비교)에 쓸 생산실적 — 전 구간(-6개월)에 전년 동기(-12개월)까지
+    # 더 필요하므로, 가장 이른 시행월 기준으로 2년 남짓 여유를 둔 범위를 한 번만 읽는다.
+    themes_with_start = [t for t in themes if t.get("start_ym")]
+    if themes_with_start:
+        earliest_start = min(
+            date(*(int(part) for part in str(t["start_ym"]).split("-")), 1) for t in themes_with_start
+        )
+        verification_records_from = date(earliest_start.year - 2, 1, 1)
+    else:
+        verification_records_from = date(year, 1, 1)
+    verification_frame = fetch_actual_production_frame(verification_records_from, base)
+    verification_actual_records = actual_production_records(verification_frame)
+
     price_cache: dict[tuple[str, str], dict[tuple[int, int], float | None]] = {}
     theme_rows: list[dict[str, Any]] = []
+    verifications: dict[int, dict[str, Any]] = {}
     monthly_planned = [0.0] * 12
     monthly_actual = [0.0] * 12
     monthly_actual_measured = [False] * 12
     by_factory: dict[str, float] = {}
 
     for theme in themes:
+        theme_id = int(theme["id"])
         computed = _savings_theme_amounts(
-            theme, records.get(int(theme["id"]), {}), price_cache, year, base,
+            theme, records.get(theme_id, {}), price_cache, year, base,
         )
+        verifications[theme_id] = _theme_verification(theme, service, base, verification_actual_records)
         for index, month_row in enumerate(computed["months"]):
             if month_row["plannedAmount"] is not None:
                 monthly_planned[index] += month_row["plannedAmount"]
@@ -2349,7 +2542,7 @@ def savings(
             name = str(theme["factory"])
             by_factory[name] = by_factory.get(name, 0.0) + computed["actualAmount"]
         theme_rows.append({
-            "id": int(theme["id"]),
+            "id": theme_id,
             "factory": theme["factory"],
             "title": theme["title"],
             "energyType": theme["energy_type"],
@@ -2367,9 +2560,14 @@ def savings(
             "plannedAmount": computed["plannedAmount"],
             "actualAmount": computed["actualAmount"],
             "rate": computed["rate"],
-            # 검증은 5단계에서 구현한다 — 그때까지 화면이 빈 칸으로 두도록 명시한다.
-            "verification": None,
         })
+
+    _mark_duplicate_verifications(themes, verifications, service)
+    for row in theme_rows:
+        verification = verifications[row["id"]]
+        row["verification"] = {
+            "status": verification["status"], "statusLabel": verification["statusLabel"],
+        }
 
     # 월별 계획 대비 실적 — 실적이 한 건도 입력되지 않은 달은 0이 아니라 None.
     # 0으로 두면 미래 월이 "달성률 0%"로 오독된다(생산실적 화면과 같은 관례).
@@ -2396,6 +2594,45 @@ def savings(
     priced_types = service.PRICED_ENERGY_TYPES
     unpriced_themes = [row for row in theme_rows if row["energyType"] not in priced_types]
 
+    status_counts = {"verified": 0, "review": 0, "unverified": 0, "pending": 0, "duplicate": 0}
+    for row in theme_rows:
+        key = row["verification"]["status"]
+        status_counts[key] = status_counts.get(key, 0) + 1
+
+    # 총량 대사(§6-⑥) — 진행/완료 테마가 있는 (물리공장, 에너지원) 조합마다
+    # YTD 실제 사용량 감소분과 등록 실적 합을 맞춰본다. 테마별 검증은 구간이
+    # 겹치면 개별 귀속이 안 되지만, 이 대사는 공장×에너지원을 통째로 보므로
+    # 겹쳐도 새지 않는다 — 과대보고를 잡는 최종 안전장치.
+    verify_service = import_core("app.services.savings_verification_service")
+    reconciliation_keys: set[tuple[str, str]] = {
+        (str(theme["factory"]), str(theme["energy_type"]))
+        for theme in themes if theme["status"] in service.ACTIVE_STATUSES
+    }
+    reconciliation: list[dict[str, Any]] = []
+    ytd_from = date(year, 1, 1)
+    prev_ytd_from, prev_ytd_to = previous_year_date(ytd_from), previous_year_date(base)
+    for physical_factory, r_energy_type in sorted(reconciliation_keys):
+        current = _theme_window_totals(physical_factory, r_energy_type, ytd_from, base, verification_actual_records)
+        previous = _theme_window_totals(physical_factory, r_energy_type, prev_ytd_from, prev_ytd_to, verification_actual_records)
+        registered = sum(
+            row["actualQty"] or 0.0
+            for row in theme_rows
+            if row["factory"] == physical_factory and row["energyType"] == r_energy_type
+            and row["status"] in service.ACTIVE_STATUSES
+        )
+        outcome = verify_service.reconcile_factory_energy_type(current, previous, registered)
+        reconciliation.append({
+            "factory": physical_factory,
+            "energyType": r_energy_type,
+            "energyLabel": service.ENERGY_TYPE_LABELS.get(r_energy_type),
+            "unit": service.ENERGY_TYPE_UNITS.get(r_energy_type),
+            "verdict": outcome["verdict"],
+            "usageChange": _round_or_none(outcome["usageChange"], 1),
+            "avoidedUsage": _round_or_none(outcome["avoidedUsage"], 1),
+            "registeredQty": round(registered, 1),
+            "explainPct": _round_or_none(outcome["explainPct"], 1),
+        })
+
     return json_safe({
         "baseDate": base,
         "year": year,
@@ -2407,11 +2644,11 @@ def savings(
             "actualAmount": round(actual_total, 1),
             "rate": round(actual_total / planned_total * 100, 1) if planned_total > 0 else None,
             "themeCount": len(theme_rows),
-            # 검증 5단계 전까지는 전부 '판정 보류'로 내려보낸다.
-            "verified": 0, "review": 0, "unverified": 0, "pending": len(theme_rows),
+            **status_counts,
         },
         "monthly": monthly,
         "themes": theme_rows,
+        "reconciliation": reconciliation,
         "byFactory": [
             {"factory": name, "actualAmount": round(amount, 1)}
             for name, amount in sorted(by_factory.items(), key=lambda item: -item[1])
@@ -2454,6 +2691,55 @@ def savings_theme_detail(theme_id: int) -> dict[str, Any]:
     records = service.records_by_theme([theme_id], year).get(theme_id, {})
     computed = _savings_theme_amounts(theme, records, {}, year, month_to)
     energy_type = str(theme["energy_type"])
+
+    # 검증(원단위 전후 비교) — 이 테마 하나만 필요한 좁은 범위로 생산실적을 읽는다.
+    verification: dict[str, Any]
+    start_ym = theme.get("start_ym")
+    if start_ym:
+        start_year = int(str(start_ym).split("-")[0])
+        records_from = date(start_year - 2, 1, 1)
+        frame = fetch_actual_production_frame(records_from, base)
+        actual_records = actual_production_records(frame)
+        verification = _theme_verification(theme, service, base, actual_records)
+        window = verification.get("window")
+        if window:
+            # 같은 물리공장·에너지원의 다른 진행/완료 테마와 검증 구간이 겹치는지 —
+            # list_themes 는 관리연도(theme.year) 단위라 인접 연도의 테마도 겹칠 수
+            # 있어 시행월 기준 폭넓게(전후 1년) 다시 조회한다.
+            siblings = service.list_themes(
+                (theme["factory"],), year - 1, energy_type, list(service.ACTIVE_STATUSES),
+            ) + service.list_themes(
+                (theme["factory"],), year, energy_type, list(service.ACTIVE_STATUSES),
+            ) + service.list_themes(
+                (theme["factory"],), year + 1, energy_type, list(service.ACTIVE_STATUSES),
+            )
+            for sibling in siblings:
+                if int(sibling["id"]) == theme_id or not sibling.get("start_ym"):
+                    continue
+                sibling_verification = _theme_verification(sibling, service, base, actual_records)
+                sibling_window = sibling_verification.get("window")
+                if not sibling_window:
+                    continue
+                overlaps = (
+                    window["beforeFrom"] <= sibling_window["afterTo"]
+                    and sibling_window["beforeFrom"] <= window["afterTo"]
+                )
+                if overlaps and verification["status"] in ("verified", "review", "unverified"):
+                    verification["status"] = "duplicate"
+                    verification["statusLabel"] = "중복 구간"
+                    verification["reason"] = (
+                        f"'{sibling['title']}' 테마와 검증 구간이 겹쳐 이 테마만의 몫으로 나누기"
+                        " 어렵습니다. 공장별 총량 대사(에너지 절감 화면)를 함께 확인하세요."
+                    )
+                    break
+    else:
+        verify_service = import_core("app.services.savings_verification_service")
+        verification = {
+            "status": "pending", "statusLabel": verify_service.STATUS_LABELS["pending"],
+            "reason": "시행월이 입력되지 않아 검증할 수 없습니다.", "window": None,
+        }
+    verification.pop("window", None)
+
     return json_safe({
         "id": int(theme["id"]),
         "factory": theme["factory"],
@@ -2476,7 +2762,7 @@ def savings_theme_detail(theme_id: int) -> dict[str, Any]:
         "plannedAmount": computed["plannedAmount"],
         "actualAmount": computed["actualAmount"],
         "rate": computed["rate"],
-        "verification": None,
+        "verification": verification,
     })
 
 

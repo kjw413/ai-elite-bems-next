@@ -7,7 +7,7 @@ import { factories } from "@/lib/bems-data";
 import { PAGE_DEFS } from "@/lib/bems-pages";
 
 type AnyRow = Record<string, unknown>;
-type AdminTab = "events" | "targets" | "monthly" | "data" | "predictions" | "mail" | "visibility";
+type AdminTab = "events" | "targets" | "savings" | "monthly" | "data" | "predictions" | "mail" | "visibility";
 
 function messageOf(error: unknown) {
   return error instanceof Error ? error.message : "요청을 처리하지 못했습니다.";
@@ -528,6 +528,266 @@ function MonthlyBackfillPanel({ isAdmin }: { isAdmin: boolean }) {
   </div>;
 }
 
+const savingsEnergyTypeFallback = [
+  { value: "power", label: "전력", unit: "kWh", priced: true },
+  { value: "fuel", label: "연료", unit: "Nm³", priced: true },
+  { value: "water", label: "용수", unit: "ton", priced: false },
+];
+const savingsStatusFallback = [
+  { value: "planned", label: "계획" }, { value: "ongoing", label: "진행" },
+  { value: "done", label: "완료" }, { value: "dropped", label: "중단" },
+];
+const savingsCategoryFallback = ["설비교체", "운전개선", "공정개선", "누설저감", "계약변경", "기타"];
+
+type SavingsThemeRow = {
+  id: number; factory: string; title: string; energyType: string; energyLabel: string; unit: string;
+  category: string | null; status: string; statusLabel: string; startYm: string | null; owner: string | null;
+  investAmount: number | null; plannedQty: number; actualQty: number;
+  plannedAmount: number | null; actualAmount: number | null; rate: number | null;
+};
+type SavingsOptions = {
+  energyTypes: { value: string; label: string; unit: string; priced: boolean }[];
+  statuses: { value: string; label: string }[];
+  categories: string[];
+};
+type SavingsThemeForm = {
+  factory: string; title: string; energy_type: string; category: string; status: string;
+  start_ym: string; owner: string; invest_amount: string; note: string;
+};
+type SavingsThemeMonth = { month: string; plannedQty: number | null; actualQty: number | null };
+
+const emptySavingsForm = (factory: string): SavingsThemeForm => ({
+  factory, title: "", energy_type: "power", category: "설비교체", status: "planned",
+  start_ym: "", owner: "", invest_amount: "", note: "",
+});
+
+// 에너지 절감 테마 등록·수정과 테마별 월간 계획/실적(절감'량') 입력.
+// 절감금액은 여기서 입력하지 않는다 — energy_daily/energy_monthly의 그 달
+// 가중평균 단가를 곱해 조회 시점에 산출한다(서버 savings_theme_amounts 참고).
+// 용수는 단가가 시스템 관리 대상이 아니라(2026-07-30 결정) 금액이 나오지 않고
+// 절감'량'만 관리된다 — 폼에서 막지 않고 그대로 등록하게 둔다.
+function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
+  const [factory, setFactory] = useState("남양주1");
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [themes, setThemes] = useState<SavingsThemeRow[]>([]);
+  const [options, setOptions] = useState<SavingsOptions>({ energyTypes: savingsEnergyTypeFallback, statuses: savingsStatusFallback, categories: savingsCategoryFallback });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState<SavingsThemeForm>(() => emptySavingsForm(factory));
+
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [months, setMonths] = useState<SavingsThemeMonth[]>([]);
+  const [monthForm, setMonthForm] = useState<Record<number, { planned: string; actual: string }>>({});
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  const [recordsSaving, setRecordsSaving] = useState(false);
+
+  const loadController = useRef<AbortController | null>(null);
+  const detailController = useRef<AbortController | null>(null);
+
+  const load = useCallback(async () => {
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await apiRequest<{ themes: SavingsThemeRow[]; options: SavingsOptions }>(
+        `/savings?${query({ factory, date: `${year}-12-31`, status: "all" })}`,
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
+      setThemes(result.themes ?? []);
+      if (result.options) setOptions(result.options);
+    } catch (requestError) {
+      if (isAbortError(requestError)) return;
+      setError(messageOf(requestError));
+    } finally {
+      if (loadController.current === controller) setLoading(false);
+    }
+  }, [factory, year]);
+
+  useEffect(() => {
+    void load();
+    return () => { loadController.current?.abort(); detailController.current?.abort(); };
+  }, [load]);
+
+  useEffect(() => {
+    if (selectedId != null && !themes.some(theme => theme.id === selectedId)) setSelectedId(null);
+  }, [themes, selectedId]);
+
+  const loadRecords = useCallback(async (themeId: number) => {
+    detailController.current?.abort();
+    const controller = new AbortController();
+    detailController.current = controller;
+    setRecordsLoading(true);
+    try {
+      const detail = await apiRequest<{ months: SavingsThemeMonth[] }>(`/savings/themes/${themeId}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setMonths(detail.months ?? []);
+      setMonthForm(Object.fromEntries((detail.months ?? []).map((month, index) => [
+        index + 1,
+        { planned: month.plannedQty == null ? "" : String(month.plannedQty), actual: month.actualQty == null ? "" : String(month.actualQty) },
+      ])));
+    } catch (requestError) {
+      if (!isAbortError(requestError)) setError(messageOf(requestError));
+    } finally {
+      if (detailController.current === controller) setRecordsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedId != null) void loadRecords(selectedId);
+    else { setMonths([]); setMonthForm({}); }
+  }, [selectedId, loadRecords]);
+
+  function resetForm() {
+    setEditingId(null);
+    setForm(emptySavingsForm(factory));
+  }
+
+  function editTheme(row: SavingsThemeRow) {
+    setEditingId(row.id);
+    setForm({
+      factory: row.factory, title: row.title, energy_type: row.energyType,
+      category: row.category ?? "", status: row.status, start_ym: row.startYm ?? "",
+      owner: row.owner ?? "", invest_amount: row.investAmount == null ? "" : String(row.investAmount),
+      note: "",
+    });
+  }
+
+  async function submitTheme(event: React.FormEvent) {
+    event.preventDefault();
+    if (!form.title.trim() || saving) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    const payload = {
+      factory: form.factory,
+      year,
+      title: form.title.trim(),
+      energy_type: form.energy_type,
+      status: form.status,
+      category: form.category || null,
+      start_ym: form.start_ym || null,
+      owner: form.owner.trim() || null,
+      invest_amount: form.invest_amount === "" ? null : Number(form.invest_amount),
+      note: form.note.trim() || null,
+    };
+    try {
+      if (editingId == null) {
+        await apiRequest("/savings/themes", { method: "POST", body: JSON.stringify(payload) });
+        setNotice("절감 테마를 등록했습니다.");
+      } else {
+        await apiRequest(`/savings/themes/${editingId}`, { method: "PUT", body: JSON.stringify(payload) });
+        setNotice("절감 테마를 수정했습니다.");
+      }
+      resetForm();
+      await load();
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeTheme(row: SavingsThemeRow) {
+    if (!window.confirm(`"${row.title}" 테마를 삭제하시겠습니까? 등록된 월별 계획·실적도 함께 삭제됩니다.`)) return;
+    setError("");
+    try {
+      const result = await apiRequest<{ recordCount: number }>(`/savings/themes/${row.id}`, { method: "DELETE" });
+      setNotice(`테마와 딸린 월별 기록 ${result.recordCount}건을 삭제했습니다.`);
+      if (editingId === row.id) resetForm();
+      if (selectedId === row.id) setSelectedId(null);
+      await load();
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    }
+  }
+
+  const selectedTheme = themes.find(theme => theme.id === selectedId) ?? null;
+  const selectedUnit = selectedTheme ? options.energyTypes.find(item => item.value === selectedTheme.energyType)?.unit ?? "" : "";
+
+  async function saveRecords() {
+    if (selectedId == null || recordsSaving) return;
+    setRecordsSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const items = Object.entries(monthForm).map(([month, values]) => ({
+        month: Number(month),
+        planned_qty: values.planned === "" ? 0 : Number(values.planned),
+        actual_qty: values.actual === "" ? null : Number(values.actual),
+      }));
+      await apiRequest(`/savings/themes/${selectedId}/records`, { method: "PUT", body: JSON.stringify({ year, items }) });
+      setNotice("월별 계획·실적을 저장했습니다.");
+      await Promise.all([loadRecords(selectedId), load()]);
+    } catch (requestError) {
+      setError(messageOf(requestError));
+    } finally {
+      setRecordsSaving(false);
+    }
+  }
+
+  return <div className="admin-grid savings-admin">
+    {isAdmin && <form className="card admin-form" onSubmit={submitTheme}>
+      <header><div><span className="eyebrow">SAVINGS THEME</span><h3>{editingId == null ? "절감 테마 등록" : "절감 테마 수정"}</h3></div>{editingId != null && <button type="button" className="text-button" onClick={resetForm}>취소</button>}</header>
+      <div className="form-grid">
+        <label className="field full"><span>테마명</span><input value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} placeholder="예: 노후 변압기 고효율 신품 교체" required/></label>
+        <label className="field"><span>공장</span><select value={form.factory} disabled={editingId != null} onChange={event => setForm({ ...form, factory: event.target.value })}>{eventFactories.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="field"><span>에너지원</span><select value={form.energy_type} onChange={event => setForm({ ...form, energy_type: event.target.value })}>{options.energyTypes.map(item => <option key={item.value} value={item.value}>{item.label}{item.priced ? "" : " (금액 미산출)"}</option>)}</select></label>
+        <label className="field"><span>분류</span><select value={form.category} onChange={event => setForm({ ...form, category: event.target.value })}>{options.categories.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="field"><span>상태</span><select value={form.status} onChange={event => setForm({ ...form, status: event.target.value })}>{options.statuses.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+        <label className="field"><span>시행월 (검증 분기점)</span><input type="month" value={form.start_ym} onChange={event => setForm({ ...form, start_ym: event.target.value })}/></label>
+        <label className="field"><span>담당</span><input value={form.owner} onChange={event => setForm({ ...form, owner: event.target.value })} placeholder="예: 설비팀 홍길동"/></label>
+        <label className="field"><span>투자비(원)</span><input type="number" min="0" step="1" value={form.invest_amount} onChange={event => setForm({ ...form, invest_amount: event.target.value })}/></label>
+        <label className="field full"><span>메모</span><textarea rows={3} value={form.note} onChange={event => setForm({ ...form, note: event.target.value })}/></label>
+      </div>
+      <button className="primary-button" type="submit" disabled={saving}><Save size={16}/>{saving ? "저장 중..." : editingId == null ? "등록" : "저장"}</button>
+      {error && <div className="form-message error">{error}</div>}{notice && <div className="form-message success">{notice}</div>}
+    </form>}
+
+    <article className="card admin-list">
+      <header className="panel-header">
+        <div><span className="eyebrow">SAVINGS THEMES</span><h3>등록된 테마</h3></div>
+        <div className="action-row">
+          <label className="field compact-field"><span>연도</span><input type="number" value={year} onChange={event => setYear(Number(event.target.value) || year)}/></label>
+          <button type="button" className="secondary-button" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/>새로고침</button>
+        </div>
+      </header>
+      {loading ? <div className="loading inline-loading"><RefreshCw className="spin"/>불러오는 중입니다.</div> : <div className="table-wrap"><table><thead><tr><th>테마명</th><th>공장</th><th>구분</th><th>상태</th><th>달성률</th>{isAdmin && <th>관리</th>}</tr></thead><tbody>
+        {themes.map(row => <tr key={row.id} className={row.id === selectedId ? "selected" : ""} onClick={() => setSelectedId(row.id)} style={{ cursor: "pointer" }}>
+          <td>{row.title}</td><td>{row.factory}</td><td>{row.energyLabel}</td><td><span className={`savings-status ${row.status}`}>{row.statusLabel}</span></td>
+          <td>{row.rate == null ? "-" : `${display(row.rate)}%`}</td>
+          {isAdmin && <td><div className="row-actions"><button type="button" aria-label="수정" onClick={event => { event.stopPropagation(); editTheme(row); }}><Pencil size={15}/></button><button type="button" aria-label="삭제" onClick={event => { event.stopPropagation(); void removeTheme(row); }}><Trash2 size={15}/></button></div></td>}
+        </tr>)}
+      </tbody></table>{themes.length === 0 && <div className="empty-row">{year}년에 등록된 절감 테마가 없습니다.</div>}</div>}
+    </article>
+
+    {selectedTheme && <article className="card admin-list admin-span savings-record-panel">
+      <header className="panel-header"><div><span className="eyebrow">MONTHLY PLAN · ACTUAL</span><h3>{selectedTheme.title} · {year}년 월별 계획/실적 ({selectedUnit})</h3></div><button type="button" className="secondary-button" onClick={() => void loadRecords(selectedTheme.id)} disabled={recordsLoading}><RefreshCw size={15}/>새로고침</button></header>
+      {recordsLoading ? <div className="loading inline-loading"><RefreshCw className="spin"/>불러오는 중입니다.</div> : <>
+        <div className="table-wrap"><table className="savings-record-grid"><thead><tr><th>월</th><th>계획량 ({selectedUnit})</th><th>실적량 ({selectedUnit})</th></tr></thead><tbody>
+          {months.map((month, index) => {
+            const key = index + 1;
+            const values = monthForm[key] ?? { planned: "", actual: "" };
+            return <tr key={month.month}>
+              <th scope="row">{month.month}</th>
+              <td><input type="text" inputMode="decimal" disabled={!isAdmin} value={values.planned} onChange={event => setMonthForm(current => ({ ...current, [key]: { ...values, planned: event.target.value } }))} onFocus={event => event.currentTarget.select()}/></td>
+              <td><input type="text" inputMode="decimal" placeholder="미입력" disabled={!isAdmin} value={values.actual} onChange={event => setMonthForm(current => ({ ...current, [key]: { ...values, actual: event.target.value } }))} onFocus={event => event.currentTarget.select()}/></td>
+            </tr>;
+          })}
+        </tbody></table></div>
+        {isAdmin ? <button className="primary-button" type="button" disabled={recordsSaving} onClick={() => void saveRecords()}><Save size={16}/>{recordsSaving ? "저장 중..." : "월별 계획·실적 저장"}</button> : <div className="permission-note">조회 사용자는 계획·실적을 확인만 할 수 있습니다.</div>}
+        <p className="panel-copy">실적량 칸을 비우면 "미입력"으로 저장됩니다 — 0(측정된 실적 없음)과는 다르게 취급되어 달성률 계산에서 빠집니다. 절감금액은 여기서 입력하지 않고 그 달 에너지 단가로 자동 산출됩니다.</p>
+      </>}
+    </article>}
+  </div>;
+}
+
 const mailPeriods = [
   { id: "daily", label: "일간" },
   { id: "weekly", label: "주간" },
@@ -1005,16 +1265,17 @@ function PageVisibilityPanel() {
 }
 
 export function AdminScreen({ factory, date, isAdmin }: { factory: string; date: string; isAdmin: boolean }) {
-  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "monthly", "data", "predictions", "mail", "visibility"] : ["events", "targets"], [isAdmin]);
+  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "savings", "monthly", "data", "predictions", "mail", "visibility"] : ["events", "targets"], [isAdmin]);
   const [tab, setTab] = useState<AdminTab>("events");
   useEffect(() => { if (!allowedTabs.includes(tab)) setTab("events"); }, [allowedTabs, tab]);
-  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", monthly: "월별 실적 백필", data: "데이터·동기화", predictions: "예측·모델 운영", mail: "메일 리포트", visibility: "페이지 노출 설정" };
+  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", savings: "절감 테마", monthly: "월별 실적 백필", data: "데이터·동기화", predictions: "예측·모델 운영", mail: "메일 리포트", visibility: "페이지 노출 설정" };
 
   return <section className="screen-stack">
     {!isAdmin && <div className="permission-banner"><ShieldAlert size={21}/><div><strong>조회 사용자 모드</strong><p>이벤트와 절감 목표는 열람만 가능하며 모든 변경 작업은 서버에서 차단됩니다.</p></div></div>}
     <div className="admin-tabs" role="tablist">{allowedTabs.map(item => <button type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{labels[item]}</button>)}</div>
     {tab === "events" && <EventsPanel factory={factory} date={date} isAdmin={isAdmin}/>}
     {tab === "targets" && <TargetsPanel factory={factory} date={date} isAdmin={isAdmin}/>}
+    {tab === "savings" && isAdmin && <SavingsThemePanel isAdmin={isAdmin}/>}
     {tab === "monthly" && isAdmin && <MonthlyBackfillPanel isAdmin={isAdmin}/>}
     {tab === "data" && isAdmin && <DataPanel/>}
     {tab === "predictions" && isAdmin && <PredictionOpsPanel factory={factory} date={date}/>}
