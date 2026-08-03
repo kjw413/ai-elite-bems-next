@@ -546,6 +546,76 @@ def _apply_monthly_energy_fallback(
     return list(by_key.values())
 
 
+def _monthly_intensity_fallback_sources(
+    factory: str, month_from: date, month_to: date,
+) -> tuple[dict[tuple[int, int], dict[str, float]], dict[tuple[int, int], float]] | None:
+    """결측 물리 공장들만의 (연,월)별 (raw 사용량, 생산 kg) 합 — 없으면 None.
+
+    dashboard()의 월별 전년비·intensity_analysis()의 월별 원단위가 함께 쓰는
+    가중 원단위(Σusage/Σproduction) 계산의 폴백 소스. 두 화면 모두 RawDB 저장
+    원단위(power_per_ton_kwh 등) × mix_prod_kg 의 가중평균을 쓰는데, 이 SQL은
+    `unit_col > 0 AND mix_prod_kg > 0` 인 날짜만 센다(데이터 품질 필터).
+
+    ⚠ 반환값은 factory 라벨 전체가 아니라 **결측이 있는 물리 공장만의 합**이다 —
+    호출자가 기존 SQL 결과(다른 공장들의 필터 통과분)에 "더해야" 한다(ADD).
+    factory="전사" 로 monthly_energy()/monthly_production_kg() 를 통째로 불러
+    REPLACE 하면, energy_monthly/production_monthly 에는 없는 위 데이터 품질
+    필터가 사라져 나머지 5개 공장 몫까지 raw SUM 으로 다시 계산돼 버린다
+    (실측 회귀: 2026-01 usage 항등식 검증에서 약 8%(57만 kWh) 과다 발견 —
+    필터에 걸려 빠졌어야 할 날짜가 raw SUM 에는 그대로 포함됐기 때문).
+    결측 공장 자신은 그 달에 daily 행이 아예 없어 raw SUM 이 곧 월별 테이블
+    값과 같으므로(품질 필터가 적용될 대상 자체가 없음), 그 공장만 단독으로
+    조회하면 이 문제가 생기지 않는다.
+
+    ⚠ 반드시 월 경계 집계(GROUP BY YEAR(date), MONTH(date))에서만 호출할 것 —
+    monthly_fallback_service 의 규칙 3.
+    """
+    fb_service = import_core("app.services.monthly_fallback_service")
+    energy_columns = (
+        "total_power_kwh", "fuel_nm3", "water_ton",
+        "wastewater_ton", "power_cost_krw", "fuel_cost_krw",
+    )
+    gap_energy: dict[tuple[int, int], dict[str, float]] = {}
+    gap_production: dict[tuple[int, int], float] = {}
+    for member in physical_factory_members(factory):
+        member_months = (
+            fb_service.fallback_months(member, month_from, month_to)
+            | fb_service.production_fallback_months(member, month_from, month_to)
+        )
+        if not member_months:
+            continue
+        member_energy = fb_service.monthly_energy(member, month_from, month_to)
+        member_production = fb_service.monthly_production_kg(member, month_from, month_to)
+        for key in member_months:
+            bucket = gap_energy.setdefault(key, {col: 0.0 for col in energy_columns})
+            for col in energy_columns:
+                bucket[col] += member_energy[key][col]
+            gap_production[key] = gap_production.get(key, 0.0) + member_production[key]
+    if not gap_energy:
+        return None
+    return gap_energy, gap_production
+
+
+def _add_intensity_fallback(
+    existing_ratio: float | None, existing_kg: float, gap_usage: float, gap_kg: float,
+) -> float | None:
+    """가중 원단위(kWh/ton 등)에 결측 공장의 raw 사용량·생산량을 더한 새 비율.
+
+    ⚠ existing_ratio 는 톤당 값인데 existing_kg 는 kg 단위다 — 그대로 곱하면
+    1000배 어긋난다(실측 회귀: 2026-01 원단위가 279,277 로 나와 발견 — 정상
+    범위는 300~400). 반드시 톤으로 환산한 뒤 곱하고, 최종 분모도 톤이어야
+    한다. dashboard()/intensity_analysis() 양쪽에 같은 계산이 따로 있으면
+    한쪽만 고치고 잊기 쉬워 여기 하나로 모은다.
+
+    반환 None: 분모(existing_kg+gap_kg)가 0 이하 — 원단위를 만들 수 없다.
+    """
+    total_kg = existing_kg + gap_kg
+    if total_kg <= 0:
+        return None
+    existing_usage = existing_ratio * (existing_kg / 1000) if existing_ratio is not None else 0.0
+    return (existing_usage + gap_usage) / (total_kg / 1000)
+
+
 def build_energy_yoy(rows: list[dict[str, Any]], year: int) -> list[dict[str, Any]]:
     """금년 vs 전년 월별 사용량 비교 12행 구성.
 
@@ -1220,13 +1290,21 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
         """
         SELECT YEAR(date) y, MONTH(date) m,
                SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN power_per_ton_kwh * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) power,
+               SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) power_kg,
                SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN fuel_per_ton_nm3 * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) fuel,
-               SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN water_per_ton_ton * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) water
+               SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) fuel_kg,
+               SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN water_per_ton_ton * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) water,
+               SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) water_kg
         FROM energy_daily WHERE date BETWEEN %s AND %s
         """ + yoy_clause + " GROUP BY y,m ORDER BY y,m",
         (date(base.year - 1, 1, 1), base, *yoy_values),
     )
     yoy_maps: dict[str, dict[tuple[int, int], float]] = {
+        "power": {}, "fuel": {}, "water": {},
+    }
+    # 폴백을 ADD 방식으로 합치려면 각 월의 분모(필터 통과 production_kg)도
+    # 같이 있어야 한다 — 비율만 저장하면 나중에 되돌릴 수 없다.
+    yoy_production_kg: dict[str, dict[tuple[int, int], float]] = {
         "power": {}, "fuel": {}, "water": {},
     }
     for row in yoy_rows:
@@ -1235,6 +1313,30 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
             value = optional_scalar(row.get(metric_key))
             if value is not None:
                 yoy_maps[metric_key][key] = value
+                yoy_production_kg[metric_key][key] = scalar(row.get(f"{metric_key}_kg"))
+    # 경산 등 일별 실적이 없는 달의 월별 전년비 폴백 — 그 달은 energy_daily에
+    # 행이 아예 없어 위 SQL의 CASE WHEN이 전부 걸러내므로 yoy_maps에 조용히
+    # 빠져 있다. energy_monthly/production_monthly 값을 기존 값에 "더한다"
+    # (ADD — REPLACE 하면 나머지 5개 공장의 데이터 품질 필터가 사라진다,
+    # _monthly_intensity_fallback_sources 참고).
+    intensity_fallback = _monthly_intensity_fallback_sources(
+        factory, date(base.year - 1, 1, 1), base,
+    )
+    if intensity_fallback:
+        gap_energy, gap_production = intensity_fallback
+        usage_col_by_metric = {"power": "total_power_kwh", "fuel": "fuel_nm3", "water": "water_ton"}
+        for key, gap_kg in gap_production.items():
+            if gap_kg <= 0:
+                continue
+            for metric_key, usage_col in usage_col_by_metric.items():
+                merged = _add_intensity_fallback(
+                    yoy_maps[metric_key].get(key),
+                    yoy_production_kg[metric_key].get(key, 0.0),
+                    gap_energy[key][usage_col],
+                    gap_kg,
+                )
+                if merged is not None:
+                    yoy_maps[metric_key][key] = merged
     yoy_by_metric: dict[str, list[dict[str, Any]]] = {}
     for metric_key, yoy_map in yoy_maps.items():
         metric_rows = []
@@ -1524,6 +1626,27 @@ def intensity_analysis(
         if value is not None and production_kg > 0:
             monthly_map[key] = value
             monthly_weighted_values[key] = value * (production_kg / 1000)
+    # 경산 등 일별 실적이 없는 달의 원단위 폴백 — SQL의 CASE WHEN이 그 달을
+    # 통째로 걸러내므로(energy_daily에 행이 없음) 위 세 dict에서 조용히 빠져
+    # 있다. energy_monthly/production_monthly 값을 기존 값에 "더한다"(ADD —
+    # REPLACE 하면 나머지 5개 공장의 데이터 품질 필터 통과분까지 raw SUM으로
+    # 다시 계산돼 버린다. _monthly_intensity_fallback_sources 참고).
+    intensity_fallback = _monthly_intensity_fallback_sources(factory, history_start, base)
+    if intensity_fallback:
+        gap_energy, gap_production = intensity_fallback
+        for key, gap_kg in gap_production.items():
+            if gap_kg <= 0:
+                continue
+            value = _add_intensity_fallback(
+                monthly_map.get(key), monthly_production.get(key, 0.0),
+                gap_energy[key][usage_col], gap_kg,
+            )
+            if value is None:
+                continue
+            total_kg = monthly_production.get(key, 0.0) + gap_kg
+            monthly_production[key] = total_kg
+            monthly_map[key] = value
+            monthly_weighted_values[key] = value * (total_kg / 1000)
     # savings_target 은 "경산 제외" 전용 목표 행을 따로 두지 않는다 — 전사 성격
     # 라벨은 모두 같은 "ALL" 목표를 공유한다(target_service.TARGET_FACTORIES 참고).
     target_factory = "ALL" if is_company_wide(factory) else factory
@@ -1751,6 +1874,66 @@ def _cost_totals(
     return _cost_row_totals(row, metric)
 
 
+def _monthly_cost_totals(
+    factory: str, metric: str, month_from: date, month_to: date,
+) -> dict[tuple[int, int], dict[str, float | None]]:
+    """(연,월) → {cost, usage, pricedCost, pricedUsage, coverage}. 월별 폴백 포함.
+
+    비용 화면의 월별 추이와 절감 화면의 금액 환산이 **같은 단가**를 쓰도록
+    하나로 모은다 — 두 화면이 각자 집계하면 폴백 적용 여부가 갈려 같은 달에
+    다른 단가가 나온다.
+
+    ⚠ 반드시 월 경계 집계에서만 호출할 것(monthly_fallback_service 규칙 3).
+    """
+    clause, values = factory_clause(factory)
+    monthly_rows = fetch_all(
+        f"SELECT YEAR(date) y, MONTH(date) m, {_COST_SUM_SQL}"
+        " FROM energy_daily WHERE date BETWEEN %s AND %s" + clause + " GROUP BY y,m ORDER BY y,m",
+        (month_from, month_to, *values),
+    )
+    totals: dict[tuple[int, int], dict[str, float | None]] = {
+        (int(row["y"]), int(row["m"])): _cost_row_totals(row, metric) for row in monthly_rows
+    }
+
+    # 월별 폴백 — 경산처럼 일별 실적이 없는 달은 energy_monthly 값으로 채운다.
+    # _COST_SUM_SQL 과 같은 별칭 모양의 합성 행을 만들어 _cost_row_totals()에
+    # 그대로 흘려보낸다 — total/power/fuel 분기 로직을 다시 쓰지 않기 위함.
+    # 월 총량으로 채운 달은 전부 비용이 반영된 것으로 본다(priced == raw).
+    fb_service = import_core("app.services.monthly_fallback_service")
+    fb_months = fb_service.fallback_months(factory, month_from, month_to)
+    if fb_months:
+        fb_totals = fb_service.monthly_energy(factory, month_from, month_to)
+        for key in fb_months:
+            source = fb_totals[key]
+            synthetic_row = {
+                "power_cost": source["power_cost_krw"], "power_usage": source["total_power_kwh"],
+                "power_priced_cost": source["power_cost_krw"], "power_priced_usage": source["total_power_kwh"],
+                "fuel_cost": source["fuel_cost_krw"], "fuel_usage": source["fuel_nm3"],
+                "fuel_priced_cost": source["fuel_cost_krw"], "fuel_priced_usage": source["fuel_nm3"],
+            }
+            totals[key] = _cost_row_totals(synthetic_row, metric)
+    return totals
+
+
+def _monthly_unit_prices(
+    factory: str, energy_type: str, year: int, month_to: date,
+) -> dict[tuple[int, int], float | None]:
+    """(연,월) → 가중평균 단가(원/kWh·원/Nm³). 단가가 없는 달은 None.
+
+    절감금액 = 절감량 × 그 달 단가. 용수는 단가가 시스템 관리 대상이 아니라
+    항상 빈 딕셔너리를 돌려준다 — 호출자는 금액을 None 으로 두고 절감'량'만
+    관리한다(2026-07-30 결정).
+    """
+    cost_service = import_core("app.services.energy_cost_service")
+    if energy_type not in cost_service.COST_METRICS:
+        return {}
+    totals = _monthly_cost_totals(factory, energy_type, date(year, 1, 1), month_to)
+    return {
+        key: cost_service.weighted_price(value["pricedCost"], value["pricedUsage"])
+        for key, value in totals.items()
+    }
+
+
 def _fully_priced_members(
     factory: str, metric: str, periods: tuple[tuple[date, date], ...],
 ) -> tuple[list[str], list[str]]:
@@ -1829,32 +2012,7 @@ def energy_cost(
     monthly_ton = _monthly_production_ton(actual_records, factory, history_start, base)
 
     clause, values = factory_clause(factory)
-    monthly_rows = fetch_all(
-        f"SELECT YEAR(date) y, MONTH(date) m, {_COST_SUM_SQL}"
-        " FROM energy_daily WHERE date BETWEEN %s AND %s" + clause + " GROUP BY y,m ORDER BY y,m",
-        (history_start, base, *values),
-    )
-    monthly_totals: dict[tuple[int, int], dict[str, float | None]] = {
-        (int(row["y"]), int(row["m"])): _cost_row_totals(row, metric) for row in monthly_rows
-    }
-
-    # 월별 폴백 — 경산처럼 일별 실적이 없는 달은 energy_monthly 값으로 채운다.
-    # _COST_SUM_SQL 과 같은 별칭 모양의 합성 행을 만들어 _cost_row_totals()에
-    # 그대로 흘려보낸다 — total/power/fuel 분기 로직을 다시 쓰지 않기 위함.
-    # 월 총량으로 채운 달은 전부 비용이 반영된 것으로 본다(priced == raw).
-    fb_service = import_core("app.services.monthly_fallback_service")
-    fb_months = fb_service.fallback_months(factory, history_start, base)
-    if fb_months:
-        fb_totals = fb_service.monthly_energy(factory, history_start, base)
-        for key in fb_months:
-            source = fb_totals[key]
-            synthetic_row = {
-                "power_cost": source["power_cost_krw"], "power_usage": source["total_power_kwh"],
-                "power_priced_cost": source["power_cost_krw"], "power_priced_usage": source["total_power_kwh"],
-                "fuel_cost": source["fuel_cost_krw"], "fuel_usage": source["fuel_nm3"],
-                "fuel_priced_cost": source["fuel_cost_krw"], "fuel_priced_usage": source["fuel_nm3"],
-            }
-            monthly_totals[key] = _cost_row_totals(synthetic_row, metric)
+    monthly_totals = _monthly_cost_totals(factory, metric, history_start, base)
 
     def month_totals(key: tuple[int, int]) -> dict[str, float | None] | None:
         """비용 적재 이전 달은 0 이 아니라 None — 0으로 그리면 '비용 0원인 달'로 읽힌다."""
@@ -2059,6 +2217,361 @@ def energy_cost(
     })
 
 
+# ─────────────────────────── 에너지 절감 ───────────────────────────
+# 절감량은 관리자가 입력하고(savings_theme/savings_record), 금액은 저장하지 않고
+# 그 달 가중평균 단가를 곱해 조회 시점에 산출한다 — 비용이 정정되면 과거 절감
+# 금액도 함께 정정되는 것이 옳기 때문(설계서 §3-3).
+
+
+def _savings_theme_amounts(
+    theme: dict[str, Any],
+    records: dict[int, dict[str, float | None]],
+    price_cache: dict[tuple[str, str], dict[tuple[int, int], float | None]],
+    year: int,
+    month_to: date,
+) -> dict[str, Any]:
+    """테마 1건의 월별 계획/실적 절감량·금액 12행과 연 누계.
+
+    금액은 (공장, 에너지원)별 월 단가를 곱해 만든다. 단가가 없는 달(용수 전체,
+    비용 미적재 구간)은 금액을 None 으로 두고 '량'만 남긴다 — 0 으로 채우면
+    "절감 금액이 0원"으로 읽혀 달성률이 왜곡된다.
+    """
+    factory = str(theme["factory"])
+    energy_type = str(theme["energy_type"])
+    cache_key = (factory, energy_type)
+    if cache_key not in price_cache:
+        price_cache[cache_key] = _monthly_unit_prices(factory, energy_type, year, month_to)
+    prices = price_cache[cache_key]
+
+    months: list[dict[str, Any]] = []
+    planned_qty_total = 0.0
+    actual_qty_total = 0.0
+    planned_amount_total = 0.0
+    actual_amount_total = 0.0
+    has_planned_amount = False
+    has_actual_amount = False
+
+    for month in range(1, 13):
+        record = records.get(month) or {}
+        planned_qty = float(record.get("planned") or 0.0)
+        actual_qty = record.get("actual")
+        price = prices.get((year, month))
+
+        planned_amount = planned_qty * price if price is not None else None
+        actual_amount = actual_qty * price if (price is not None and actual_qty is not None) else None
+
+        planned_qty_total += planned_qty
+        if actual_qty is not None:
+            actual_qty_total += actual_qty
+        if planned_amount is not None:
+            planned_amount_total += planned_amount
+            has_planned_amount = True
+        if actual_amount is not None:
+            actual_amount_total += actual_amount
+            has_actual_amount = True
+
+        months.append({
+            "month": f"{month}월",
+            "plannedQty": round(planned_qty, 1) if planned_qty else None,
+            "actualQty": round(actual_qty, 1) if actual_qty is not None else None,
+            "price": _round_or_none(price, 2),
+            "plannedAmount": _round_or_none(
+                planned_amount / 1_000_000 if planned_amount is not None else None, 2),
+            "actualAmount": _round_or_none(
+                actual_amount / 1_000_000 if actual_amount is not None else None, 2),
+        })
+
+    # 달성률은 금액이 아니라 '량' 기준 — 용수처럼 단가가 없는 테마도 관리에서
+    # 빠지지 않게 하려는 것이다(설계서 §6-③).
+    rate = (actual_qty_total / planned_qty_total * 100) if planned_qty_total > 0 else None
+    return {
+        "months": months,
+        "plannedQty": round(planned_qty_total, 1),
+        "actualQty": round(actual_qty_total, 1),
+        "plannedAmount": round(planned_amount_total / 1_000_000, 2) if has_planned_amount else None,
+        "actualAmount": round(actual_amount_total / 1_000_000, 2) if has_actual_amount else None,
+        "rate": _round_or_none(rate, 1),
+    }
+
+
+@app.get("/api/v1/savings")
+def savings(
+    factory: str = "전사",
+    requested_date: date | None = Query(None, alias="date"),
+    energy_type: str | None = Query(None),
+    status: str | None = Query(None),
+) -> dict[str, Any]:
+    """에너지 절감 테마 현황 — KPI · 월별 계획대비실적 · 테마 목록 · 공장별 성과.
+
+    절감'량'은 관리자 입력값 그대로, 절감'금액'은 그 달 가중평균 단가를 곱해
+    산출한다(비용 화면과 동일한 단가 원천 — _monthly_cost_totals).
+    """
+    service = import_core("app.services.savings_theme_service")
+    if energy_type is not None and energy_type not in service.ENERGY_TYPES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 에너지원입니다: {energy_type}")
+
+    max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
+    base = bounded_base_date(requested_date, max_row.get("max_date"))
+    year = base.year
+
+    # status 미지정 = 화면 기본값 '진행+완료'. 성과 집계에서 계획 단계·중단 건을 뺀다.
+    if status in (None, "", "active"):
+        statuses = list(service.ACTIVE_STATUSES)
+    elif status == "all":
+        statuses = list(service.THEME_STATUSES)
+    elif status in service.THEME_STATUSES:
+        statuses = [status]
+    else:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 상태입니다: {status}")
+
+    members = physical_factory_members(factory)
+    themes = service.list_themes(members, year, energy_type, statuses)
+    records = service.records_by_theme([t["id"] for t in themes], year)
+
+    price_cache: dict[tuple[str, str], dict[tuple[int, int], float | None]] = {}
+    theme_rows: list[dict[str, Any]] = []
+    monthly_planned = [0.0] * 12
+    monthly_actual = [0.0] * 12
+    monthly_actual_measured = [False] * 12
+    by_factory: dict[str, float] = {}
+
+    for theme in themes:
+        computed = _savings_theme_amounts(
+            theme, records.get(int(theme["id"]), {}), price_cache, year, base,
+        )
+        for index, month_row in enumerate(computed["months"]):
+            if month_row["plannedAmount"] is not None:
+                monthly_planned[index] += month_row["plannedAmount"]
+            if month_row["actualAmount"] is not None:
+                monthly_actual[index] += month_row["actualAmount"]
+                monthly_actual_measured[index] = True
+        if computed["actualAmount"] is not None:
+            name = str(theme["factory"])
+            by_factory[name] = by_factory.get(name, 0.0) + computed["actualAmount"]
+        theme_rows.append({
+            "id": int(theme["id"]),
+            "factory": theme["factory"],
+            "title": theme["title"],
+            "energyType": theme["energy_type"],
+            "energyLabel": service.ENERGY_TYPE_LABELS.get(str(theme["energy_type"])),
+            "unit": service.ENERGY_TYPE_UNITS.get(str(theme["energy_type"])),
+            "category": theme["category"],
+            "status": theme["status"],
+            "statusLabel": service.STATUS_LABELS.get(str(theme["status"])),
+            "startYm": theme["start_ym"],
+            "owner": theme["owner"],
+            "investAmount": _round_or_none(
+                float(theme["invest_amount"]) / 1_000_000 if theme["invest_amount"] is not None else None, 1),
+            "plannedQty": computed["plannedQty"],
+            "actualQty": computed["actualQty"],
+            "plannedAmount": computed["plannedAmount"],
+            "actualAmount": computed["actualAmount"],
+            "rate": computed["rate"],
+            # 검증은 5단계에서 구현한다 — 그때까지 화면이 빈 칸으로 두도록 명시한다.
+            "verification": None,
+        })
+
+    # 월별 계획 대비 실적 — 실적이 한 건도 입력되지 않은 달은 0이 아니라 None.
+    # 0으로 두면 미래 월이 "달성률 0%"로 오독된다(생산실적 화면과 같은 관례).
+    cumulative_planned = 0.0
+    cumulative_actual = 0.0
+    monthly: list[dict[str, Any]] = []
+    for index in range(12):
+        cumulative_planned += monthly_planned[index]
+        measured = monthly_actual_measured[index]
+        if measured:
+            cumulative_actual += monthly_actual[index]
+        monthly.append({
+            "month": f"{index + 1}월",
+            "planned": round(monthly_planned[index], 2) if monthly_planned[index] else None,
+            "actual": round(monthly_actual[index], 2) if measured else None,
+            "cumulativeRate": (
+                round(cumulative_actual / cumulative_planned * 100, 1)
+                if measured and cumulative_planned > 0 else None
+            ),
+        })
+
+    planned_total = sum(row["plannedAmount"] or 0.0 for row in theme_rows)
+    actual_total = sum(row["actualAmount"] or 0.0 for row in theme_rows)
+    priced_types = service.PRICED_ENERGY_TYPES
+    unpriced_themes = [row for row in theme_rows if row["energyType"] not in priced_types]
+
+    return json_safe({
+        "baseDate": base,
+        "year": year,
+        "factory": factory,
+        "energyType": energy_type,
+        "status": status or "active",
+        "summary": {
+            "plannedAmount": round(planned_total, 1),
+            "actualAmount": round(actual_total, 1),
+            "rate": round(actual_total / planned_total * 100, 1) if planned_total > 0 else None,
+            "themeCount": len(theme_rows),
+            # 검증 5단계 전까지는 전부 '판정 보류'로 내려보낸다.
+            "verified": 0, "review": 0, "unverified": 0, "pending": len(theme_rows),
+        },
+        "monthly": monthly,
+        "themes": theme_rows,
+        "byFactory": [
+            {"factory": name, "actualAmount": round(amount, 1)}
+            for name, amount in sorted(by_factory.items(), key=lambda item: -item[1])
+        ],
+        "options": {
+            "energyTypes": [
+                {"value": value, "label": service.ENERGY_TYPE_LABELS[value],
+                 "unit": service.ENERGY_TYPE_UNITS[value], "priced": value in priced_types}
+                for value in service.ENERGY_TYPES
+            ],
+            "statuses": [
+                {"value": value, "label": service.STATUS_LABELS[value]}
+                for value in service.THEME_STATUSES
+            ],
+            "categories": list(service.THEME_CATEGORIES),
+            "factories": list(PHYSICAL_FACTORIES),
+        },
+        # 용수 테마가 섞여 있으면 금액 합계가 전체를 대표하지 않는다 — 화면이 각주로 알린다.
+        "scopeNote": (
+            f"용수 테마 {len(unpriced_themes)}건은 단가가 시스템 관리 대상이 아니라"
+            " 금액이 산출되지 않습니다 — 아래 금액 합계에서 빠져 있습니다."
+        ) if unpriced_themes else None,
+    })
+
+
+@app.get("/api/v1/savings/themes/{theme_id}")
+def savings_theme_detail(theme_id: int) -> dict[str, Any]:
+    """테마 상세 — 월별 계획/실적 절감량과 그 달 단가·산출 금액."""
+    service = import_core("app.services.savings_theme_service")
+    theme = service.get_theme(theme_id)
+    if theme is None:
+        raise HTTPException(status_code=404, detail="테마를 찾을 수 없습니다.")
+
+    max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
+    base = bounded_base_date(None, max_row.get("max_date"))
+    year = int(theme["year"])
+    # 관리 연도가 과거면 그 해 12월까지를 단가 조회 상한으로 삼는다.
+    month_to = base if year == base.year else min(base, date(year, 12, 31))
+
+    records = service.records_by_theme([theme_id], year).get(theme_id, {})
+    computed = _savings_theme_amounts(theme, records, {}, year, month_to)
+    energy_type = str(theme["energy_type"])
+    return json_safe({
+        "id": int(theme["id"]),
+        "factory": theme["factory"],
+        "year": year,
+        "title": theme["title"],
+        "energyType": energy_type,
+        "energyLabel": service.ENERGY_TYPE_LABELS.get(energy_type),
+        "unit": service.ENERGY_TYPE_UNITS.get(energy_type),
+        "priced": energy_type in service.PRICED_ENERGY_TYPES,
+        "category": theme["category"],
+        "status": theme["status"],
+        "statusLabel": service.STATUS_LABELS.get(str(theme["status"])),
+        "startYm": theme["start_ym"],
+        "owner": theme["owner"],
+        "investAmount": theme["invest_amount"],
+        "note": theme["note"],
+        "months": computed["months"],
+        "plannedQty": computed["plannedQty"],
+        "actualQty": computed["actualQty"],
+        "plannedAmount": computed["plannedAmount"],
+        "actualAmount": computed["actualAmount"],
+        "rate": computed["rate"],
+        "verification": None,
+    })
+
+
+class SavingsThemeRequest(BaseModel):
+    factory: str
+    year: int
+    title: str
+    energy_type: str
+    status: str = "planned"
+    category: str | None = None
+    start_ym: str | None = None
+    owner: str | None = None
+    invest_amount: float | None = None
+    note: str | None = None
+
+
+class SavingsRecordsRequest(BaseModel):
+    year: int
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def _validated_theme_payload(payload: SavingsThemeRequest, service: Any) -> dict[str, Any]:
+    """공통 검증 — 물리 공장만 허용하고 서비스 규칙을 통과시킨다."""
+    data = payload.model_dump()
+    if data["factory"] not in PHYSICAL_FACTORIES:
+        raise HTTPException(
+            status_code=400,
+            detail="테마는 개별 공장에만 등록할 수 있습니다 — 집계 라벨은 사용할 수 없습니다.",
+        )
+    reason = service.validate_theme(data)
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    return data
+
+
+@app.post("/api/v1/savings/themes")
+def create_savings_theme(payload: SavingsThemeRequest, request: Request) -> dict[str, Any]:
+    require_admin(request)
+    service = import_core("app.services.savings_theme_service")
+    data = _validated_theme_payload(payload, service)
+    try:
+        theme_id = service.create_theme(data)
+    except Exception as exc:
+        if "Duplicate" in str(exc):
+            raise HTTPException(
+                status_code=409, detail="같은 공장·연도에 이미 같은 이름의 테마가 있습니다.",
+            ) from exc
+        raise
+    return {"id": theme_id}
+
+
+@app.put("/api/v1/savings/themes/{theme_id}")
+def update_savings_theme(
+    theme_id: int, payload: SavingsThemeRequest, request: Request,
+) -> dict[str, Any]:
+    require_admin(request)
+    service = import_core("app.services.savings_theme_service")
+    data = _validated_theme_payload(payload, service)
+    try:
+        updated = service.update_theme(theme_id, data)
+    except Exception as exc:
+        if "Duplicate" in str(exc):
+            raise HTTPException(
+                status_code=409, detail="같은 공장·연도에 이미 같은 이름의 테마가 있습니다.",
+            ) from exc
+        raise
+    if not updated:
+        raise HTTPException(status_code=404, detail="테마를 찾을 수 없습니다.")
+    return {"updated": True}
+
+
+@app.delete("/api/v1/savings/themes/{theme_id}")
+def delete_savings_theme(theme_id: int, request: Request) -> dict[str, Any]:
+    require_admin(request)
+    service = import_core("app.services.savings_theme_service")
+    # 삭제 전에 딸린 월별 레코드 수를 세어 돌려준다 — 화면이 "n건이 함께
+    # 삭제됩니다"를 사후가 아니라 사전에 보여줄 수 있도록.
+    record_count = service.count_records(theme_id)
+    if not service.delete_theme(theme_id):
+        raise HTTPException(status_code=404, detail="테마를 찾을 수 없습니다.")
+    return {"deleted": True, "recordCount": record_count}
+
+
+@app.put("/api/v1/savings/themes/{theme_id}/records")
+def save_savings_records(
+    theme_id: int, payload: SavingsRecordsRequest, request: Request,
+) -> dict[str, Any]:
+    require_admin(request)
+    service = import_core("app.services.savings_theme_service")
+    if service.get_theme(theme_id) is None:
+        raise HTTPException(status_code=404, detail="테마를 찾을 수 없습니다.")
+    saved = service.upsert_records(theme_id, payload.year, payload.items)
+    return {"saved": saved}
+
+
 @app.get("/api/v1/production")
 def production(
     factory: str = "전사",
@@ -2221,6 +2734,30 @@ def production(
             ),
         )
         previous_map = {int(row["month_no"]): row for row in previous_rows if row.get("month_no") is not None}
+
+        # 경산 등 일별 실적이 없는 (공장,월)의 제품유형별 생산량 폴백 —
+        # production_monthly. 일별 실적이 있는 (공장,월)은 위 SQL이 이미 계산
+        # 했으므로 여기서는 "더한다"(monthly_production_category2_kg 는 일별
+        # 실적이 있는 조합을 스스로 제외하고 반환하므로 이중 계상되지 않는다 —
+        # monthly_fallback_service 참고).
+        fb_service = import_core("app.services.monthly_fallback_service")
+
+        def _add_category_fallback(target_map: dict[int, dict[str, Any]], year: int) -> None:
+            fb_cat2 = fb_service.monthly_production_category2_kg(
+                factory, date(year, 1, 1), date(year, 12, 31),
+            )
+            for (fb_year, fb_month), categories in fb_cat2.items():
+                if fb_year != year:
+                    continue
+                merged = dict(target_map.get(fb_month, {}))
+                for category, kg in categories.items():
+                    if category in cat2_keys:
+                        merged[category] = scalar(merged.get(category, 0)) + kg / 1000
+                target_map[fb_month] = merged
+
+        _add_category_fallback(monthly_map, base.year)
+        _add_category_fallback(previous_map, base.year - 1)
+
         wip_monthly_ton: dict[int, float] = {}
         for wip_date, kg in wip_daily_kg.items():
             wip_monthly_ton[wip_date.month] = wip_monthly_ton.get(wip_date.month, 0.0) + kg / 1000
@@ -2338,7 +2875,13 @@ def production(
         (period_from, period_to, *scoped_values),
     ) if plan_allowed else []
     cat2_plan = {str(row["cat2"]): scalar(row.get("plan")) for row in cat2_plan_rows}
-    cat2_actual = {key: sum(scalar(row.get(key)) for row in daily) for key in cat2_keys}
+    # 연간 모드는 위에서 폴백을 합쳐 넣은 monthly_map을 써야 인사이트("최대/부진
+    # 제품유형")도 경산 반영분을 본다 — daily는 원본 SQL 결과라 폴백이 없다.
+    cat2_actual = (
+        {key: sum(scalar(row.get(key)) for row in monthly_map.values()) for key in cat2_keys}
+        if mode == "year"
+        else {key: sum(scalar(row.get(key)) for row in daily) for key in cat2_keys}
+    )
     insights = build_production_insights(
         plan=plan if plan_allowed else None,
         actual=actual,
@@ -2369,6 +2912,19 @@ def production(
             (date(base.year - 1, 1, 1), date(base.year, 12, 31), *scoped_values),
         )
         yoy_map = {(int(row["y"]), int(row["m"])): scalar(row.get("total")) for row in yoy_rows}
+        # 경산 등 일별 실적이 없는 달 폴백 — monthly_production_kg()가 그 달의
+        # 모든 물리 공장을 이미 다시 합산해 반환하므로(일별+월별 소스 통합),
+        # 더하지 않고 통째로 교체한다(energy_cost()의 동일 패턴 참고).
+        fb_service = import_core("app.services.monthly_fallback_service")
+        fb_prod_months = fb_service.production_fallback_months(
+            factory, date(base.year - 1, 1, 1), date(base.year, 12, 31),
+        )
+        if fb_prod_months:
+            fb_prod_kg = fb_service.monthly_production_kg(
+                factory, date(base.year - 1, 1, 1), date(base.year, 12, 31),
+            )
+            for key in fb_prod_months:
+                yoy_map[key] = fb_prod_kg[key] / 1000
         for month in range(1, 13):
             current_total = yoy_map.get((base.year, month))
             previous_total = yoy_map.get((base.year - 1, month))

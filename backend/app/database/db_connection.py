@@ -322,6 +322,44 @@ _PENDING_TABLE_CREATES: list[tuple[str, str]] = [
             UNIQUE KEY uq_production_monthly (factory, month_key, category2)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """),
+    # savings_record 가 savings_theme 을 FK 로 참조하므로 순서가 중요하다 —
+    # 이 목록은 위에서 아래로 순차 실행되며, 참조 대상이 먼저 있어야 한다.
+    ("savings_theme", """
+        CREATE TABLE IF NOT EXISTS savings_theme (
+            id            INT AUTO_INCREMENT PRIMARY KEY,
+            factory       VARCHAR(50)  NOT NULL,
+            year          INT          NOT NULL,
+            title         VARCHAR(200) NOT NULL,
+            energy_type   VARCHAR(20)  NOT NULL,
+            category      VARCHAR(40)  DEFAULT NULL,
+            status        VARCHAR(20)  NOT NULL DEFAULT 'planned',
+            start_ym      CHAR(7)      DEFAULT NULL,
+            owner         VARCHAR(60)  DEFAULT NULL,
+            invest_amount DOUBLE       DEFAULT NULL,
+            note          TEXT,
+            created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            changed_by    TEXT,
+            UNIQUE KEY uq_savings_theme (factory, year, title),
+            INDEX idx_savings_theme_scope (factory, year, energy_type)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """),
+    ("savings_record", """
+        CREATE TABLE IF NOT EXISTS savings_record (
+            id          INT AUTO_INCREMENT PRIMARY KEY,
+            theme_id    INT      NOT NULL,
+            year        INT      NOT NULL,
+            month       TINYINT  NOT NULL,
+            planned_qty DOUBLE   NOT NULL DEFAULT 0,
+            actual_qty  DOUBLE   DEFAULT NULL,
+            note        TEXT,
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            changed_by  TEXT,
+            UNIQUE KEY uq_savings_record (theme_id, year, month),
+            FOREIGN KEY (theme_id) REFERENCES savings_theme(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """),
 ]
 
 # 폐기된 컬럼의 멱등 DROP. 컬럼이 존재할 때만 ALTER DROP 을 1회 수행한다.

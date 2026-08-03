@@ -267,3 +267,58 @@ CREATE TABLE IF NOT EXISTS production_monthly (
     UNIQUE KEY uq_production_monthly (factory, month_key, category2)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 13. 에너지 절감 테마 마스터 — 공장별 절감 과제.
+--     factory: energy_daily 와 동일한 물리 공장 라벨(남양주1·남양주2 분리).
+--       집계 라벨('전사' 등)은 저장하지 않는다 — 검증이 공장 단위 원단위를
+--       비교하므로 테마도 물리 공장에 귀속돼야 한다.
+--     energy_type: 절감량의 단위를 정하고, 금액 환산 시 단가 조인 키가 된다.
+--       power(kWh)/fuel(Nm³) 은 energy_daily 에 단가가 있어 금액이 나오고,
+--       water(ton) 는 용수 단가가 시스템 관리 대상이 아니라 절감'량'까지만
+--       관리한다(2026-07-30 결정 — 용수·폐수 처리비는 사외 파일 수기 관리).
+--     start_ym: 시행(완료) 월. 원단위 전후 비교 검증의 분기점이라, 없으면
+--       검증을 "판정 보류"로 둔다.
+--     invest_amount: 투자비(원). 단순 회수기간(투자비 ÷ 연환산 절감금액) 산출용.
+CREATE TABLE IF NOT EXISTS savings_theme (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    factory       VARCHAR(50)  NOT NULL,
+    year          INT          NOT NULL,          -- 관리 연도
+    title         VARCHAR(200) NOT NULL,          -- '노후 변압기 고효율 신품 교체'
+    energy_type   VARCHAR(20)  NOT NULL,          -- power / fuel / water
+    category      VARCHAR(40)  DEFAULT NULL,      -- 설비교체/운전개선/공정개선/누설저감/계약변경
+    status        VARCHAR(20)  NOT NULL DEFAULT 'planned',  -- planned/ongoing/done/dropped
+    start_ym      CHAR(7)      DEFAULT NULL,      -- 'YYYY-MM' 시행월 = 검증 분기점
+    owner         VARCHAR(60)  DEFAULT NULL,
+    invest_amount DOUBLE       DEFAULT NULL,      -- 투자비(원)
+    note          TEXT,
+
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    changed_by    TEXT,
+
+    UNIQUE KEY uq_savings_theme (factory, year, title),
+    INDEX idx_savings_theme_scope (factory, year, energy_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 14. 테마 × 월 단위 절감 계획/실적(절감'량').
+--     금액은 저장하지 않는다 — 해당 월 가중평균 단가(Σ비용÷Σ사용량)를 조회
+--     시점에 곱해 산출한다. 저장하면 비용이 정정될 때 과거 금액이 따라가지
+--     못해 두 값이 어긋난다(energy_daily 원단위 컬럼의 전철).
+--     actual_qty 는 NULL 을 허용한다 — "아직 미입력"과 "실적이 0"은 다르다.
+--     planned_qty 는 NOT NULL DEFAULT 0 — 계획이 없는 달은 0이 맞다.
+CREATE TABLE IF NOT EXISTS savings_record (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    theme_id    INT      NOT NULL,
+    year        INT      NOT NULL,
+    month       TINYINT  NOT NULL,               -- 1~12
+    planned_qty DOUBLE   NOT NULL DEFAULT 0,     -- kWh / Nm³ / ton
+    actual_qty  DOUBLE   DEFAULT NULL,           -- NULL = 미입력
+    note        TEXT,
+
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    changed_by  TEXT,
+
+    UNIQUE KEY uq_savings_record (theme_id, year, month),
+    FOREIGN KEY (theme_id) REFERENCES savings_theme(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+

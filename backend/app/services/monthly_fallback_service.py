@@ -34,6 +34,7 @@ from typing import Any
 
 from app.database.db_connection import managed_cursor
 from app.domain.factories import FACTORY_KR_TO_CODE, expand_factory_members
+from app.services.production_correction_service import finished_production_filter_sql
 
 MonthKey = tuple[int, int]
 
@@ -188,6 +189,15 @@ def _production_daily_code(member: str) -> str | None:
 def _daily_production_by_member_month(
     members: tuple[str, ...], month_from: date, month_to: date,
 ) -> dict[tuple[str, int, int], float]:
+    """물리 공장별 (연,월)의 production_daily SUM(actual_qty) — 광주 WIP 항목 제외.
+
+    production() 화면이 자기 SQL에 finished_production_filter_sql() 을 걸어
+    광주의 판매용 반제품 9개 item_code 를 실적에서 뺀다(원단위·생산실적 화면의
+    '생산실적' 정의). 이 함수가 같은 필터 없이 SUM 하면, 폴백 REPLACE가 적용되는
+    달(경산 결측 구간)에서 광주분만 그 WIP 수량만큼 부풀려 실측(전사(경산 제외))
+    과 어긋난다 — 실측 2025-01 광주에서 31.2톤 초과로 재현됨. 두 경로가 같은
+    '생산실적' 정의를 쓰도록 이 필터를 반드시 함께 적용한다.
+    """
     code_to_member = {
         code: member
         for member in members
@@ -196,15 +206,17 @@ def _daily_production_by_member_month(
     if not code_to_member:
         return {}
     placeholders = ",".join(["%s"] * len(code_to_member))
+    finished_filter, finished_params = finished_production_filter_sql()
     with managed_cursor(with_db=True, dictionary=True) as (_conn, cursor):
         cursor.execute(
             f"""
             SELECT factory, YEAR(date) y, MONTH(date) m, COUNT(*) n, SUM(actual_qty) qty
             FROM production_daily
             WHERE factory IN ({placeholders}) AND date BETWEEN %s AND %s
+            {finished_filter}
             GROUP BY factory, y, m
             """,
-            (*code_to_member, month_from, month_to),
+            (*code_to_member, month_from, month_to, *finished_params),
         )
         rows = cursor.fetchall()
     result: dict[tuple[str, int, int], float] = {}

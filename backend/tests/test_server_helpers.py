@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import unittest
+from contextlib import contextmanager
 from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -653,6 +654,36 @@ class ServerHelperTests(unittest.TestCase):
         lookup = server.LOCAL_CORE_ROOT / "analysis_results" / "item_energy_impact_lookup.json"
         self.assertTrue(lookup.exists())
 
+    @staticmethod
+    def _no_monthly_fallback_import_core():
+        """import_core 를 실행하되 monthly_fallback_service 만 무폴백 스텁으로 바꾼다.
+
+        production()/dashboard()/intensity_analysis() 의 월별 경계 집계는 매번
+        monthly_fallback_service 를 호출해 경산 등 결측월이 있는지 실DB로 확인한다
+        (energy()의 _apply_monthly_energy_fallback 와 같은 기존 패턴). 이 서비스는
+        managed_cursor 로 직접 쿼리하므로 server.fetch_all/fetch_one 목(mock)을
+        거치지 않는다 — 그대로 두면 개발 DB의 실제 경산 데이터가 섞여 들어와 완전히
+        목으로 채운 테스트의 기대값을 오염시킨다(2026-08 실측 회귀 발견: 300.0 →
+        2585.0). 다른 모듈(production_correction_service 등)은 순수 함수뿐이라
+        실제 구현을 그대로 통과시켜도 DB에 닿지 않는다 — 그 경로만 원래
+        import_core 로 위임한다.
+        """
+        real_import_core = server.import_core
+        stub = SimpleNamespace(
+            monthly_production_category2_kg=lambda *a, **k: {},
+            production_fallback_months=lambda *a, **k: set(),
+            monthly_production_kg=lambda *a, **k: {},
+            fallback_months=lambda *a, **k: set(),
+            monthly_energy=lambda *a, **k: {},
+        )
+
+        def fake_import_core(module: str):
+            if module == "app.services.monthly_fallback_service":
+                return stub
+            return real_import_core(module)
+
+        return fake_import_core
+
     def test_annual_monthly_plan_rate_stops_after_last_actual_month(self) -> None:
         """연간 모드는 누계 Burn-up이 아니라 월별 계획 대비 실적을 낸다.
 
@@ -678,6 +709,7 @@ class ServerHelperTests(unittest.TestCase):
                 [],                                                # 제품유형 계획
                 [],                                                # 월별 전년비
             ]),
+            patch.object(server, "import_core", side_effect=self._no_monthly_fallback_import_core()),
         ):
             result = server.production(factory="전사", requested_date=date(2026, 7, 15), mode="year")
         monthly_plan = result["monthlyPlan"]
@@ -990,6 +1022,249 @@ class ServerHelperTests(unittest.TestCase):
         self.assertEqual(alert_signals[0]["factory"], "논산")
         self.assertEqual(alert_signals[0]["date"], date(2026, 7, 16))
         self.assertGreater(evaluation["alertCount"], 1)
+
+    # ── 에너지 절감 테마 (설계서 §6 화면 B) ──────────────────────
+
+    @staticmethod
+    def _savings_theme(**overrides):
+        base = {
+            "id": 1, "factory": "남양주1", "year": 2026, "title": "노후 변압기 교체",
+            "energy_type": "power", "category": "설비교체", "status": "done",
+            "start_ym": "2026-03", "owner": None, "invest_amount": None, "note": None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_savings_amount_uses_month_price_and_skips_missing(self) -> None:
+        """절감금액 = 절감량 × 그 달 단가. 단가가 없는 달은 0이 아니라 None이다.
+
+        0으로 채우면 "절감 금액이 0원"으로 읽혀 달성률이 왜곡된다 — 비용 미적재
+        구간(2024-01 이전 등)이 실제로 그렇다.
+        """
+        theme = self._savings_theme()
+        records = {3: {"planned": 40_000.0, "actual": 42_000.0},
+                   4: {"planned": 40_000.0, "actual": 40_000.0}}
+        # 4월 단가는 없음 — 그 달 금액만 None 이어야 한다.
+        prices = {("남양주1", "power"): {(2026, 3): 200.0}}
+        computed = server._savings_theme_amounts(
+            theme, records, prices, 2026, date(2026, 7, 28),
+        )
+        march, april = computed["months"][2], computed["months"][3]
+        self.assertEqual(march["price"], 200.0)
+        self.assertAlmostEqual(march["plannedAmount"], 40_000 * 200 / 1_000_000)
+        self.assertAlmostEqual(march["actualAmount"], 42_000 * 200 / 1_000_000)
+        self.assertIsNone(april["price"])
+        self.assertIsNone(april["plannedAmount"])
+        self.assertIsNone(april["actualAmount"])
+        # 금액 누계는 단가가 있는 달만 — 4월분이 0으로 섞이지 않는다.
+        self.assertAlmostEqual(computed["actualAmount"], 42_000 * 200 / 1_000_000)
+
+    def test_savings_rate_uses_quantity_not_amount(self) -> None:
+        """달성률은 '량' 기준 — 단가가 없는 용수 테마도 관리에서 빠지지 않아야 한다."""
+        theme = self._savings_theme(energy_type="water", factory="논산")
+        records = {m: {"planned": 1_500.0, "actual": 1_200.0} for m in (4, 5, 6, 7)}
+        computed = server._savings_theme_amounts(
+            theme, records, {("논산", "water"): {}}, 2026, date(2026, 7, 28),
+        )
+        self.assertEqual(computed["plannedQty"], 6_000.0)
+        self.assertEqual(computed["actualQty"], 4_800.0)
+        self.assertEqual(computed["rate"], 80.0)      # 4800/6000 — 금액이 없어도 나온다
+        self.assertIsNone(computed["plannedAmount"])  # 용수는 단가 자체가 없다
+        self.assertIsNone(computed["actualAmount"])
+
+    def test_savings_unentered_actual_is_not_counted_as_zero(self) -> None:
+        """실적 미입력(None)과 실적 0은 다르다 — 표기도 누계도 갈라져야 한다.
+
+        계획/실적의 빈 칸 규칙이 일부러 비대칭이다:
+          · planned_qty 는 NOT NULL DEFAULT 0 이라 "미입력" 상태가 없다 →
+            0 은 '계획 없음'이므로 빈 칸으로 표기한다.
+          · actual_qty 는 NULL 을 허용한다 → None 은 '아직 미입력'이라 빈 칸,
+            0.0 은 '측정했더니 0'이라 그대로 0 을 보여야 한다.
+        """
+        theme = self._savings_theme()
+        records = {
+            3: {"planned": 40_000.0, "actual": 42_000.0},
+            4: {"planned": 40_000.0, "actual": None},   # 미입력
+            5: {"planned": 40_000.0, "actual": 0.0},    # 측정된 0
+        }
+        prices = {("남양주1", "power"): {(2026, m): 200.0 for m in (3, 4, 5)}}
+        computed = server._savings_theme_amounts(
+            theme, records, prices, 2026, date(2026, 7, 28),
+        )
+        self.assertEqual(computed["actualQty"], 42_000.0)      # None 은 누계에서 제외
+        self.assertIsNone(computed["months"][3]["actualQty"])   # 4월 미입력 → 빈 칸
+        self.assertIsNone(computed["months"][3]["actualAmount"])
+        self.assertEqual(computed["months"][4]["actualQty"], 0.0)      # 5월 측정 0 → 0 보존
+        self.assertEqual(computed["months"][4]["actualAmount"], 0.0)
+        # 계획 12만 중 실적 4.2만 — 미입력 월을 0으로 세지 않았음을 달성률로 재확인
+        self.assertEqual(computed["rate"], 35.0)
+
+    def test_savings_theme_rejects_aggregate_factory(self) -> None:
+        """테마는 물리 공장에만 귀속된다 — 집계 라벨은 400.
+
+        집계 라벨로 저장하면 물리 공장으로 펼칠 수 없어 전사 합계가 이중 계상된다.
+        """
+        service = server.import_core("app.services.savings_theme_service")
+        for label in ("전사", "전사(경산 제외)", "남양주"):
+            with self.subTest(factory=label):
+                payload = server.SavingsThemeRequest(
+                    factory=label, year=2026, title="테스트", energy_type="power",
+                )
+                with self.assertRaises(server.HTTPException) as raised:
+                    server._validated_theme_payload(payload, service)
+                self.assertEqual(raised.exception.status_code, 400)
+
+    def test_savings_theme_validation_rules(self) -> None:
+        service = server.import_core("app.services.savings_theme_service")
+        valid = {"factory": "남양주1", "year": 2026, "title": "교체",
+                 "energy_type": "power", "status": "done", "start_ym": "2026-03"}
+        self.assertIsNone(service.validate_theme(valid))
+        for override, label in (
+            ({"title": "   "}, "빈 테마명"),
+            ({"energy_type": "steam"}, "미지원 에너지원"),
+            ({"status": "unknown"}, "미지원 상태"),
+            ({"start_ym": "2026-13"}, "잘못된 월"),
+            ({"start_ym": "202603"}, "구분자 없음"),
+            ({"year": 1800}, "범위 밖 연도"),
+        ):
+            with self.subTest(case=label):
+                self.assertIsNotNone(service.validate_theme({**valid, **override}))
+        # 시행월 미입력은 허용 — 검증만 '판정 보류'가 된다.
+        self.assertIsNone(service.validate_theme({**valid, "start_ym": None}))
+
+    def test_savings_endpoint_rejects_unknown_filters_before_query(self) -> None:
+        with (
+            patch.object(server, "fetch_one") as fetch_one,
+            self.assertRaises(server.HTTPException) as raised,
+        ):
+            server.savings(factory="전사", energy_type="steam")
+        self.assertEqual(raised.exception.status_code, 400)
+        fetch_one.assert_not_called()
+
+    # ── 전사(경산 제외) 구분 · 경산 월별 폴백 (전사_경산구분_및_월별적재_계획.md) ──
+
+    def test_monthly_fallback_production_query_excludes_gwangju_wip_items(self) -> None:
+        """월별 폴백의 생산량 합계는 production() 자체와 같은 '생산실적' 정의를 써야 한다.
+
+        실측 회귀(2026-08): 필터 없이 SUM(actual_qty) 하면 광주의 판매용 WIP
+        반제품(129998 등)이 그대로 합산돼, 경산 폴백이 섞인 달의 전사 합계가
+        production()의 finished_clause 적용 수치보다 정확히 그 WIP 수량만큼
+        (2025-01 기준 31.2톤) 부풀어 올랐다 — monthly_production_kg()로 REPLACE
+        되는 production()의 monthlyYoy에서 처음 발견됨.
+        """
+        fallback = server.import_core("app.services.monthly_fallback_service")
+        captured: dict[str, object] = {}
+
+        class _FakeCursor:
+            def execute(self, sql, params):
+                captured["sql"] = sql
+                captured["params"] = params
+
+            def fetchall(self):
+                return []
+
+        @contextmanager
+        def fake_managed_cursor(*args, **kwargs):
+            yield None, _FakeCursor()
+
+        with patch.object(fallback, "managed_cursor", fake_managed_cursor):
+            fallback._daily_production_by_member_month(
+                ("광주",), date(2026, 1, 1), date(2026, 1, 31),
+            )
+
+        self.assertIn("NOT", captured["sql"])
+        # finished_production_filter_sql()의 광주 전용 반제품 코드가 그대로 실려야 한다.
+        self.assertIn("F30", captured["params"])
+        self.assertIn("129998", captured["params"])
+        self.assertIn("129999", captured["params"])
+
+    def test_monthly_intensity_fallback_only_returns_fallback_months(self) -> None:
+        """dashboard()/intensity_analysis()가 함께 쓰는 폴백 소스는 결측 물리공장의
+
+        결측월만 돌려준다(정상 공장들의 몫은 섞지 않는다) — 호출자가 기존 SQL
+        결과(다른 공장들의 필터 통과분)에 이 값을 "더해야" 하므로, factory 라벨
+        전체가 아니라 결측이 있는 물리 공장(예: 경산)별로만 조회해야 한다.
+        전체(factory="전사") 로 REPLACE 하면 결측 없는 공장의 데이터 품질
+        필터가 사라진다(_monthly_intensity_fallback_sources 참고, 실측 회귀로
+        발견). 다른 물리 공장(경산 이외)은 결측이 없어 빈 집합을 반환하는
+        시나리오로 이 위임 방식을 검증한다.
+        """
+        def fallback_months(member: str, m1, m2):
+            return {(2025, 1)} if member == "경산" else set()
+
+        def production_fallback_months(member: str, m1, m2):
+            return {(2025, 2)} if member == "경산" else set()
+
+        def monthly_energy(member: str, m1, m2):
+            if member != "경산":
+                return {}
+            return {
+                (2025, 1): {"total_power_kwh": 1000.0, "fuel_nm3": 0, "water_ton": 0,
+                            "wastewater_ton": 0, "power_cost_krw": 0, "fuel_cost_krw": 0},
+                (2025, 2): {"total_power_kwh": 2000.0, "fuel_nm3": 0, "water_ton": 0,
+                            "wastewater_ton": 0, "power_cost_krw": 0, "fuel_cost_krw": 0},
+            }
+
+        def monthly_production_kg(member: str, m1, m2):
+            return {(2025, 1): 5000.0, (2025, 2): 6000.0} if member == "경산" else {}
+
+        stub = SimpleNamespace(
+            fallback_months=fallback_months,
+            production_fallback_months=production_fallback_months,
+            monthly_energy=monthly_energy,
+            monthly_production_kg=monthly_production_kg,
+        )
+        with patch.object(server, "import_core", return_value=stub):
+            result = server._monthly_intensity_fallback_sources(
+                "전사", date(2025, 1, 1), date(2025, 3, 31),
+            )
+        self.assertIsNotNone(result)
+        fb_energy, fb_production_kg = result
+        # 합집합 {(2025,1), (2025,2)} 만 — (2025,3)은 어느 쪽도 결측이 아니므로 없어야 한다.
+        self.assertEqual(set(fb_energy), {(2025, 1), (2025, 2)})
+        self.assertEqual(set(fb_production_kg), {(2025, 1), (2025, 2)})
+        self.assertEqual(fb_energy[(2025, 1)]["total_power_kwh"], 1000.0)
+        self.assertEqual(fb_production_kg[(2025, 2)], 6000.0)
+
+    def test_add_intensity_fallback_keeps_unit_consistent(self) -> None:
+        """existing_ratio(톤당)에 existing_kg(kg)를 그대로 곱하면 1000배 어긋난다.
+
+        실측 회귀: 이 변환을 빠뜨렸더니 정상 300~400 범위여야 할 원단위가
+        279,277 로 나왔다(2026-01, 전사). 5개 정상 공장 몫(existing)과 경산
+        폴백 몫(gap)을 합친 결과가 두 그룹을 각각 kg→ton 환산해 계산한
+        수작업 가중평균과 일치해야 한다.
+        """
+        existing_ratio, existing_kg = 370.0, 18_586_536.0   # 전사(경산 제외) 2026-01 실측 규모
+        gap_usage, gap_kg = 1_264_376.0, 1_423_000.0         # 경산 2026-01 실측
+        merged = server._add_intensity_fallback(existing_ratio, existing_kg, gap_usage, gap_kg)
+        expected = (
+            existing_ratio * (existing_kg / 1000) + gap_usage
+        ) / ((existing_kg + gap_kg) / 1000)
+        self.assertAlmostEqual(merged, expected, places=6)
+        # 정상 범위(수백 kWh/ton) — 1000배 튀는 회귀가 재발하면 이 단정에서 바로 잡힌다.
+        self.assertTrue(200 < merged < 500, f"원단위가 정상 범위를 벗어남: {merged}")
+
+    def test_add_intensity_fallback_handles_missing_existing_value(self) -> None:
+        """그 달에 기존 값이 전혀 없으면(existing_ratio=None) 결측 공장 몫만으로 계산한다."""
+        merged = server._add_intensity_fallback(None, 0.0, 1_000_000.0, 5_000.0)
+        self.assertAlmostEqual(merged, 1_000_000.0 / 5.0)
+
+    def test_add_intensity_fallback_returns_none_when_denominator_empty(self) -> None:
+        self.assertIsNone(server._add_intensity_fallback(300.0, 0.0, 100.0, 0.0))
+
+    def test_monthly_intensity_fallback_returns_none_without_gaps(self) -> None:
+        """결측월이 전혀 없으면 폴백 소스 자체를 만들지 않는다(불필요한 DB 조회 회피)."""
+        stub = SimpleNamespace(
+            fallback_months=lambda factory, m1, m2: set(),
+            production_fallback_months=lambda factory, m1, m2: set(),
+            monthly_energy=lambda *a, **k: (_ for _ in ()).throw(AssertionError("호출되면 안 됨")),
+            monthly_production_kg=lambda *a, **k: (_ for _ in ()).throw(AssertionError("호출되면 안 됨")),
+        )
+        with patch.object(server, "import_core", return_value=stub):
+            result = server._monthly_intensity_fallback_sources(
+                "남양주", date(2025, 1, 1), date(2025, 3, 31),
+            )
+        self.assertIsNone(result)
 
     def test_intensity_bridge_splits_change_without_residual(self) -> None:
         """원단위 변동 분해는 사용량효과 + 생산량효과가 정확히 전체 변동과 같아야 한다."""
