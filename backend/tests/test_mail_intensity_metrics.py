@@ -77,6 +77,73 @@ class MailIntensityMetricTests(unittest.TestCase):
         self.assertEqual(result["freezing_power_per_ton_kwh"], 25.0)
         self.assertEqual(result["air_compressor_per_ton_kwh"], 50.0)
 
+    def test_zero_production_day_usage_still_counts_toward_intensity(self) -> None:
+        """생산량 0인 비조업일의 사용량도 기간 원단위 분자에 포함되어야 한다."""
+        operating = {
+            "factory": "김해",
+            "mix_prod_kg": 2_000.0,       # 2 ton
+            "total_power_kwh": 200.0,
+            "freezing_power_kwh": 40.0,
+            "air_compressor_kwh": 20.0,
+            "fuel_nm3": 60.0,
+            "water_ton": 10.0,
+            "wastewater_ton": 8.0,
+            "power_per_ton_kwh": 100.0,
+            "freezing_power_per_ton_kwh": 20.0,
+            "air_compressor_per_ton_kwh": 10.0,
+            "fuel_per_ton_nm3": 30.0,
+            "water_per_ton_ton": 5.0,
+        }
+        idle = {
+            "factory": "김해",
+            "mix_prod_kg": 0.0,           # 비조업 — 엑셀 원단위 수식 성립 안 함
+            "total_power_kwh": 50.0,
+            "freezing_power_kwh": 10.0,
+            "air_compressor_kwh": 5.0,
+            "fuel_nm3": 15.0,
+            "water_ton": 2.0,
+            "wastewater_ton": 1.0,
+            "power_per_ton_kwh": None,
+            "freezing_power_per_ton_kwh": None,
+            "air_compressor_per_ton_kwh": None,
+            "fuel_per_ton_nm3": None,
+            "water_per_ton_ton": None,
+        }
+
+        result = daily._aggregate_weighted([operating, idle])
+
+        self.assertIsNotNone(result)
+        # 총사용량 / 총생산량 (2 ton) — 비조업일 고정부하가 원단위에 반영된다.
+        self.assertAlmostEqual(result["power_per_ton_kwh"], 250.0 / 2)
+        self.assertAlmostEqual(result["freezing_power_per_ton_kwh"], 50.0 / 2)
+        self.assertAlmostEqual(result["air_compressor_per_ton_kwh"], 25.0 / 2)
+        self.assertAlmostEqual(result["fuel_per_ton_nm3"], 75.0 / 2)
+        self.assertAlmostEqual(result["water_per_ton_ton"], 12.0 / 2)
+
+    def test_all_zero_production_rows_yield_no_intensity(self) -> None:
+        """생산량이 전혀 없으면 분모가 0이므로 원단위는 '-'(None)로 남는다."""
+        rows = [{
+            "factory": "김해",
+            "mix_prod_kg": 0.0,
+            "total_power_kwh": 50.0,
+            "freezing_power_kwh": 10.0,
+            "air_compressor_kwh": 5.0,
+            "fuel_nm3": 15.0,
+            "water_ton": 2.0,
+            "wastewater_ton": 1.0,
+            "power_per_ton_kwh": None,
+            "freezing_power_per_ton_kwh": None,
+            "air_compressor_per_ton_kwh": None,
+            "fuel_per_ton_nm3": None,
+            "water_per_ton_ton": None,
+        }]
+
+        result = daily._aggregate_weighted(rows)
+
+        self.assertIsNotNone(result)
+        for metric in daily.INTENSITY_METRICS:
+            self.assertIsNone(result[metric["unit_col"]], metric["key"])
+
     def test_mail_query_selects_stored_equipment_unit_columns(self) -> None:
         class FakeCursor:
             sql = ""

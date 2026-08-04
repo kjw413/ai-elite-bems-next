@@ -587,7 +587,9 @@ def _aggregate_weighted(rows: List[dict]) -> Optional[dict]:
     """공장 행들을 합산하고 RawDB 수식 원단위를 생산량 가중 집계한다.
 
     Python에서 사용량/생산량으로 원단위를 다시 만들지 않는다. 여러 일자·공장을
-    합칠 때만 엑셀 수식값을 같은 엑셀 믹스생산량으로 가중 평균한다.
+    합칠 때만 엑셀 수식값을 같은 엑셀 믹스생산량으로 가중 평균한다. 단, 생산량 0인
+    행(비조업일 등)은 엑셀 원단위가 없어 가중평균에 참여할 수 없으므로 그 행의
+    사용량만 분자에 별도로 더한다 — 기간 원단위 = 기간 총사용량 / 기간 총생산량.
     """
     if not rows:
         return None
@@ -602,6 +604,10 @@ def _aggregate_weighted(rows: List[dict]) -> Optional[dict]:
         "mix_prod_kg":     sum(float(r.get("mix_prod_kg") or 0) for r in rows),
     }
     prod_ton = agg["mix_prod_kg"] / 1000.0
+    # 생산량 0(비조업)인 행은 엑셀 원단위 수식이 성립하지 않아 가중평균에서 빠지지만,
+    # 고정부하 사용량은 실제로 발생한다. 기간을 합칠 때는 그 사용량도 분자에 더해
+    # 원단위가 과소 산출되지 않게 한다(생산량이 없으므로 분모는 그대로).
+    idle_rows = [r for r in rows if float(r.get("mix_prod_kg") or 0) <= 0]
     for m in INTENSITY_METRICS:
         weighted = [
             (float(r.get(m["unit_col"])), float(r.get("mix_prod_kg") or 0))
@@ -609,8 +615,11 @@ def _aggregate_weighted(rows: List[dict]) -> Optional[dict]:
             if float(r.get(m["unit_col"]) or 0) > 0 and float(r.get("mix_prod_kg") or 0) > 0
         ]
         weight_total = sum(weight for _value, weight in weighted)
+        # 가중합 단위는 (사용량/ton)×kg = 사용량×1000 이므로 비조업 사용량도 ×1000로 맞춘다.
+        idle_usage = sum(float(r.get(m["usage_col"]) or 0) for r in idle_rows)
         agg[m["unit_col"]] = (
-            sum(value * weight for value, weight in weighted) / weight_total
+            (sum(value * weight for value, weight in weighted) + idle_usage * 1000.0)
+            / weight_total
             if weight_total > 0 else None
         )
     # 폐수/용수 = 폐수량 / 용수량 (소수점 비). 용수량 0이면 산출 불가(None).
