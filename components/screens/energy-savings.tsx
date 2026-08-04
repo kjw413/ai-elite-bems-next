@@ -258,13 +258,21 @@ function ThemeDetailPanel({ themeId, onClose }: { themeId: number; onClose: () =
             <VerificationChip status={detail.verification.status} statusLabel={detail.verification.statusLabel}/>
           </div>
           <p className="cost-note">{detail.verification.reason}</p>
-          {detail.verification.avoidedQty != null && <dl className="savings-detail-facts savings-verify-facts">
-            <div><dt>시행 전 원단위(전년比)</dt><dd>{fmt(detail.verification.beforeIntensity)} → {fmt(detail.verification.rBeforePct)}%</dd></div>
-            <div><dt>시행 후 원단위(전년比)</dt><dd>{fmt(detail.verification.afterIntensity)} → {fmt(detail.verification.rAfterPct)}%</dd></div>
-            <div><dt>추정 회피량</dt><dd>{fmt(detail.verification.avoidedQty)} {detail.unit}</dd></div>
-            <div><dt>설명률</dt><dd>{fmt(detail.verification.explainPct)}%</dd></div>
-            <div><dt>관측 기간</dt><dd>{detail.verification.afterMonths}개월</dd></div>
-          </dl>}
+          {detail.verification.avoidedQty != null && (() => {
+            // Δ>0(원단위 악화)이면 회피량이 음수로 나온다 — 그대로 "회피량 −58,944"로
+            // 찍으면 이중부정이라 읽히지 않고, "설명률 −28%"는 백분율로서 뜻이 없다.
+            // 악화 구간에서는 같은 값을 '초과 사용량'으로 이름만 바꿔 양수로 보이고,
+            // 설명률은 감춘다(등록 실적을 설명한 몫이 애초에 없으므로).
+            const avoided = detail.verification.avoidedQty ?? 0;
+            const worsened = avoided < 0;
+            return <dl className="savings-detail-facts savings-verify-facts">
+              <div><dt>시행 전 원단위 · 전년비</dt><dd>{fmt(detail.verification.beforeIntensity)} · {fmt(detail.verification.rBeforePct)}%</dd></div>
+              <div><dt>시행 후 원단위 · 전년비</dt><dd>{fmt(detail.verification.afterIntensity)} · {fmt(detail.verification.rAfterPct)}%</dd></div>
+              <div><dt>{worsened ? "추정 초과 사용량" : "추정 회피량"}</dt><dd className={worsened ? "bad" : "good"}>{fmt(Math.abs(avoided))} {detail.unit}</dd></div>
+              {!worsened && <div><dt>설명률</dt><dd>{fmt(detail.verification.explainPct)}%</dd></div>}
+              <div><dt>관측 기간</dt><dd>{detail.verification.afterMonths}개월</dd></div>
+            </dl>;
+          })()}
         </div>
         {detail.note && <p className="cost-note">{detail.note}</p>}
       </div>
