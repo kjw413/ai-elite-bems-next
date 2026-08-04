@@ -260,6 +260,12 @@ COMPANY_WIDE_LABELS = frozenset({"전사", "전체", "전사(경산 제외)"})
 def is_company_wide(factory: str) -> bool:
     return factory in COMPANY_WIDE_LABELS
 PHYSICAL_FACTORIES = ["남양주1", "남양주2", "김해", "광주", "논산", "경산"]
+# 절감 테마 전용 — 남양주1·남양주2 통합 시공 건은 공장별 절감량 산출이 원리적으로
+# 불가능해(계측기가 없어 원단위로 간접 검증하는데, 통합 시공은애초에 두 공장을 나눌
+# 근거 자체가 없다) "남양주" 라벨로도 등록할 수 있다(2026-08 결정). energy_daily 등
+# 물리 전용 테이블과 달리 savings_theme.factory 는 이 값을 실제로 저장한다 —
+# savings_theme_query_scope()/savings_sibling_factories() 가 이 라벨을 다룬다.
+SAVINGS_FACTORY_OPTIONS = (*PHYSICAL_FACTORIES, "남양주")
 DISPLAY_FACTORIES = ["남양주", "김해", "광주", "논산", "경산"]
 
 # v5.3 모델은 경산(F50, 2026-07 신규) 학습 데이터가 없다. 예측 실행과
@@ -742,6 +748,41 @@ def physical_factory_members(factory: str) -> tuple[str, ...]:
         return tuple(PHYSICAL_FACTORIES)
     members = FACTORY_MEMBERS.get(factory)
     return tuple(members) if members else (factory,)
+
+
+def savings_theme_query_scope(factory: str) -> tuple[str, ...]:
+    """savings_theme.factory 조회 범위 — 물리 공장 + 남양주(통합) 포함 규칙.
+
+    physical_factory_members() 는 energy_daily 등 물리 전용 테이블을 위한 함수라
+    "남양주" 를 반환하지 않는다(고의 — 수정 금지 대상). savings_theme 은 그 라벨을
+    실제로 저장하므로, 상위 조회(전사·전사(경산 제외)·남양주)에서는 물리 멤버에
+    "남양주" 를 더해야 통합 테마가 함께 잡힌다. 남양주1/남양주2 단독 조회는 더하지
+    않는다 — 통합 실적은 그 공장 하나만의 몫이 아니기 때문(화면이 별도 안내로 알림).
+    """
+    members = physical_factory_members(factory)
+    if "남양주1" in members and "남양주2" in members:
+        return (*members, "남양주")
+    return members
+
+
+# 절감 테마 중복(검증 구간 겹침) 판정 — 남양주1·남양주2·남양주(통합)만 서로 겹칠 수
+# 있다(남양주1↔남양주2는 서로 다른 설비라 겹치지 않는다). 그 외 공장은 자기 자신하고만.
+_SAVINGS_NAMYANGJU_FAMILY = frozenset({"남양주1", "남양주2", "남양주"})
+
+
+def savings_sibling_factories(factory: str) -> tuple[str, ...]:
+    """이 테마와 검증 구간이 겹칠 수 있는 savings_theme.factory 값들."""
+    if factory in _SAVINGS_NAMYANGJU_FAMILY:
+        return tuple(_SAVINGS_NAMYANGJU_FAMILY)
+    return (factory,)
+
+
+def _savings_theme_conflicts(factory_a: str, factory_b: str) -> bool:
+    """두 테마의 factory 가 물리적으로 겹치는지 — 남양주(통합)는 남양주1·남양주2 각각과
+    겹치지만, 남양주1과 남양주2는 서로 다른 설비라 겹치지 않는다."""
+    if factory_a in _SAVINGS_NAMYANGJU_FAMILY and factory_b in _SAVINGS_NAMYANGJU_FAMILY:
+        return factory_a == factory_b or "남양주" in (factory_a, factory_b)
+    return factory_a == factory_b
 
 
 def prediction_factory_members(factory: str) -> tuple[str, ...]:
@@ -2438,7 +2479,10 @@ def _mark_duplicate_verifications(
     computed 값(Δ·설명률 등)은 참고용으로 남기고 status/reason 만 대체한다
     (총량 대사가 이 경우의 최종 신뢰 구간이 된다, 설계서 §6-⑥).
     """
-    windows_by_key: dict[tuple[str, str], list[tuple[int, date, date]]] = {}
+    # (factory, energy_type) 정확히 같은 값끼리만 묶으면 "남양주1 개별 테마"와
+    # "남양주(통합) 테마"처럼 factory 문자열은 다르지만 물리적으로 겹치는 조합을
+    # 놓친다 — 그래서 딕셔너리 그룹핑 대신 _savings_theme_conflicts() 로 전 쌍을 본다.
+    entries: list[tuple[int, str, str, date, date]] = []
     for theme in themes:
         if theme["status"] not in service.ACTIVE_STATUSES:
             continue
@@ -2446,19 +2490,20 @@ def _mark_duplicate_verifications(
         window = verification.get("window") if verification else None
         if not window:
             continue
-        key = (str(theme["factory"]), str(theme["energy_type"]))
-        windows_by_key.setdefault(key, []).append(
-            (int(theme["id"]), window["beforeFrom"], window["afterTo"]),
-        )
+        entries.append((
+            int(theme["id"]), str(theme["factory"]), str(theme["energy_type"]),
+            window["beforeFrom"], window["afterTo"],
+        ))
 
     duplicate_ids: set[int] = set()
-    for entries in windows_by_key.values():
-        for i in range(len(entries)):
-            id_a, from_a, to_a = entries[i]
-            for id_b, from_b, to_b in entries[i + 1:]:
-                if from_a <= to_b and from_b <= to_a:
-                    duplicate_ids.add(id_a)
-                    duplicate_ids.add(id_b)
+    for i in range(len(entries)):
+        id_a, factory_a, type_a, from_a, to_a = entries[i]
+        for id_b, factory_b, type_b, from_b, to_b in entries[i + 1:]:
+            if type_a != type_b or not _savings_theme_conflicts(factory_a, factory_b):
+                continue
+            if from_a <= to_b and from_b <= to_a:
+                duplicate_ids.add(id_a)
+                duplicate_ids.add(id_b)
 
     for theme_id in duplicate_ids:
         verification = verifications[theme_id]
@@ -2501,9 +2546,20 @@ def savings(
     else:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 상태입니다: {status}")
 
-    members = physical_factory_members(factory)
+    members = savings_theme_query_scope(factory)
     themes = service.list_themes(members, year, energy_type, statuses)
     records = service.records_by_theme([t["id"] for t in themes], year)
+
+    # 남양주1/남양주2 단독 조회는 통합 테마를 포함하지 않는다(savings_theme_query_scope) —
+    # 존재를 모르고 지나치지 않도록 건수를 안내한다.
+    integrated_note: str | None = None
+    if factory in ("남양주1", "남양주2"):
+        integrated_count = len(service.list_themes(["남양주"], year, energy_type, statuses))
+        if integrated_count > 0:
+            integrated_note = (
+                f"남양주1·남양주2 통합 시공 테마 {integrated_count}건은 이 목록에 없습니다 —"
+                " '남양주' 선택 시 함께 표시됩니다."
+            )
 
     # 검증(원단위 전후 비교)에 쓸 생산실적 — 전 구간(-6개월)에 전년 동기(-12개월)까지
     # 더 필요하므로, 가장 이른 시행월 기준으로 2년 남짓 여유를 둔 범위를 한 번만 읽는다.
@@ -2664,13 +2720,14 @@ def savings(
                 for value in service.THEME_STATUSES
             ],
             "categories": list(service.THEME_CATEGORIES),
-            "factories": list(PHYSICAL_FACTORIES),
+            "factories": list(SAVINGS_FACTORY_OPTIONS),
         },
         # 용수 테마가 섞여 있으면 금액 합계가 전체를 대표하지 않는다 — 화면이 각주로 알린다.
         "scopeNote": (
             f"용수 테마 {len(unpriced_themes)}건은 단가가 시스템 관리 대상이 아니라"
             " 금액이 산출되지 않습니다 — 아래 금액 합계에서 빠져 있습니다."
         ) if unpriced_themes else None,
+        "integratedNote": integrated_note,
     })
 
 
@@ -2706,12 +2763,15 @@ def savings_theme_detail(theme_id: int) -> dict[str, Any]:
             # 같은 물리공장·에너지원의 다른 진행/완료 테마와 검증 구간이 겹치는지 —
             # list_themes 는 관리연도(theme.year) 단위라 인접 연도의 테마도 겹칠 수
             # 있어 시행월 기준 폭넓게(전후 1년) 다시 조회한다.
+            # 남양주(통합) 테마는 남양주1·남양주2 개별 테마와도 겹칠 수 있으므로
+            # factory 정확히 일치가 아니라 물리적으로 겹치는 라벨 전부를 찾는다.
+            sibling_factories = savings_sibling_factories(str(theme["factory"]))
             siblings = service.list_themes(
-                (theme["factory"],), year - 1, energy_type, list(service.ACTIVE_STATUSES),
+                sibling_factories, year - 1, energy_type, list(service.ACTIVE_STATUSES),
             ) + service.list_themes(
-                (theme["factory"],), year, energy_type, list(service.ACTIVE_STATUSES),
+                sibling_factories, year, energy_type, list(service.ACTIVE_STATUSES),
             ) + service.list_themes(
-                (theme["factory"],), year + 1, energy_type, list(service.ACTIVE_STATUSES),
+                sibling_factories, year + 1, energy_type, list(service.ACTIVE_STATUSES),
             )
             for sibling in siblings:
                 if int(sibling["id"]) == theme_id or not sibling.get("start_ym"):
@@ -2785,12 +2845,19 @@ class SavingsRecordsRequest(BaseModel):
 
 
 def _validated_theme_payload(payload: SavingsThemeRequest, service: Any) -> dict[str, Any]:
-    """공통 검증 — 물리 공장만 허용하고 서비스 규칙을 통과시킨다."""
+    """공통 검증 — 물리 공장(+ 남양주 통합)만 허용하고 서비스 규칙을 통과시킨다.
+
+    "전사"·"전사(경산 제외)" 같은 집계 라벨은 여전히 금지한다 — 검증이 물리 공장
+    단위 원단위를 비교하므로 그 라벨로 저장하면 물리 공장으로 펼칠 방법이 없다.
+    "남양주"만 예외인 이유는 남양주1·남양주2 통합 시공 건이 실제로 있고, 그 값이
+    factory_clause() 를 그대로 통과해 검증·단가·총량대사가 전부 정상 동작하기
+    때문이다(2026-08 결정 — savings_theme_query_scope 근처 주석 참고).
+    """
     data = payload.model_dump()
-    if data["factory"] not in PHYSICAL_FACTORIES:
+    if data["factory"] not in SAVINGS_FACTORY_OPTIONS:
         raise HTTPException(
             status_code=400,
-            detail="테마는 개별 공장에만 등록할 수 있습니다 — 집계 라벨은 사용할 수 없습니다.",
+            detail="테마는 개별 공장 또는 '남양주'(남양주1·2 통합)에만 등록할 수 있습니다.",
         )
     reason = service.validate_theme(data)
     if reason:
