@@ -555,13 +555,18 @@ type SavingsThemeForm = {
   start_ym: string; owner: string; invest_amount: string; note: string;
 };
 type SavingsThemeMonth = { month: string; plannedQty: number | null; actualQty: number | null };
+type SavingsServerFile = {
+  path: string; filename: string; exists: boolean; sizeBytes: number; modifiedAt: string | null; sha256: string | null;
+};
 type SavingsImportPreview = {
   success: boolean; year: number; totalThemes: number; newThemes: number; existingThemes: number; recordValues: number;
   byFactory: { factory: string; themes: number }[];
   samples: { factory: string; title: string; action: "new" | "update" }[];
+  sourceFile: SavingsServerFile & { sha256: string };
 };
 type SavingsImportResult = {
   success: boolean; year: number; insertedThemes: number; updatedThemes: number; savedRecords: number; clearedRecords: number;
+  sourceFile: SavingsServerFile & { sha256: string };
 };
 
 const emptySavingsForm = (factory: string): SavingsThemeForm => ({
@@ -592,8 +597,8 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
   const [monthForm, setMonthForm] = useState<Record<number, { planned: string; actual: string }>>({});
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [recordsSaving, setRecordsSaving] = useState(false);
-  const importFileInput = useRef<HTMLInputElement | null>(null);
-  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importFileStatus, setImportFileStatus] = useState<SavingsServerFile | null>(null);
+  const [importStatusLoading, setImportStatusLoading] = useState(false);
   const [importPreview, setImportPreview] = useState<SavingsImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState("");
@@ -601,6 +606,19 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
 
   const loadController = useRef<AbortController | null>(null);
   const detailController = useRef<AbortController | null>(null);
+
+  const loadImportFileStatus = useCallback(async () => {
+    if (!isAdmin) return;
+    setImportStatusLoading(true);
+    setImportError("");
+    try {
+      setImportFileStatus(await apiRequest<SavingsServerFile>("/savings/themes/import/server-file"));
+    } catch (requestError) {
+      setImportError(messageOf(requestError));
+    } finally {
+      setImportStatusLoading(false);
+    }
+  }, [isAdmin]);
 
   const load = useCallback(async () => {
     loadController.current?.abort();
@@ -628,6 +646,10 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
     void load();
     return () => { loadController.current?.abort(); detailController.current?.abort(); };
   }, [load]);
+
+  useEffect(() => {
+    void loadImportFileStatus();
+  }, [loadImportFileStatus]);
 
   useEffect(() => {
     if (selectedId != null && !themes.some(theme => theme.id === selectedId)) setSelectedId(null);
@@ -746,25 +768,18 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  function selectImportFile(file: File | null) {
-    setImportFile(file);
-    setImportPreview(null);
-    setImportError("");
-    setImportNotice("");
-  }
-
   async function previewImport() {
-    if (!importFile || importing) return;
+    if (!importFileStatus?.exists || importing) return;
     setImporting(true);
     setImportError("");
     setImportNotice("");
     try {
-      const body = new FormData();
-      body.append("file", importFile);
-      setImportPreview(await apiRequest<SavingsImportPreview>(
+      const result = await apiRequest<SavingsImportPreview>(
         `/savings/themes/import/preview?${query({ year: String(year) })}`,
-        { method: "POST", body },
-      ));
+        { method: "POST" },
+      );
+      setImportPreview(result);
+      setImportFileStatus(result.sourceFile);
     } catch (requestError) {
       setImportPreview(null);
       setImportError(messageOf(requestError));
@@ -774,7 +789,7 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
   }
 
   async function applyImport() {
-    if (!importFile || !importPreview?.success || importing) return;
+    if (!importPreview?.success || importing) return;
     if (importPreview.existingThemes > 0 && !window.confirm(
       `기존 테마 ${importPreview.existingThemes}건의 에너지원·분류·월별 계획/실적을 양식 값으로 갱신합니다. 계속하시겠습니까?`,
     )) return;
@@ -782,18 +797,18 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
     setImportError("");
     setImportNotice("");
     try {
-      const body = new FormData();
-      body.append("file", importFile);
       const result = await apiRequest<SavingsImportResult>(
-        `/savings/themes/import?${query({ year: String(year) })}`,
-        { method: "POST", body },
+        `/savings/themes/import?${query({
+          year: String(year),
+          expected_sha256: importPreview.sourceFile.sha256,
+        })}`,
+        { method: "POST" },
       );
       setImportNotice(
         `${result.year}년 절감 테마를 반영했습니다. 신규 ${result.insertedThemes}건 · 갱신 ${result.updatedThemes}건 · 월별 값 ${result.savedRecords}건`,
       );
-      setImportFile(null);
+      setImportFileStatus(result.sourceFile);
       setImportPreview(null);
-      if (importFileInput.current) importFileInput.current.value = "";
       setSelectedId(null);
       await load();
     } catch (requestError) {
@@ -805,15 +820,23 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
   return <div className="admin-grid savings-admin">
     {isAdmin && <article className="card upload-panel admin-span">
       <div>
-        <span className="eyebrow">SAVINGS XLSX UPSERT</span><h3>절감테마 양식 일괄 등록</h3>
-        <p>{year}년 기준으로 남양주·김해·광주·논산·경산 시트를 읽습니다. 신규 테마는 "진행"으로 등록되며, 기존 테마의 상태·시행월·담당·투자비·메모는 보존됩니다.</p>
-        <div className="action-row" style={{ marginTop: 12 }}><button type="button" className="secondary-button" onClick={() => { window.location.href = apiUrl("/savings/themes/template"); }}><Download size={16}/>양식 다운로드</button></div>
+        <span className="eyebrow">SAVINGS XLSX SERVER IMPORT</span><h3>절감테마 서버 파일 일괄 등록</h3>
+        <p>{year}년 기준으로 남양주·김해·광주·논산·경산 시트를 읽습니다. 고정 등록 파일을 Excel에서 저장하고 닫은 뒤 검증하세요. 브라우저 파일 업로드는 사용하지 않습니다.</p>
+        <div className="action-row" style={{ marginTop: 12 }}>
+          <button type="button" className="secondary-button" onClick={() => { window.location.href = apiUrl("/savings/themes/template"); }}><Download size={16}/>빈 양식 다운로드</button>
+          <button type="button" className="secondary-button" disabled={importStatusLoading} onClick={() => void loadImportFileStatus()}><RefreshCw size={16}/>{importStatusLoading ? "확인 중..." : "서버 파일 확인"}</button>
+        </div>
       </div>
-      <label className="file-picker"><Upload size={22}/><span>{importFile?.name ?? "절감테마 Excel 선택"}</span><input ref={importFileInput} type="file" accept=".xlsx" onChange={event => selectImportFile(event.target.files?.[0] ?? null)}/></label>
-      <button type="button" className="primary-button" disabled={!importFile || importing} onClick={() => void previewImport()}><Play size={16}/>{importing && !importPreview ? "검증 중..." : "1단계 · 검증·미리보기"}</button>
+      {importFileStatus && <div className="operation-result admin-span">
+        <strong>{importFileStatus.exists ? `등록 파일 확인됨 · ${(importFileStatus.sizeBytes / 1024).toFixed(1)}KB` : "등록 파일이 없습니다."}</strong>
+        <p>고정 경로: <code>{importFileStatus.path}</code></p>
+        {importFileStatus.modifiedAt && <p>최종 수정: {new Date(importFileStatus.modifiedAt).toLocaleString("ko-KR")}</p>}
+      </div>}
+      <button type="button" className="primary-button" disabled={!importFileStatus?.exists || importing} onClick={() => void previewImport()}><Play size={16}/>{importing && !importPreview ? "검증 중..." : "1단계 · 서버 파일 검증"}</button>
       {importPreview && <div className="operation-result admin-span">
         <strong>{importPreview.year}년 · 테마 {importPreview.totalThemes}건 · 월별 입력값 {importPreview.recordValues}건</strong>
         <p>신규 {importPreview.newThemes}건 · 기존 갱신 {importPreview.existingThemes}건 · {importPreview.byFactory.map(item => `${item.factory} ${item.themes}건`).join(" · ")}</p>
+        <p>검증 파일: {importPreview.sourceFile.filename} · 해시 {importPreview.sourceFile.sha256.slice(0, 12)}…</p>
         <div className="action-row"><button type="button" className="primary-button" disabled={importing} onClick={() => void applyImport()}><Upload size={16}/>{importing ? "반영 중..." : `2단계 · DB 반영 (${importPreview.totalThemes}건)`}</button></div>
       </div>}
       {importError && <div className="form-message error admin-span">{importError}</div>}

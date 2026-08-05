@@ -18,6 +18,7 @@ import asyncio
 import base64
 import calendar
 import importlib
+import hashlib
 import logging
 import math
 import os
@@ -39,6 +40,7 @@ from pydantic import BaseModel, Field
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SAVINGS_TEMPLATE_PATH = PROJECT_ROOT / "절감테마_양식.xlsx"
+SAVINGS_IMPORT_PATH = PROJECT_ROOT / "imports" / "savings" / "절감테마_등록.xlsx"
 logger = logging.getLogger(__name__)
 # Strict legacy read-only policy: imported core modules must not create __pycache__.
 sys.dont_write_bytecode = True
@@ -2732,13 +2734,38 @@ def savings(
     })
 
 
-async def _read_savings_template_upload(file: UploadFile) -> bytes:
-    if not file.filename or Path(file.filename).suffix.lower() != ".xlsx":
-        raise HTTPException(status_code=400, detail="절감테마 양식은 .xlsx 파일만 업로드할 수 있습니다.")
-    content = await file.read()
+def _savings_import_file_status(content: bytes | None = None) -> dict[str, Any]:
+    try:
+        stat = SAVINGS_IMPORT_PATH.stat()
+    except FileNotFoundError:
+        return {
+            "path": str(SAVINGS_IMPORT_PATH), "filename": SAVINGS_IMPORT_PATH.name,
+            "exists": False, "sizeBytes": 0, "modifiedAt": None, "sha256": None,
+        }
+    return {
+        "path": str(SAVINGS_IMPORT_PATH), "filename": SAVINGS_IMPORT_PATH.name,
+        "exists": SAVINGS_IMPORT_PATH.is_file(), "sizeBytes": stat.st_size,
+        "modifiedAt": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
+        "sha256": hashlib.sha256(content).hexdigest() if content is not None else None,
+    }
+
+
+def _read_savings_server_file() -> tuple[bytes, dict[str, Any]]:
+    if not SAVINGS_IMPORT_PATH.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"고정 등록 파일을 찾을 수 없습니다: {SAVINGS_IMPORT_PATH}",
+        )
+    try:
+        content = SAVINGS_IMPORT_PATH.read_bytes()
+    except OSError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="등록 파일을 읽을 수 없습니다. Excel에서 저장한 뒤 파일을 닫고 다시 시도하세요.",
+        ) from exc
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="절감테마 양식은 10MB 이하여야 합니다.")
-    return content
+    return content, _savings_import_file_status(content)
 
 
 def _parse_savings_template(content: bytes, year: int) -> tuple[Any, list[dict[str, Any]]]:
@@ -2764,24 +2791,38 @@ def download_savings_template(request: Request) -> FileResponse:
     )
 
 
+@app.get("/api/v1/savings/themes/import/server-file")
+def savings_import_server_file(request: Request) -> dict[str, Any]:
+    require_admin(request)
+    return json_safe(_savings_import_file_status())
+
+
 @app.post("/api/v1/savings/themes/import/preview")
-async def preview_savings_template_import(
-    request: Request, year: int = Query(..., ge=2000, le=2100), file: UploadFile = File(...),
+def preview_savings_template_import(
+    request: Request, year: int = Query(..., ge=2000, le=2100),
 ) -> dict[str, Any]:
     require_admin(request)
-    content = await _read_savings_template_upload(file)
+    content, source_file = _read_savings_server_file()
     service, themes = _parse_savings_template(content, year)
-    return json_safe(service.preview_import(themes))
+    return json_safe({**service.preview_import(themes), "sourceFile": source_file})
 
 
 @app.post("/api/v1/savings/themes/import")
-async def import_savings_template(
-    request: Request, year: int = Query(..., ge=2000, le=2100), file: UploadFile = File(...),
+def import_savings_template(
+    request: Request, year: int = Query(..., ge=2000, le=2100),
+    expected_sha256: str = Query(..., min_length=64, max_length=64),
 ) -> dict[str, Any]:
     require_admin(request)
-    content = await _read_savings_template_upload(file)
+    content, source_file = _read_savings_server_file()
+    if source_file["sha256"] != expected_sha256.lower():
+        raise HTTPException(
+            status_code=409,
+            detail="미리보기 후 등록 파일이 변경되었습니다. 1단계 검증을 다시 실행하세요.",
+        )
     service, themes = _parse_savings_template(content, year)
-    return json_safe({"success": True, "year": year, **service.apply_import(themes)})
+    return json_safe({
+        "success": True, "year": year, **service.apply_import(themes), "sourceFile": source_file,
+    })
 
 @app.get("/api/v1/savings/themes/{theme_id}")
 def savings_theme_detail(theme_id: int) -> dict[str, Any]:
