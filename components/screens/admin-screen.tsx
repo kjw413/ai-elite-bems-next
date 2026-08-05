@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, ClipboardPaste, CloudSun, Database, Eye, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
-import { apiRequest, isAbortError, query } from "@/lib/bems-api";
+import { BrainCircuit, ClipboardPaste, CloudSun, Database, Download, Eye, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
+import { apiRequest, apiUrl, isAbortError, query } from "@/lib/bems-api";
 import { factories } from "@/lib/bems-data";
 import { PAGE_DEFS } from "@/lib/bems-pages";
 
@@ -555,6 +555,14 @@ type SavingsThemeForm = {
   start_ym: string; owner: string; invest_amount: string; note: string;
 };
 type SavingsThemeMonth = { month: string; plannedQty: number | null; actualQty: number | null };
+type SavingsImportPreview = {
+  success: boolean; year: number; totalThemes: number; newThemes: number; existingThemes: number; recordValues: number;
+  byFactory: { factory: string; themes: number }[];
+  samples: { factory: string; title: string; action: "new" | "update" }[];
+};
+type SavingsImportResult = {
+  success: boolean; year: number; insertedThemes: number; updatedThemes: number; savedRecords: number; clearedRecords: number;
+};
 
 const emptySavingsForm = (factory: string): SavingsThemeForm => ({
   factory, title: "", energy_type: "power", category: "설비교체", status: "planned",
@@ -584,6 +592,12 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
   const [monthForm, setMonthForm] = useState<Record<number, { planned: string; actual: string }>>({});
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [recordsSaving, setRecordsSaving] = useState(false);
+  const importFileInput = useRef<HTMLInputElement | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<SavingsImportPreview | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importNotice, setImportNotice] = useState("");
 
   const loadController = useRef<AbortController | null>(null);
   const detailController = useRef<AbortController | null>(null);
@@ -732,7 +746,79 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  function selectImportFile(file: File | null) {
+    setImportFile(file);
+    setImportPreview(null);
+    setImportError("");
+    setImportNotice("");
+  }
+
+  async function previewImport() {
+    if (!importFile || importing) return;
+    setImporting(true);
+    setImportError("");
+    setImportNotice("");
+    try {
+      const body = new FormData();
+      body.append("file", importFile);
+      setImportPreview(await apiRequest<SavingsImportPreview>(
+        `/savings/themes/import/preview?${query({ year: String(year) })}`,
+        { method: "POST", body },
+      ));
+    } catch (requestError) {
+      setImportPreview(null);
+      setImportError(messageOf(requestError));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function applyImport() {
+    if (!importFile || !importPreview?.success || importing) return;
+    if (importPreview.existingThemes > 0 && !window.confirm(
+      `기존 테마 ${importPreview.existingThemes}건의 에너지원·분류·월별 계획/실적을 양식 값으로 갱신합니다. 계속하시겠습니까?`,
+    )) return;
+    setImporting(true);
+    setImportError("");
+    setImportNotice("");
+    try {
+      const body = new FormData();
+      body.append("file", importFile);
+      const result = await apiRequest<SavingsImportResult>(
+        `/savings/themes/import?${query({ year: String(year) })}`,
+        { method: "POST", body },
+      );
+      setImportNotice(
+        `${result.year}년 절감 테마를 반영했습니다. 신규 ${result.insertedThemes}건 · 갱신 ${result.updatedThemes}건 · 월별 값 ${result.savedRecords}건`,
+      );
+      setImportFile(null);
+      setImportPreview(null);
+      if (importFileInput.current) importFileInput.current.value = "";
+      setSelectedId(null);
+      await load();
+    } catch (requestError) {
+      setImportError(messageOf(requestError));
+    } finally {
+      setImporting(false);
+    }
+  }
   return <div className="admin-grid savings-admin">
+    {isAdmin && <article className="card upload-panel admin-span">
+      <div>
+        <span className="eyebrow">SAVINGS XLSX UPSERT</span><h3>절감테마 양식 일괄 등록</h3>
+        <p>{year}년 기준으로 남양주·김해·광주·논산·경산 시트를 읽습니다. 신규 테마는 "진행"으로 등록되며, 기존 테마의 상태·시행월·담당·투자비·메모는 보존됩니다.</p>
+        <div className="action-row" style={{ marginTop: 12 }}><button type="button" className="secondary-button" onClick={() => { window.location.href = apiUrl("/savings/themes/template"); }}><Download size={16}/>양식 다운로드</button></div>
+      </div>
+      <label className="file-picker"><Upload size={22}/><span>{importFile?.name ?? "절감테마 Excel 선택"}</span><input ref={importFileInput} type="file" accept=".xlsx" onChange={event => selectImportFile(event.target.files?.[0] ?? null)}/></label>
+      <button type="button" className="primary-button" disabled={!importFile || importing} onClick={() => void previewImport()}><Play size={16}/>{importing && !importPreview ? "검증 중..." : "1단계 · 검증·미리보기"}</button>
+      {importPreview && <div className="operation-result admin-span">
+        <strong>{importPreview.year}년 · 테마 {importPreview.totalThemes}건 · 월별 입력값 {importPreview.recordValues}건</strong>
+        <p>신규 {importPreview.newThemes}건 · 기존 갱신 {importPreview.existingThemes}건 · {importPreview.byFactory.map(item => `${item.factory} ${item.themes}건`).join(" · ")}</p>
+        <div className="action-row"><button type="button" className="primary-button" disabled={importing} onClick={() => void applyImport()}><Upload size={16}/>{importing ? "반영 중..." : `2단계 · DB 반영 (${importPreview.totalThemes}건)`}</button></div>
+      </div>}
+      {importError && <div className="form-message error admin-span">{importError}</div>}
+      {importNotice && <div className="form-message success admin-span">{importNotice}</div>}
+    </article>}
     {isAdmin && <form className="card admin-form" onSubmit={submitTheme}>
       <header><div><span className="eyebrow">SAVINGS THEME</span><h3>{editingId == null ? "절감 테마 등록" : "절감 테마 수정"}</h3></div>{editingId != null && <button type="button" className="text-button" onClick={resetForm}>취소</button>}</header>
       <div className="form-grid">
@@ -754,7 +840,7 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
       <header className="panel-header">
         <div><span className="eyebrow">SAVINGS THEMES</span><h3>등록된 테마</h3></div>
         <div className="action-row">
-          <label className="field compact-field"><span>연도</span><input type="number" value={year} onChange={event => setYear(Number(event.target.value) || year)}/></label>
+          <label className="field compact-field"><span>연도</span><input type="number" value={year} onChange={event => { setYear(Number(event.target.value) || year); setImportPreview(null); setImportNotice(""); setImportError(""); }}/></label>
           <button type="button" className="secondary-button" onClick={() => void load()} disabled={loading}><RefreshCw size={15}/>새로고침</button>
         </div>
       </header>

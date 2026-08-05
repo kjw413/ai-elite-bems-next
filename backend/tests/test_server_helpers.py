@@ -1100,12 +1100,9 @@ class ServerHelperTests(unittest.TestCase):
         self.assertEqual(computed["rate"], 35.0)
 
     def test_savings_theme_rejects_aggregate_factory(self) -> None:
-        """테마는 물리 공장에만 귀속된다 — 집계 라벨은 400.
-
-        집계 라벨로 저장하면 물리 공장으로 펼칠 수 없어 전사 합계가 이중 계상된다.
-        """
+        """전사 집계 라벨은 거부하고, 남양주 통합 시공 라벨은 허용한다."""
         service = server.import_core("app.services.savings_theme_service")
-        for label in ("전사", "전사(경산 제외)", "남양주"):
+        for label in ("전사", "전사(경산 제외)"):
             with self.subTest(factory=label):
                 payload = server.SavingsThemeRequest(
                     factory=label, year=2026, title="테스트", energy_type="power",
@@ -1114,6 +1111,12 @@ class ServerHelperTests(unittest.TestCase):
                     server._validated_theme_payload(payload, service)
                 self.assertEqual(raised.exception.status_code, 400)
 
+        integrated = server.SavingsThemeRequest(
+            factory="남양주", year=2026, title="통합 시공", energy_type="power",
+        )
+        self.assertEqual(
+            server._validated_theme_payload(integrated, service)["factory"], "남양주",
+        )
     def test_savings_theme_validation_rules(self) -> None:
         service = server.import_core("app.services.savings_theme_service")
         valid = {"factory": "남양주1", "year": 2026, "title": "교체",

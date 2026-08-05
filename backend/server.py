@@ -34,10 +34,11 @@ import pymysql
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SAVINGS_TEMPLATE_PATH = PROJECT_ROOT / "절감테마_양식.xlsx"
 logger = logging.getLogger(__name__)
 # Strict legacy read-only policy: imported core modules must not create __pycache__.
 sys.dont_write_bytecode = True
@@ -2730,6 +2731,57 @@ def savings(
         "integratedNote": integrated_note,
     })
 
+
+async def _read_savings_template_upload(file: UploadFile) -> bytes:
+    if not file.filename or Path(file.filename).suffix.lower() != ".xlsx":
+        raise HTTPException(status_code=400, detail="절감테마 양식은 .xlsx 파일만 업로드할 수 있습니다.")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="절감테마 양식은 10MB 이하여야 합니다.")
+    return content
+
+
+def _parse_savings_template(content: bytes, year: int) -> tuple[Any, list[dict[str, Any]]]:
+    from io import BytesIO
+
+    service = import_core("app.services.savings_import_service")
+    try:
+        themes = service.parse_template(BytesIO(content), year)
+    except service.TemplateValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return service, themes
+
+
+@app.get("/api/v1/savings/themes/template")
+def download_savings_template(request: Request) -> FileResponse:
+    require_admin(request)
+    if not SAVINGS_TEMPLATE_PATH.is_file():
+        raise HTTPException(status_code=404, detail="절감테마 양식 파일을 찾을 수 없습니다.")
+    return FileResponse(
+        SAVINGS_TEMPLATE_PATH,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=SAVINGS_TEMPLATE_PATH.name,
+    )
+
+
+@app.post("/api/v1/savings/themes/import/preview")
+async def preview_savings_template_import(
+    request: Request, year: int = Query(..., ge=2000, le=2100), file: UploadFile = File(...),
+) -> dict[str, Any]:
+    require_admin(request)
+    content = await _read_savings_template_upload(file)
+    service, themes = _parse_savings_template(content, year)
+    return json_safe(service.preview_import(themes))
+
+
+@app.post("/api/v1/savings/themes/import")
+async def import_savings_template(
+    request: Request, year: int = Query(..., ge=2000, le=2100), file: UploadFile = File(...),
+) -> dict[str, Any]:
+    require_admin(request)
+    content = await _read_savings_template_upload(file)
+    service, themes = _parse_savings_template(content, year)
+    return json_safe({"success": True, "year": year, **service.apply_import(themes)})
 
 @app.get("/api/v1/savings/themes/{theme_id}")
 def savings_theme_detail(theme_id: int) -> dict[str, Any]:

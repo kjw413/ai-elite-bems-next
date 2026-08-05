@@ -18,6 +18,11 @@ function getApiBase() {
   return "http://localhost:8000/api/v1";
 }
 
+export function apiUrl(path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${getApiBase()}${normalizedPath}`;
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -41,12 +46,11 @@ function errorMessage(payload: unknown, fallback: string) {
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`${getApiBase()}${normalizedPath}`, {
+  const response = await fetch(apiUrl(path), {
     cache: "no-store",
     ...init,
     headers,
