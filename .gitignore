@@ -11,3 +11,6 @@ next-env.d.ts
 backend/app/predictive model/
 __pycache__/
 *.pyc
+# Excel 임시 잠금 파일 — imports/savings/절감테마_등록.xlsx 를 열어두면 생긴다.
+# 커밋되면 다른 PC에서 "파일이 사용 중" 오해를 부르므로 추적하지 않는다.
+~$*.xlsx

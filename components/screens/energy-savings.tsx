@@ -113,6 +113,9 @@ type SavingsData = {
   byFactory: { factory: string; actualAmount: number }[];
   options: { energyTypes: EnergyTypeOption[]; statuses: OptionDef[]; categories: string[]; factories: string[] };
   scopeNote: string | null;
+  // 남양주1/남양주2 단독 조회 시, 목록에서 빠진 통합 시공 테마 건수 안내.
+  // 통합 건은 공장별 절감량을 나눌 근거가 없어 "남양주" 소속으로만 관리된다.
+  integratedNote: string | null;
 };
 
 const emptyData = (): SavingsData => ({
@@ -124,6 +127,7 @@ const emptyData = (): SavingsData => ({
   byFactory: [],
   options: { energyTypes: [], statuses: [], categories: [], factories: [] },
   scopeNote: null,
+  integratedNote: null,
 });
 
 const fmt = (value: unknown, digits = 1) =>
@@ -359,6 +363,7 @@ export function EnergySavings({ factory, requestedDate }: { factory: string; req
     </div>
 
     {data.scopeNote && <section className="alert warning cost-scope-note"><Coins size={19}/><div><strong>금액 범위 안내</strong><p>{data.scopeNote}</p></div></section>}
+    {data.integratedNote && <section className="alert cost-scope-note"><ListChecks size={19}/><div><strong>통합 시공 테마 안내</strong><p>{data.integratedNote}</p></div></section>}
 
     <section className="kpi-grid">
       <SavingsKpi label="연간 계획 절감금액" value={data.summary.plannedAmount} unit="백만원" icon={Target}/>

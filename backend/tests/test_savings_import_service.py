@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from io import BytesIO
+from unittest.mock import patch
 
 from openpyxl import Workbook
 
@@ -82,11 +83,74 @@ class SavingsImportServiceTests(unittest.TestCase):
         self.assertIn("숫자", str(raised.exception))
 
 
+    def test_preview_contains_every_theme_and_all_month_values(self) -> None:
+        row: list[object] = [1, "고효율 모터 교체", "전력", "설비교체", None, None]
+        row.extend([100, 90, 120, None])
+        row.extend([None] * 20)
+        themes = savings_import_service.parse_template(workbook_bytes(row), 2026)
+
+        with patch.object(savings_import_service, "_existing_theme_ids", return_value={}):
+            preview = savings_import_service.preview_import(themes)
+
+        self.assertEqual(len(preview["items"]), 1)
+        item = preview["items"][0]
+        self.assertEqual(item["sourceRow"], 2)
+        self.assertEqual(item["energyLabel"], "전력")
+        self.assertEqual(item["plannedTotal"], 220.0)
+        self.assertEqual(item["actualTotal"], 90.0)
+        self.assertEqual(len(item["months"]), 12)
+        self.assertEqual(
+            item["months"][1],
+            {"month": 2, "plannedQty": 120.0, "actualQty": None},
+        )
+
     def test_rejects_corrupt_xlsx_as_template_error(self) -> None:
         with self.assertRaises(savings_import_service.TemplateValidationError) as raised:
             savings_import_service.parse_template(BytesIO(b"not-an-xlsx"), 2026)
 
         self.assertIn("손상", str(raised.exception))
+
+    # ── 시행월 자동 도출 ─────────────────────────────────────────
+    # 양식에 시행월 열이 없어 월별 값에서 도출한다. 이 값이 없으면 원단위 전후
+    # 비교 검증이 영영 '판정 보류'로 남으므로(2026-08 실측: 25건 전부 보류)
+    # 규칙을 테스트로 고정한다.
+
+    def test_start_ym_is_first_month_with_plan_or_actual(self) -> None:
+        records = [
+            {"month": month, "planned_qty": 100.0 if month >= 3 else 0.0, "actual_qty": None}
+            for month in range(1, 13)
+        ]
+        self.assertEqual(savings_import_service.derive_start_ym(records, 2026), "2026-03")
+
+    def test_start_ym_counts_actual_only_month(self) -> None:
+        """계획 없이 실적만 있는 달도 시행으로 본다 — 계획 없이 시행된 건이 실제로 있다."""
+        records = [
+            {"month": month, "planned_qty": 0.0, "actual_qty": 5.0 if month >= 5 else None}
+            for month in range(1, 13)
+        ]
+        self.assertEqual(savings_import_service.derive_start_ym(records, 2026), "2026-05")
+
+    def test_start_ym_treats_zero_actual_as_entered(self) -> None:
+        """실적 0(측정했더니 0)과 미입력(None)은 다르다 — 0 은 시행된 달이다."""
+        records = [
+            {"month": month, "planned_qty": 0.0, "actual_qty": 0.0 if month == 7 else None}
+            for month in range(1, 13)
+        ]
+        self.assertEqual(savings_import_service.derive_start_ym(records, 2026), "2026-07")
+
+    def test_start_ym_is_none_when_nothing_entered(self) -> None:
+        records = [
+            {"month": month, "planned_qty": 0.0, "actual_qty": None} for month in range(1, 13)
+        ]
+        self.assertIsNone(savings_import_service.derive_start_ym(records, 2026))
+
+    def test_parsed_theme_carries_derived_start_ym(self) -> None:
+        row: list[object] = [1, "고효율 모터 교체", "전력", "설비교체", None, None]
+        row.extend([None, None])          # 1월 — 비어 있음
+        row.extend([120, None])           # 2월 — 계획 최초 기입
+        row.extend([None] * 20)
+        themes = savings_import_service.parse_template(workbook_bytes(row), 2026)
+        self.assertEqual(themes[0]["start_ym"], "2026-02")
 
 if __name__ == "__main__":
     unittest.main()

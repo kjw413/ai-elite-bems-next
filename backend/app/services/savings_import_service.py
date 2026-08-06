@@ -22,6 +22,7 @@ from app.services.audit_service import get_current_user
 
 FACTORY_SHEETS: tuple[str, ...] = ("남양주", "김해", "광주", "논산", "경산")
 ENERGY_LABEL_TO_TYPE: dict[str, str] = {"전력": "power", "연료": "fuel", "용수": "water"}
+ENERGY_TYPE_TO_LABEL: dict[str, str] = {value: key for key, value in ENERGY_LABEL_TO_TYPE.items()}
 CATEGORIES: tuple[str, ...] = ("설비교체", "운전개선", "공정개선", "누설저감", "계약변경", "기타")
 NEW_THEME_STATUS = "ongoing"
 
@@ -61,6 +62,24 @@ def _number(value: Any, location: str, *, blank: float | None) -> float | None:
     if not math.isfinite(parsed):
         raise TemplateValidationError(f"{location}: 유한한 숫자를 입력하세요.")
     return parsed
+
+
+def derive_start_ym(records: list[dict[str, Any]], year: int) -> str | None:
+    """계획량 또는 실적량이 처음 기입된 월 → 'YYYY-MM' (시행월).
+
+    양식에 시행월 열이 없어 월별 값에서 도출한다(2026-08 결정). 이 값은 원단위
+    전후 비교 검증의 분기점이므로, 없으면 그 테마는 영영 '판정 보류'가 된다.
+
+    주의 — 연초부터 계획이 깔린 테마는 시행월이 1월로 잡혀 '시행 전' 구간이
+    통째로 전년도가 된다. 연중 시행 건은 시행 전 월의 계획을 0(또는 공란)으로
+    두어야 전후 비교가 의도대로 나뉜다. 관리자 화면에서 개별 수정할 수 있다.
+    """
+    for record in records:
+        planned = float(record.get("planned_qty") or 0.0)
+        actual = record.get("actual_qty")
+        if planned != 0.0 or actual is not None:
+            return f"{int(year):04d}-{int(record['month']):02d}"
+    return None
 
 
 def _validate_headers(sheet: Any) -> None:
@@ -157,6 +176,7 @@ def parse_template(source: BinaryIO, year: int) -> list[dict[str, Any]]:
                     "energy_type": energy_type,
                     "category": category,
                     "status": NEW_THEME_STATUS,
+                    "start_ym": derive_start_ym(records, int(year)),
                     "records": records,
                     "source_row": row_number,
                 })
@@ -184,7 +204,7 @@ def _existing_theme_ids(themes: list[dict[str, Any]]) -> dict[tuple[str, str], i
 def preview_import(themes: list[dict[str, Any]]) -> dict[str, Any]:
     existing = _existing_theme_ids(themes)
     factory_counts = Counter(str(theme["factory"]) for theme in themes)
-    samples = []
+    items = []
     new_count = 0
     update_count = 0
     record_values = 0
@@ -199,8 +219,36 @@ def preview_import(themes: list[dict[str, Any]]) -> dict[str, Any]:
             1 for record in theme["records"]
             if float(record["planned_qty"] or 0.0) != 0.0 or record["actual_qty"] is not None
         )
-        if len(samples) < 12:
-            samples.append({"factory": theme["factory"], "title": theme["title"], "action": action})
+        actual_values = [
+            float(record["actual_qty"])
+            for record in theme["records"]
+            if record["actual_qty"] is not None
+        ]
+        items.append({
+            "factory": theme["factory"],
+            "sourceRow": theme["source_row"],
+            "title": theme["title"],
+            "energyType": theme["energy_type"],
+            "energyLabel": ENERGY_TYPE_TO_LABEL[str(theme["energy_type"])],
+            "category": theme["category"],
+            "action": action,
+            # 도출된 시행월 — 검증 분기점이라 반영 전에 확인할 수 있게 내려보낸다.
+            # 기존 테마에 이미 시행월이 있으면 그 값이 유지되므로(COALESCE) 참고값이다.
+            "startYm": theme.get("start_ym"),
+            "plannedTotal": sum(float(record["planned_qty"] or 0.0) for record in theme["records"]),
+            "actualTotal": sum(actual_values) if actual_values else None,
+            "months": [
+                {
+                    "month": int(record["month"]),
+                    "plannedQty": float(record["planned_qty"] or 0.0),
+                    "actualQty": (
+                        float(record["actual_qty"])
+                        if record["actual_qty"] is not None else None
+                    ),
+                }
+                for record in theme["records"]
+            ],
+        })
     return {
         "success": True,
         "year": int(themes[0]["year"]),
@@ -209,7 +257,7 @@ def preview_import(themes: list[dict[str, Any]]) -> dict[str, Any]:
         "existingThemes": update_count,
         "recordValues": record_values,
         "byFactory": [{"factory": factory, "themes": factory_counts[factory]} for factory in FACTORY_SHEETS if factory_counts[factory]],
-        "samples": samples,
+        "items": items,
     }
 
 
@@ -230,13 +278,20 @@ def apply_import(themes: list[dict[str, Any]]) -> dict[str, int]:
                 rows = cursor.fetchall()
                 if rows:
                     theme_id = int(rows[0]["id"] if isinstance(rows[0], dict) else rows[0][0])
+                    # 시행월은 COALESCE 로 "비어 있을 때만" 채운다 — 관리자가 화면에서
+                    # 직접 지정한 값은 양식이 덮지 않고, 아직 NULL 인 건만 도출값으로
+                    # 메운다(수기 관리 항목 보존 원칙 + 기존 NULL 건 백필을 동시에).
                     cursor.execute(
                         """
                         UPDATE savings_theme
-                        SET energy_type=%s, category=%s, changed_by=%s
+                        SET energy_type=%s, category=%s,
+                            start_ym=COALESCE(start_ym, %s), changed_by=%s
                         WHERE id=%s
                         """,
-                        (theme["energy_type"], theme["category"], user, theme_id),
+                        (
+                            theme["energy_type"], theme["category"],
+                            theme.get("start_ym"), user, theme_id,
+                        ),
                     )
                     updated += 1
                 else:
@@ -245,11 +300,12 @@ def apply_import(themes: list[dict[str, Any]]) -> dict[str, int]:
                         INSERT INTO savings_theme
                             (factory, year, title, energy_type, category, status,
                              start_ym, owner, invest_amount, note, changed_by)
-                        VALUES (%s, %s, %s, %s, %s, %s, NULL, NULL, NULL, NULL, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, NULL, NULL, %s)
                         """,
                         (
                             theme["factory"], theme["year"], theme["title"],
-                            theme["energy_type"], theme["category"], theme["status"], user,
+                            theme["energy_type"], theme["category"], theme["status"],
+                            theme.get("start_ym"), user,
                         ),
                     )
                     theme_id = int(cursor.lastrowid)

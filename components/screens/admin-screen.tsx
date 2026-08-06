@@ -538,6 +538,9 @@ const savingsStatusFallback = [
   { value: "done", label: "완료" }, { value: "dropped", label: "중단" },
 ];
 const savingsCategoryFallback = ["설비교체", "운전개선", "공정개선", "누설저감", "계약변경", "기타"];
+// API 미응답 시 폴백 — 서버 SAVINGS_FACTORY_OPTIONS 와 같은 목록이어야 한다.
+// "남양주"는 남양주1·2 통합 시공 건 전용 라벨이다(공장별 절감량 산출 불가).
+const savingsFactoryFallback = ["남양주1", "남양주2", "김해", "광주", "논산", "경산", "남양주"];
 
 type SavingsThemeRow = {
   id: number; factory: string; title: string; energyType: string; energyLabel: string; unit: string;
@@ -549,6 +552,9 @@ type SavingsOptions = {
   energyTypes: { value: string; label: string; unit: string; priced: boolean }[];
   statuses: { value: string; label: string }[];
   categories: string[];
+  // 물리 공장 6개 + "남양주"(남양주1·2 통합 시공 건). eventFactories 를 쓰면
+  // 통합 라벨이 빠져 엑셀로 등록된 통합 테마를 화면에서 수정할 수 없다.
+  factories: string[];
 };
 type SavingsThemeForm = {
   factory: string; title: string; energy_type: string; category: string; status: string;
@@ -558,10 +564,18 @@ type SavingsThemeMonth = { month: string; plannedQty: number | null; actualQty: 
 type SavingsServerFile = {
   path: string; filename: string; exists: boolean; sizeBytes: number; modifiedAt: string | null; sha256: string | null;
 };
+type SavingsImportItem = {
+  factory: string; sourceRow: number; title: string; energyType: string; energyLabel: string; category: string;
+  action: "new" | "update"; plannedTotal: number; actualTotal: number | null;
+  // 양식에 시행월 열이 없어 "계획·실적이 처음 기입된 월"로 도출한 값. 원단위 전후
+  // 비교 검증의 분기점이라 반영 전에 확인할 수 있도록 미리보기에 싣는다.
+  startYm: string | null;
+  months: { month: number; plannedQty: number; actualQty: number | null }[];
+};
 type SavingsImportPreview = {
   success: boolean; year: number; totalThemes: number; newThemes: number; existingThemes: number; recordValues: number;
   byFactory: { factory: string; themes: number }[];
-  samples: { factory: string; title: string; action: "new" | "update" }[];
+  items: SavingsImportItem[];
   sourceFile: SavingsServerFile & { sha256: string };
 };
 type SavingsImportResult = {
@@ -583,7 +597,7 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
   const [factory, setFactory] = useState("남양주1");
   const [year, setYear] = useState(new Date().getFullYear());
   const [themes, setThemes] = useState<SavingsThemeRow[]>([]);
-  const [options, setOptions] = useState<SavingsOptions>({ energyTypes: savingsEnergyTypeFallback, statuses: savingsStatusFallback, categories: savingsCategoryFallback });
+  const [options, setOptions] = useState<SavingsOptions>({ energyTypes: savingsEnergyTypeFallback, statuses: savingsStatusFallback, categories: savingsCategoryFallback, factories: savingsFactoryFallback });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -837,6 +851,12 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
         <strong>{importPreview.year}년 · 테마 {importPreview.totalThemes}건 · 월별 입력값 {importPreview.recordValues}건</strong>
         <p>신규 {importPreview.newThemes}건 · 기존 갱신 {importPreview.existingThemes}건 · {importPreview.byFactory.map(item => `${item.factory} ${item.themes}건`).join(" · ")}</p>
         <p>검증 파일: {importPreview.sourceFile.filename} · 해시 {importPreview.sourceFile.sha256.slice(0, 12)}…</p>
+        <p><strong>등록 예정 내용</strong> · 갱신 테마에서 계획 0·실적 빈칸인 월은 기존 월별 기록이 삭제됩니다.</p>
+        <p>시행월은 <strong>계획 또는 실적이 처음 기입된 월</strong>로 자동 지정됩니다 — 원단위 전후 비교 검증의 분기점입니다. 기존 테마에 시행월이 이미 있으면 그 값을 유지합니다.</p>
+        {importPreview.items.map((item, index) => <details className="quad-details" key={[item.factory, item.sourceRow, item.title].join("-")} open={index === 0}>
+          <summary>{item.action === "new" ? "신규" : "기존 갱신"} · {item.factory}!{item.sourceRow} · {item.title} · {item.energyLabel}/{item.category} · 시행 {item.startYm ?? "—"} · 연간 계획 {display(item.plannedTotal)} · 실적 {display(item.actualTotal)}</summary>
+          <div className="table-wrap"><table className="savings-record-grid"><thead><tr><th>월</th><th>계획량</th><th>실적량</th><th>반영 방식</th></tr></thead><tbody>{item.months.map(month => <tr key={month.month}><td>{month.month}월</td><td>{display(month.plannedQty)}</td><td>{display(month.actualQty)}</td><td>{month.plannedQty === 0 && month.actualQty == null ? (item.action === "update" ? "기존 기록 삭제" : "저장 안 함") : "저장/갱신"}</td></tr>)}</tbody></table></div>
+        </details>)}
         <div className="action-row"><button type="button" className="primary-button" disabled={importing} onClick={() => void applyImport()}><Upload size={16}/>{importing ? "반영 중..." : `2단계 · DB 반영 (${importPreview.totalThemes}건)`}</button></div>
       </div>}
       {importError && <div className="form-message error admin-span">{importError}</div>}
@@ -846,7 +866,7 @@ function SavingsThemePanel({ isAdmin }: { isAdmin: boolean }) {
       <header><div><span className="eyebrow">SAVINGS THEME</span><h3>{editingId == null ? "절감 테마 등록" : "절감 테마 수정"}</h3></div>{editingId != null && <button type="button" className="text-button" onClick={resetForm}>취소</button>}</header>
       <div className="form-grid">
         <label className="field full"><span>테마명</span><input value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} placeholder="예: 노후 변압기 고효율 신품 교체" required/></label>
-        <label className="field"><span>공장</span><select value={form.factory} disabled={editingId != null} onChange={event => setForm({ ...form, factory: event.target.value })}>{eventFactories.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="field"><span>공장</span><select value={form.factory} disabled={editingId != null} onChange={event => setForm({ ...form, factory: event.target.value })}>{options.factories.map(item => <option key={item} value={item}>{item === "남양주" ? "남양주 (1·2 통합)" : item}</option>)}</select></label>
         <label className="field"><span>에너지원</span><select value={form.energy_type} onChange={event => setForm({ ...form, energy_type: event.target.value })}>{options.energyTypes.map(item => <option key={item.value} value={item.value}>{item.label}{item.priced ? "" : " (금액 미산출)"}</option>)}</select></label>
         <label className="field"><span>분류</span><select value={form.category} onChange={event => setForm({ ...form, category: event.target.value })}>{options.categories.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className="field"><span>상태</span><select value={form.status} onChange={event => setForm({ ...form, status: event.target.value })}>{options.statuses.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>

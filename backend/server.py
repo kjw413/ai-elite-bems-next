@@ -2566,14 +2566,21 @@ def savings(
 
     # 검증(원단위 전후 비교)에 쓸 생산실적 — 전 구간(-6개월)에 전년 동기(-12개월)까지
     # 더 필요하므로, 가장 이른 시행월 기준으로 2년 남짓 여유를 둔 범위를 한 번만 읽는다.
-    themes_with_start = [t for t in themes if t.get("start_ym")]
-    if themes_with_start:
-        earliest_start = min(
-            date(*(int(part) for part in str(t["start_ym"]).split("-")), 1) for t in themes_with_start
+    #
+    # ⚠ 하한은 시행월과 무관하게 **최소 전년 1월**이어야 한다. 총량 대사(아래)는
+    # 시행월을 쓰지 않고 YTD vs 전년 YTD 를 비교하는데, 시행월이 하나도 없다고
+    # 올해치만 읽으면 전년 창의 생산량이 0이 되어 _theme_window_totals 가 그 달들을
+    # 통째로 건너뛴다 → previous.usage=0 → 사용량이 순증한 것처럼 보여 전 공장이
+    # 거짓 '역행' 판정을 받는다(2026-08 실측: 남양주 전력 +57,675 가 +21,821,940 로).
+    theme_start_dates = [
+        date(*(int(part) for part in str(t["start_ym"]).split("-")), 1)
+        for t in themes if t.get("start_ym")
+    ]
+    verification_records_from = date(year - 1, 1, 1)
+    if theme_start_dates:
+        verification_records_from = min(
+            verification_records_from, date(min(theme_start_dates).year - 2, 1, 1),
         )
-        verification_records_from = date(earliest_start.year - 2, 1, 1)
-    else:
-        verification_records_from = date(year, 1, 1)
     verification_frame = fetch_actual_production_frame(verification_records_from, base)
     verification_actual_records = actual_production_records(verification_frame)
 
