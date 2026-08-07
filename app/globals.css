@@ -409,6 +409,50 @@ nav button.unsupported:hover{background:transparent;color:#a9b6c9}
 [data-theme="dark"] .backfill-grid input:disabled{background:#1a2130;color:#77849b}
 
 .savings-screen{display:grid;gap:16px}
+.savings-screen>.data-warning,.savings-screen>.alert,.savings-screen>.mode-row,.savings-screen>.kpi-grid{margin-bottom:0}
+.savings-content-grid{align-items:start}
+.savings-toolbar{align-items:flex-end}
+.savings-filter-group{display:flex;flex-direction:column;gap:6px}
+.savings-filter-label{font-size:10.5px;font-weight:800;color:var(--muted);padding-left:3px}
+.savings-section-title{align-items:flex-start;gap:14px}
+.savings-section-title>div{min-width:0}
+.savings-section-title>div>p{font-size:11px;line-height:1.55;color:var(--muted);margin:5px 0 0}
+.savings-section-title>span{flex:none;max-width:44%;text-align:right;white-space:normal;line-height:1.45}
+.savings-monthly-chart{height:260px}
+.savings-factory-chart{height:250px}
+.savings-empty{min-height:140px}
+.savings-verification-kpi>div:last-child{min-width:0;flex:1}
+.kpi-grid.compact.savings-kpis.unpriced{grid-template-columns:repeat(2,minmax(0,1fr))}
+.savings-method-note{border:1px solid var(--line);border-radius:9px;background:var(--soft,#f7f9fc);padding:10px 13px;margin-bottom:13px}
+.savings-method-note summary{cursor:pointer;font-size:11.5px;font-weight:800;color:var(--text)}
+.savings-method-note summary::marker{color:var(--muted)}
+.savings-method-note[open] summary{margin-bottom:6px}
+.savings-method-note p{font-size:11.5px;line-height:1.65;color:var(--text);margin:4px 0 2px}
+.savings-method-note small{display:block;font-size:10.5px;line-height:1.55;color:var(--muted)}
+.savings-impact-table{table-layout:auto;min-width:1120px}
+.savings-impact-table col.impact-scope{width:120px}
+.savings-impact-table col.impact-production{width:190px}
+.savings-impact-table col.impact-verdict{width:155px}
+.savings-impact-table th,.savings-impact-table td{text-align:left;vertical-align:top;white-space:nowrap}
+.savings-impact-table td strong{display:block;font-size:11.5px}
+.savings-impact-table td small{display:block;color:var(--muted);font-size:10.5px;line-height:1.45;margin-top:4px;white-space:normal}
+.savings-impact-table td.good small,.savings-impact-table td.bad small{color:inherit;opacity:.8}
+.savings-trend{display:inline-flex;align-items:center;border-radius:999px;padding:2px 6px;font:800 10px/1.3 var(--mono);white-space:nowrap;background:var(--soft,#f1f4f9);color:var(--muted)}
+.savings-trend.increase{background:var(--tint-blue-bg,#edf4ff);color:var(--blue)}
+.savings-trend.decrease{background:var(--tint-amber-bg,#fff4da);color:var(--chart-amber)}
+.savings-trend.improved{background:var(--tint-green-bg,#eafaf2);color:var(--green)}
+.savings-trend.worsened{background:var(--tint-red-bg,#fdeef0);color:var(--red)}
+.savings-impact-table .savings-verdict{white-space:nowrap}
+.savings-theme-list tbody tr{cursor:pointer}
+.savings-theme-open{display:block;width:100%;border:0;background:transparent;padding:0;color:inherit;font:inherit;font-weight:600;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.savings-theme-open:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+.production-ranking-table.savings-table{min-width:1020px}
+.production-ranking-table.savings-table th:first-child{width:250px}
+.production-ranking-table.savings-table th:nth-child(2){width:92px}
+.production-ranking-table.savings-table th:nth-last-child(-n+2){width:130px}
+@media(max-width:1050px){.kpi-grid.compact.savings-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.savings-kpis:not(.unpriced) .savings-verification-kpi{grid-column:1/-1}}
+@media(max-width:760px){.savings-toolbar{align-items:stretch}.savings-filter-group{width:100%}.savings-filter-group .segmented{max-width:100%;overflow:auto}.savings-filter-group .segmented button{white-space:nowrap}.savings-section-title{flex-direction:column}.savings-section-title>span{max-width:100%;text-align:left}.savings-monthly-chart,.savings-factory-chart{height:235px}}
+@media(max-width:440px){.kpi-grid.compact.savings-kpis,.kpi-grid.compact.savings-kpis.unpriced{grid-template-columns:1fr}.savings-kpis .savings-verification-kpi{grid-column:auto}}
 .savings-detail-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;align-items:start}
 .savings-detail-grid .chart{height:260px}
 .savings-detail-side{display:flex;flex-direction:column;gap:12px}

@@ -2274,22 +2274,38 @@ def _savings_theme_amounts(
     year: int,
     month_to: date,
 ) -> dict[str, Any]:
-    """테마 1건의 월별 계획/실적 절감량·금액 12행과 연 누계.
+    """테마 1건의 월 계획·월 실적(MTD)과 기준월 누계를 계산한다.
 
     금액은 (공장, 에너지원)별 월 단가를 곱해 만든다. 단가가 없는 달(용수 전체,
     비용 미적재 구간)은 금액을 None 으로 두고 '량'만 남긴다 — 0 으로 채우면
     "절감 금액이 0원"으로 읽혀 달성률이 왜곡된다.
+
+    계획은 연초에 확정한 12개월 배분값이므로 ``annualPlannedQty`` 는 12개월
+    전체 합, ``plannedYtdQty`` 는 기준월까지의 합이다. 실적은 각 월 MTD 값이며
+    ``actualYtdQty`` 는 기준월까지만 합산한다. 기준월 이후에 잘못 저장된 실적은
+    과거 시점 조회에 섞거나 월별 응답에 노출하지 않는다.
     """
     factory = str(theme["factory"])
     energy_type = str(theme["energy_type"])
+    as_of_month = 0 if month_to.year < year else 12 if month_to.year > year else month_to.month
     cache_key = (factory, energy_type)
     if cache_key not in price_cache:
-        price_cache[cache_key] = _monthly_unit_prices(factory, energy_type, year, month_to)
+        price_cache[cache_key] = (
+            _monthly_unit_prices(
+                factory,
+                energy_type,
+                year,
+                month_to if month_to.year == year else date(year, 12, 31),
+            )
+            if as_of_month > 0 else {}
+        )
     prices = price_cache[cache_key]
 
     months: list[dict[str, Any]] = []
     planned_qty_total = 0.0
+    planned_ytd_qty_total = 0.0
     actual_qty_total = 0.0
+    actual_entered_months = 0
     planned_amount_total = 0.0
     actual_amount_total = 0.0
     has_planned_amount = False
@@ -2298,15 +2314,19 @@ def _savings_theme_amounts(
     for month in range(1, 13):
         record = records.get(month) or {}
         planned_qty = float(record.get("planned") or 0.0)
-        actual_qty = record.get("actual")
-        price = prices.get((year, month))
+        in_scope = month <= as_of_month
+        actual_qty = record.get("actual") if in_scope else None
+        price = prices.get((year, month)) if in_scope else None
 
         planned_amount = planned_qty * price if price is not None else None
         actual_amount = actual_qty * price if (price is not None and actual_qty is not None) else None
 
         planned_qty_total += planned_qty
+        if in_scope:
+            planned_ytd_qty_total += planned_qty
         if actual_qty is not None:
             actual_qty_total += actual_qty
+            actual_entered_months += 1
         if planned_amount is not None:
             planned_amount_total += planned_amount
             has_planned_amount = True
@@ -2325,68 +2345,308 @@ def _savings_theme_amounts(
                 actual_amount / 1_000_000 if actual_amount is not None else None, 2),
         })
 
-    # 달성률은 금액이 아니라 '량' 기준 — 용수처럼 단가가 없는 테마도 관리에서
-    # 빠지지 않게 하려는 것이다(설계서 §6-③).
-    rate = (actual_qty_total / planned_qty_total * 100) if planned_qty_total > 0 else None
+    # 기존 rate는 연간 계획 대비 진척률 의미를 유지한다. 신규 ytdRate는 같은
+    # 기준월까지의 계획과 실적을 비교하므로 운영 진도 판단에 사용한다.
+    annual_progress_rate = (
+        actual_qty_total / planned_qty_total * 100
+        if actual_entered_months > 0 and planned_qty_total > 0 else None
+    )
+    ytd_rate = (
+        actual_qty_total / planned_ytd_qty_total * 100
+        if actual_entered_months > 0 and planned_ytd_qty_total > 0 else None
+    )
+    planned_ytd_amount = (
+        round(planned_amount_total / 1_000_000, 2) if has_planned_amount else None
+    )
+    actual_ytd_amount = (
+        round(actual_amount_total / 1_000_000, 2) if has_actual_amount else None
+    )
     return {
         "months": months,
         "plannedQty": round(planned_qty_total, 1),
         "actualQty": round(actual_qty_total, 1),
-        "plannedAmount": round(planned_amount_total / 1_000_000, 2) if has_planned_amount else None,
-        "actualAmount": round(actual_amount_total / 1_000_000, 2) if has_actual_amount else None,
-        "rate": _round_or_none(rate, 1),
+        "plannedAmount": planned_ytd_amount,
+        "actualAmount": actual_ytd_amount,
+        "rate": _round_or_none(annual_progress_rate, 1),
+        "annualPlannedQty": round(planned_qty_total, 1),
+        "plannedYtdQty": round(planned_ytd_qty_total, 1),
+        "actualYtdQty": (
+            round(actual_qty_total, 1) if actual_entered_months > 0 else None
+        ),
+        "annualProgressRate": _round_or_none(annual_progress_rate, 1),
+        "ytdRate": _round_or_none(ytd_rate, 1),
+        "actualEnteredMonths": actual_entered_months,
+        "plannedYtdAmount": planned_ytd_amount,
+        "actualYtdAmount": actual_ytd_amount,
     }
+
+
+def _savings_monthly_rows(
+    monthly_planned: list[float],
+    monthly_actual: list[float],
+    monthly_actual_measured: list[bool],
+    as_of_month: int,
+) -> list[dict[str, Any]]:
+    """월 금액과 누계 달성률을 만들되 기준월 이후 누계는 표시하지 않는다."""
+    cumulative_planned = 0.0
+    cumulative_actual = 0.0
+    has_cumulative_actual = False
+    monthly: list[dict[str, Any]] = []
+    for index in range(12):
+        in_scope = index + 1 <= as_of_month
+        measured = in_scope and monthly_actual_measured[index]
+        if in_scope:
+            cumulative_planned += monthly_planned[index]
+            if measured:
+                cumulative_actual += monthly_actual[index]
+                has_cumulative_actual = True
+        monthly.append({
+            "month": f"{index + 1}월",
+            "planned": round(monthly_planned[index], 2) if monthly_planned[index] else None,
+            "actual": round(monthly_actual[index], 2) if measured else None,
+            "cumulativeRate": (
+                round(cumulative_actual / cumulative_planned * 100, 1)
+                if in_scope and has_cumulative_actual and cumulative_planned > 0 else None
+            ),
+        })
+    return monthly
 
 
 def _month_end(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
 
 
-def _theme_window_totals(
+def _theme_monthly_totals(
     physical_factory: str, energy_type: str, date_from: date, date_to: date,
     actual_records: list[dict[str, Any]],
-) -> dict[str, float]:
-    """물리 공장 1곳의 [date_from, date_to] 월 경계 구간 (Σ사용량, Σ생산톤, 실측월수).
-
-    ⚠ physical_factory 는 반드시 물리 공장 1곳이어야 한다 — 아래 폴백은 REPLACE
-    방식이라, 집계 라벨을 넣으면 다른 공장 몫까지 raw 재계산돼 버린다
-    (_monthly_intensity_fallback_sources 의 교훈과 같은 함정 — savings_theme 은
-    애초에 물리 공장에만 귀속되므로(server.py의 _validated_theme_payload) 이
-    경로에서는 항상 안전하다).
-    """
+) -> dict[tuple[int, int], dict[str, Any]]:
+    """물리 공장 한 곳의 월별 사용량·생산량과 사용량 일자 완전성을 반환한다."""
     spec = INTENSITY_METRICS[energy_type]
     usage_col = spec["column"]
     clause, values = factory_clause(physical_factory)
     rows = fetch_all(
-        # 'usage' 는 MySQL 예약어라 별칭으로 쓰면 문법 오류가 난다 — usage_sum 사용.
-        f"SELECT YEAR(date) y, MONTH(date) m, SUM({usage_col}) usage_sum"
+        # usage는 MySQL 예약어라 별칭으로 쓰지 않는다.
+        f"SELECT YEAR(date) y, MONTH(date) m, SUM({usage_col}) usage_sum,"
+        " COUNT(DISTINCT date) usage_days"
         " FROM energy_daily WHERE date BETWEEN %s AND %s" + clause + " GROUP BY y,m",
         (date_from, date_to, *values),
     )
-    monthly_usage: dict[tuple[int, int], float] = {
-        (int(row["y"]), int(row["m"])): scalar(row.get("usage_sum")) for row in rows
-    }
+    monthly_usage: dict[tuple[int, int], float] = {}
+    monthly_usage_days: dict[tuple[int, int], int | None] = {}
+    for row in rows:
+        key = (int(row["y"]), int(row["m"]))
+        monthly_usage[key] = scalar(row.get("usage_sum"))
+        raw_days = row.get("usage_days")
+        monthly_usage_days[key] = int(raw_days) if raw_days is not None else None
+
     fb_service = import_core("app.services.monthly_fallback_service")
-    fb_months = fb_service.fallback_months(physical_factory, date_from, date_to)
+    fb_months = set(fb_service.fallback_months(physical_factory, date_from, date_to))
     if fb_months:
         fb_energy = fb_service.monthly_energy(physical_factory, date_from, date_to)
         for key in fb_months:
             monthly_usage[key] = fb_energy[key][usage_col]
-    monthly_ton = _monthly_production_ton(actual_records, physical_factory, date_from, date_to)
 
-    total_usage, total_ton, measured_months = 0.0, 0.0, 0
-    year, month = date_from.year, date_from.month
+    monthly_ton = _monthly_production_ton(
+        actual_records, physical_factory, date_from, date_to,
+    )
+    monthly: dict[tuple[int, int], dict[str, Any]] = {}
+    cursor_year, cursor_month = date_from.year, date_from.month
     end_index = date_to.year * 12 + date_to.month
-    while year * 12 + month <= end_index:
-        key = (year, month)
+    while cursor_year * 12 + cursor_month <= end_index:
+        key = (cursor_year, cursor_month)
+        expected_days = calendar.monthrange(cursor_year, cursor_month)[1]
+        usage_days = (
+            expected_days if key in fb_months
+            else monthly_usage_days.get(key)
+        )
+        # 기존 테스트/외부 stub가 usage_days를 주지 않는 경우에는 값 존재를 완전 월로
+        # 간주한다. 실제 DB 조회는 항상 COUNT(DISTINCT date)를 반환한다.
+        if usage_days is None and key in monthly_usage:
+            usage_days = expected_days
         usage = monthly_usage.get(key)
-        ton = monthly_ton.get(key, 0.0)
-        if usage is not None and ton > 0:
-            total_usage += usage
-            total_ton += ton
-            measured_months += 1
-        year, month = shift_month(year, month, 1)
-    return {"usage": total_usage, "productionTon": total_ton, "measuredMonths": measured_months}
+        monthly[key] = {
+            "usage": usage,
+            "productionTon": monthly_ton.get(key, 0.0),
+            "usageDays": usage_days or 0,
+            "expectedUsageDays": expected_days,
+            "usageComplete": usage is not None and usage_days == expected_days,
+        }
+        cursor_year, cursor_month = shift_month(cursor_year, cursor_month, 1)
+    return monthly
+
+
+def _theme_window_totals(
+    physical_factory: str, energy_type: str, date_from: date, date_to: date,
+    actual_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """월별 값 중 사용량과 생산량이 함께 있는 셀의 구간 합계를 반환한다."""
+    monthly = _theme_monthly_totals(
+        physical_factory, energy_type, date_from, date_to, actual_records,
+    )
+    measured = [
+        (key, cell) for key, cell in monthly.items()
+        if cell["usageComplete"] and cell["productionTon"] > 0
+    ]
+    return {
+        "usage": sum(float(cell["usage"]) for _, cell in measured),
+        "productionTon": sum(float(cell["productionTon"]) for _, cell in measured),
+        "measuredMonths": len(measured),
+        "measuredMonthNumbers": [key[1] for key, _ in measured],
+        "monthly": monthly,
+    }
+
+
+def _reconciliation_cutoff(
+    base: date,
+    actual_records: list[dict[str, Any]] | None = None,
+) -> date | None:
+    """에너지·생산 양쪽의 최신일을 넘지 않는 마지막 완료월 말일."""
+    reference = base
+    if actual_records is not None:
+        production_dates = [
+            row_date for row in actual_records
+            if (row_date := normalize_date(row.get("date"))) is not None
+            and row_date <= base
+        ]
+        if not production_dates:
+            return None
+        reference = min(base, max(production_dates))
+    if reference.year != base.year:
+        return None
+    if reference == _month_end(reference.year, reference.month):
+        return reference
+    cutoff_year, cutoff_month = shift_month(reference.year, reference.month, -1)
+    if cutoff_year != base.year:
+        return None
+    return _month_end(cutoff_year, cutoff_month)
+
+
+def _registered_qty_coverage(
+    themes: list[dict[str, Any]],
+    records: dict[int, dict[int, dict[str, float | None]]],
+    cutoff_month: int,
+) -> dict[str, Any]:
+    """완료월까지 입력된 등록량 합과 계획이 있지만 실적이 빈 월을 구분한다."""
+    total = 0.0
+    entered_count = 0
+    missing: list[dict[str, Any]] = []
+    for theme in themes:
+        theme_id = int(theme["id"])
+        for month, values in records.get(theme_id, {}).items():
+            if month > cutoff_month:
+                continue
+            actual_qty = values.get("actual")
+            if actual_qty is not None:
+                total += float(actual_qty)
+                entered_count += 1
+            elif float(values.get("planned") or 0.0) > 0:
+                missing.append({
+                    "themeId": theme_id,
+                    "title": str(theme.get("title") or ""),
+                    "month": month,
+                })
+    return {
+        "qty": total,
+        "enteredCount": entered_count,
+        "complete": not missing,
+        "missing": missing,
+    }
+
+
+def _production_adjusted_scope_totals(
+    comparison_scope: str,
+    energy_type: str,
+    year: int,
+    cutoff: date | None,
+    actual_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """동월·물리공장별 완전한 셀만으로 보정 비교 입력을 만든다."""
+    current = {"usage": 0.0, "productionTon": 0.0}
+    previous = {"usage": 0.0, "productionTon": 0.0}
+    if cutoff is None:
+        return {
+            "current": current,
+            "previous": previous,
+            "periods": [],
+            "measuredMonths": 0,
+            "coverage": {
+                "status": "no-complete-month",
+                "comparedMonths": [],
+                "missing": [],
+            },
+        }
+
+    current_from = date(year, 1, 1)
+    previous_from = date(year - 1, 1, 1)
+    previous_to = previous_year_date(cutoff)
+    expected_months = list(range(1, cutoff.month + 1))
+    periods: list[dict[str, float]] = []
+    missing: list[dict[str, Any]] = []
+    failed_months: set[int] = set()
+
+    for physical_factory in physical_factory_members(comparison_scope):
+        current_monthly = _theme_monthly_totals(
+            physical_factory, energy_type, current_from, cutoff, actual_records,
+        )
+        previous_monthly = _theme_monthly_totals(
+            physical_factory, energy_type, previous_from, previous_to, actual_records,
+        )
+        for month in expected_months:
+            current_cell = current_monthly[(year, month)]
+            previous_cell = previous_monthly[(year - 1, month)]
+            issues: list[tuple[str, str, dict[str, int]]] = []
+            if current_cell["usage"] is None:
+                issues.append(("current", "usage", {}))
+            elif not current_cell["usageComplete"]:
+                issues.append(("current", "usageDays", {
+                    "presentDays": current_cell["usageDays"],
+                    "expectedDays": current_cell["expectedUsageDays"],
+                }))
+            if current_cell["productionTon"] <= 0:
+                issues.append(("current", "production", {}))
+            if previous_cell["usage"] is None or previous_cell["usage"] <= 0:
+                issues.append(("previous", "baselineUsage", {}))
+            elif not previous_cell["usageComplete"]:
+                issues.append(("previous", "usageDays", {
+                    "presentDays": previous_cell["usageDays"],
+                    "expectedDays": previous_cell["expectedUsageDays"],
+                }))
+            if previous_cell["productionTon"] <= 0:
+                issues.append(("previous", "production", {}))
+            if issues:
+                failed_months.add(month)
+                missing.extend({
+                    "factory": physical_factory,
+                    "month": month,
+                    "period": period,
+                    "metric": metric,
+                    **extra,
+                } for period, metric, extra in issues)
+                continue
+
+            period = {
+                "currentUsage": float(current_cell["usage"]),
+                "currentProductionTon": float(current_cell["productionTon"]),
+                "previousUsage": float(previous_cell["usage"]),
+                "previousProductionTon": float(previous_cell["productionTon"]),
+            }
+            periods.append(period)
+            current["usage"] += period["currentUsage"]
+            current["productionTon"] += period["currentProductionTon"]
+            previous["usage"] += period["previousUsage"]
+            previous["productionTon"] += period["previousProductionTon"]
+
+    return {
+        "current": current,
+        "previous": previous,
+        "periods": periods,
+        "measuredMonths": len(expected_months) - len(failed_months),
+        "coverage": {
+            "status": "incomplete" if missing else "complete",
+            "comparedMonths": expected_months,
+            "missing": missing,
+        },
+    }
 
 
 def _theme_actual_qty_in_window(
@@ -2419,7 +2679,7 @@ def _theme_verification(
     if not start_ym:
         return {
             "status": "pending", "statusLabel": verify_service.STATUS_LABELS["pending"],
-            "reason": "시행월이 입력되지 않아 검증할 수 없습니다.", "window": None,
+            "reason": "시행월이 없어 과제 시행 전·후의 실제 사용량을 비교할 수 없습니다.", "window": None,
         }
     start_year, start_month = (int(part) for part in str(start_ym).split("-"))
     after_from = date(start_year, start_month, 1)
@@ -2428,12 +2688,22 @@ def _theme_verification(
             "status": "pending", "statusLabel": verify_service.STATUS_LABELS["pending"],
             "reason": "시행월이 아직 시작되지 않았습니다.", "window": None,
         }
+    completed_month_cutoff = _reconciliation_cutoff(base, actual_records)
+    if completed_month_cutoff is None or after_from > completed_month_cutoff:
+        return {
+            "status": "pending", "statusLabel": verify_service.STATUS_LABELS["pending"],
+            "reason": (
+                "시행 이후 완료된 월이 없어 월간 등록 실적과 실제 사용량을 아직"
+                " 같은 기간으로 비교할 수 없습니다."
+            ),
+            "window": None,
+        }
 
     physical_factory = str(theme["factory"])
     energy_type = str(theme["energy_type"])
 
     ideal_after_to_year, ideal_after_to_month = shift_month(start_year, start_month, verify_service.WINDOW_MONTHS - 1)
-    after_to = min(_month_end(ideal_after_to_year, ideal_after_to_month), base)
+    after_to = min(_month_end(ideal_after_to_year, ideal_after_to_month), completed_month_cutoff)
 
     before_to_year, before_to_month = shift_month(start_year, start_month, -1)
     before_to = _month_end(before_to_year, before_to_month)
@@ -2450,10 +2720,40 @@ def _theme_verification(
 
     actual_qty_after = _theme_actual_qty_in_window(service, int(theme["id"]), after_from, after_to)
 
-    result = verify_service.verify_theme(
-        before, after, before_prev, after_prev,
-        actual_qty_after=actual_qty_after, after_months=after["measuredMonths"],
+    def complete_month_count(date_from: date, date_to: date) -> int:
+        return (date_to.year - date_from.year) * 12 + date_to.month - date_from.month + 1
+
+    windows = (
+        (after, after_from, after_to),
+        (before, before_from, before_to),
+        (after_prev, after_prev_from, after_prev_to),
+        (before_prev, before_prev_from, before_prev_to),
     )
+    coverage_complete = all(
+        window["measuredMonths"] == complete_month_count(date_from, date_to)
+        for window, date_from, date_to in windows
+    )
+    if coverage_complete:
+        result = verify_service.verify_theme(
+            before, after, before_prev, after_prev,
+            actual_qty_after=actual_qty_after, after_months=after["measuredMonths"],
+        )
+    else:
+        result = {
+            "status": "pending",
+            "statusLabel": verify_service.STATUS_LABELS["pending"],
+            "reason": (
+                "비교 기간 중 사용량 또는 생산량이 빠진 완료월이 있어 실제"
+                " 에너지 원단위 효과를 같은 기간으로 비교할 수 없습니다."
+            ),
+            "intensities": {
+                "before": verify_service.window_intensity(before),
+                "after": verify_service.window_intensity(after),
+                "beforePrev": verify_service.window_intensity(before_prev),
+                "afterPrev": verify_service.window_intensity(after_prev),
+            },
+            "afterMonths": after["measuredMonths"],
+        }
     result["window"] = {
         "beforeFrom": before_from, "beforeTo": before_to,
         "afterFrom": after_from, "afterTo": after_to,
@@ -2512,10 +2812,10 @@ def _mark_duplicate_verifications(
         verification = verifications[theme_id]
         if verification["status"] in ("verified", "review", "unverified"):
             verification["status"] = "duplicate"
-            verification["statusLabel"] = "중복 구간"
+            verification["statusLabel"] = "과제별 구분 어려움"
             verification["reason"] = (
-                "같은 공장·에너지원에 검증 구간이 겹치는 테마가 더 있어 이 테마만의 몫으로"
-                " 나누기 어렵습니다. 아래 공장별 총량 대사를 함께 확인하세요."
+                "같은 공장·에너지원에 확인 기간이 겹치는 과제가 더 있어 이 과제만의 효과로"
+                " 나누기 어렵습니다. 아래 '생산량을 고려한 실제 절감 확인'을 함께 보세요."
             )
 
 
@@ -2560,7 +2860,7 @@ def savings(
         integrated_count = len(service.list_themes(["남양주"], year, energy_type, statuses))
         if integrated_count > 0:
             integrated_note = (
-                f"남양주1·남양주2 통합 시공 테마 {integrated_count}건은 이 목록에 없습니다 —"
+                f"남양주1·남양주2 통합 시공 과제 {integrated_count}건은 이 목록에 없습니다 —"
                 " '남양주' 선택 시 함께 표시됩니다."
             )
 
@@ -2626,6 +2926,14 @@ def savings(
             "plannedAmount": computed["plannedAmount"],
             "actualAmount": computed["actualAmount"],
             "rate": computed["rate"],
+            "annualPlannedQty": computed["annualPlannedQty"],
+            "plannedYtdQty": computed["plannedYtdQty"],
+            "actualYtdQty": computed["actualYtdQty"],
+            "annualProgressRate": computed["annualProgressRate"],
+            "ytdRate": computed["ytdRate"],
+            "actualEnteredMonths": computed["actualEnteredMonths"],
+            "plannedYtdAmount": computed["plannedYtdAmount"],
+            "actualYtdAmount": computed["actualYtdAmount"],
         })
 
     _mark_duplicate_verifications(themes, verifications, service)
@@ -2636,27 +2944,21 @@ def savings(
         }
 
     # 월별 계획 대비 실적 — 실적이 한 건도 입력되지 않은 달은 0이 아니라 None.
-    # 0으로 두면 미래 월이 "달성률 0%"로 오독된다(생산실적 화면과 같은 관례).
-    cumulative_planned = 0.0
-    cumulative_actual = 0.0
-    monthly: list[dict[str, Any]] = []
-    for index in range(12):
-        cumulative_planned += monthly_planned[index]
-        measured = monthly_actual_measured[index]
-        if measured:
-            cumulative_actual += monthly_actual[index]
-        monthly.append({
-            "month": f"{index + 1}월",
-            "planned": round(monthly_planned[index], 2) if monthly_planned[index] else None,
-            "actual": round(monthly_actual[index], 2) if measured else None,
-            "cumulativeRate": (
-                round(cumulative_actual / cumulative_planned * 100, 1)
-                if measured and cumulative_planned > 0 else None
-            ),
-        })
+    # 누계 달성률은 기준월까지만 만들고 이후 월은 미래값으로 오독되지 않게 비운다.
+    monthly = _savings_monthly_rows(
+        monthly_planned, monthly_actual, monthly_actual_measured, base.month,
+    )
 
     planned_total = sum(row["plannedAmount"] or 0.0 for row in theme_rows)
     actual_total = sum(row["actualAmount"] or 0.0 for row in theme_rows)
+    has_planned_ytd_amount = any(row["plannedAmount"] is not None for row in theme_rows)
+    has_actual_ytd_amount = any(row["actualAmount"] is not None for row in theme_rows)
+    planned_ytd_amount = round(planned_total, 1) if has_planned_ytd_amount else None
+    actual_ytd_amount = round(actual_total, 1) if has_actual_ytd_amount else None
+    amount_ytd_rate = (
+        round(actual_total / planned_total * 100, 1)
+        if has_actual_ytd_amount and planned_total > 0 else None
+    )
     priced_types = service.PRICED_ENERGY_TYPES
     unpriced_themes = [row for row in theme_rows if row["energyType"] not in priced_types]
 
@@ -2665,38 +2967,165 @@ def savings(
         key = row["verification"]["status"]
         status_counts[key] = status_counts.get(key, 0) + 1
 
-    # 총량 대사(§6-⑥) — 진행/완료 테마가 있는 (물리공장, 에너지원) 조합마다
-    # YTD 실제 사용량 감소분과 등록 실적 합을 맞춰본다. 테마별 검증은 구간이
-    # 겹치면 개별 귀속이 안 되지만, 이 대사는 공장×에너지원을 통째로 보므로
-    # 겹쳐도 새지 않는다 — 과대보고를 잡는 최종 안전장치.
+    # 생산량 보정 절감 확인 — 화면 표시 상태와 무관하게 진행·완료 과제 전체를
+    # 대상으로 하며, 월간 등록 실적과 기간을 맞추기 위해 완료된 월까지만 비교한다.
+    # BAU 사용량은 월×물리공장별 전년 원단위를 올해 같은 셀의 생산량에 적용한다.
     verify_service = import_core("app.services.savings_verification_service")
+    if set(service.ACTIVE_STATUSES).issubset(set(statuses)):
+        active_themes = [
+            theme for theme in themes if theme["status"] in service.ACTIVE_STATUSES
+        ]
+        active_records = records
+    else:
+        active_themes = service.list_themes(
+            members, year, energy_type, list(service.ACTIVE_STATUSES),
+        )
+        active_records = service.records_by_theme(
+            [theme["id"] for theme in active_themes], year,
+        )
+
+    integrated_energy_types = {
+        str(theme["energy_type"])
+        for theme in active_themes if str(theme["factory"]) == "남양주"
+    }
+
+    def comparison_factory(theme: dict[str, Any]) -> str:
+        theme_factory = str(theme["factory"])
+        theme_energy_type = str(theme["energy_type"])
+        if (
+            theme_energy_type in integrated_energy_types
+            and theme_factory in _SAVINGS_NAMYANGJU_FAMILY
+        ):
+            return "남양주"
+        return theme_factory
+
     reconciliation_keys: set[tuple[str, str]] = {
-        (str(theme["factory"]), str(theme["energy_type"]))
-        for theme in themes if theme["status"] in service.ACTIVE_STATUSES
+        (comparison_factory(theme), str(theme["energy_type"]))
+        for theme in active_themes
     }
     reconciliation: list[dict[str, Any]] = []
-    ytd_from = date(year, 1, 1)
-    prev_ytd_from, prev_ytd_to = previous_year_date(ytd_from), previous_year_date(base)
-    for physical_factory, r_energy_type in sorted(reconciliation_keys):
-        current = _theme_window_totals(physical_factory, r_energy_type, ytd_from, base, verification_actual_records)
-        previous = _theme_window_totals(physical_factory, r_energy_type, prev_ytd_from, prev_ytd_to, verification_actual_records)
-        registered = sum(
-            row["actualQty"] or 0.0
-            for row in theme_rows
-            if row["factory"] == physical_factory and row["energyType"] == r_energy_type
-            and row["status"] in service.ACTIVE_STATUSES
+    reconciliation_cutoff = _reconciliation_cutoff(
+        base, verification_actual_records,
+    )
+    reconciliation_period = {
+        "basis": "completed-months",
+        "currentFrom": date(year, 1, 1) if reconciliation_cutoff else None,
+        "currentTo": reconciliation_cutoff,
+        "previousFrom": date(year - 1, 1, 1) if reconciliation_cutoff else None,
+        "previousTo": (
+            previous_year_date(reconciliation_cutoff)
+            if reconciliation_cutoff else None
+        ),
+        "excludedPartialMonth": reconciliation_cutoff != base,
+    }
+    coverage_metric_labels = {
+        "usage": "사용량",
+        "usageDays": "사용량 일자",
+        "baselineUsage": "전년 사용량",
+        "production": "생산량",
+    }
+
+    for comparison_scope, r_energy_type in sorted(reconciliation_keys):
+        scope_totals = _production_adjusted_scope_totals(
+            comparison_scope, r_energy_type, year, reconciliation_cutoff,
+            verification_actual_records,
         )
-        outcome = verify_service.reconcile_factory_energy_type(current, previous, registered)
+        current = scope_totals["current"]
+        previous = scope_totals["previous"]
+        coverage = scope_totals["coverage"]
+        comparable = coverage["status"] == "complete"
+        expected_usage = (
+            verify_service.production_adjusted_expected_usage(scope_totals["periods"])
+            if comparable else None
+        )
+
+        scope_active_themes = [
+            theme for theme in active_themes
+            if (
+                comparison_factory(theme) == comparison_scope
+                and str(theme["energy_type"]) == r_energy_type
+            )
+        ]
+        registration = _registered_qty_coverage(
+            scope_active_themes,
+            active_records,
+            reconciliation_cutoff.month if reconciliation_cutoff else 0,
+        )
+        registered = float(registration["qty"])
+        registration_missing = registration["missing"]
+        registration_note = (
+            f'{registration_missing[0]["title"]} '
+            f'{registration_missing[0]["month"]}월 등 '
+            f'등록 실적 {len(registration_missing)}건이 미입력입니다.'
+            if registration_missing else None
+        )
+
+        outcome = verify_service.reconcile_factory_energy_type(
+            current,
+            previous,
+            registered,
+            comparable=comparable,
+            expected_usage=expected_usage,
+            registration_complete=registration["complete"],
+        )
+        missing = coverage["missing"]
+        if coverage["status"] == "no-complete-month":
+            coverage_note = "아직 비교할 완료 월이 없습니다."
+        elif missing:
+            first = missing[0]
+            label = coverage_metric_labels.get(first["metric"], first["metric"])
+            coverage_note = (
+                f'{first["factory"]} {first["month"]}월 {label}'
+                f' 등 비교자료 {len(missing)}건이 부족합니다.'
+            )
+        else:
+            coverage_note = None
+
         reconciliation.append({
-            "factory": physical_factory,
+            "factory": comparison_scope,
             "energyType": r_energy_type,
             "energyLabel": service.ENERGY_TYPE_LABELS.get(r_energy_type),
             "unit": service.ENERGY_TYPE_UNITS.get(r_energy_type),
             "verdict": outcome["verdict"],
-            "usageChange": _round_or_none(outcome["usageChange"], 1),
+            "currentUsage": round(current["usage"], 1) if comparable else None,
+            "previousUsage": round(previous["usage"], 1) if comparable else None,
+            "currentProductionTon": (
+                round(current["productionTon"], 1) if comparable else None
+            ),
+            "previousProductionTon": (
+                round(previous["productionTon"], 1) if comparable else None
+            ),
+            "currentMeasuredMonths": scope_totals["measuredMonths"],
+            "previousMeasuredMonths": scope_totals["measuredMonths"],
+            "coverageMatched": comparable,
+            "coverage": coverage,
+            "coverageNote": coverage_note,
+            "usageChange": (
+                _round_or_none(outcome["usageChange"], 1) if comparable else None
+            ),
+            "usageChangePct": _round_or_none(outcome["usageChangePct"], 1),
+            "productionChangePct": _round_or_none(outcome["productionChangePct"], 1),
+            "previousIntensity": _round_or_none(outcome["previousIntensity"], 3),
+            "currentIntensity": _round_or_none(outcome["currentIntensity"], 3),
+            "intensityChangePct": _round_or_none(outcome["intensityChangePct"], 1),
+            "expectedUsage": _round_or_none(outcome["expectedUsage"], 1),
+            "expectedAfterRegistered": _round_or_none(
+                outcome["expectedAfterRegistered"], 1,
+            ),
+            "normalizedUsageChange": _round_or_none(
+                outcome["normalizedUsageChange"], 1,
+            ),
             "avoidedUsage": _round_or_none(outcome["avoidedUsage"], 1),
-            "registeredQty": round(registered, 1),
+            "residualQty": _round_or_none(outcome["residualQty"], 1),
+            "registeredQty": (
+                round(registered, 1) if registration["enteredCount"] > 0 else None
+            ),
+            "registeredEnteredCount": registration["enteredCount"],
+            "registeredCoverageComplete": registration["complete"],
+            "registeredMissingCount": len(registration_missing),
+            "registeredCoverageNote": registration_note,
             "explainPct": _round_or_none(outcome["explainPct"], 1),
+            "registeredExceedsBaseline": outcome["registeredExceedsBaseline"],
         })
 
     return json_safe({
@@ -2708,13 +3137,17 @@ def savings(
         "summary": {
             "plannedAmount": round(planned_total, 1),
             "actualAmount": round(actual_total, 1),
-            "rate": round(actual_total / planned_total * 100, 1) if planned_total > 0 else None,
+            "rate": amount_ytd_rate,
+            "plannedYtdAmount": planned_ytd_amount,
+            "actualYtdAmount": actual_ytd_amount,
+            "ytdRate": amount_ytd_rate,
             "themeCount": len(theme_rows),
             **status_counts,
         },
         "monthly": monthly,
         "themes": theme_rows,
         "reconciliation": reconciliation,
+        "reconciliationPeriod": reconciliation_period,
         "byFactory": [
             {"factory": name, "actualAmount": round(amount, 1)}
             for name, amount in sorted(by_factory.items(), key=lambda item: -item[1])
@@ -2734,7 +3167,7 @@ def savings(
         },
         # 용수 테마가 섞여 있으면 금액 합계가 전체를 대표하지 않는다 — 화면이 각주로 알린다.
         "scopeNote": (
-            f"용수 테마 {len(unpriced_themes)}건은 단가가 시스템 관리 대상이 아니라"
+            f"용수 과제 {len(unpriced_themes)}건은 단가가 시스템 관리 대상이 아니라"
             " 금액이 산출되지 않습니다 — 아래 금액 합계에서 빠져 있습니다."
         ) if unpriced_themes else None,
         "integratedNote": integrated_note,
@@ -2832,15 +3265,17 @@ def import_savings_template(
     })
 
 @app.get("/api/v1/savings/themes/{theme_id}")
-def savings_theme_detail(theme_id: int) -> dict[str, Any]:
-    """테마 상세 — 월별 계획/실적 절감량과 그 달 단가·산출 금액."""
+def savings_theme_detail(
+    theme_id: int, requested_date: date | None = Query(None, alias="date"),
+) -> dict[str, Any]:
+    """테마 상세 — 선택 기준일의 월 계획·월 실적(MTD)·누계(YTD)."""
     service = import_core("app.services.savings_theme_service")
     theme = service.get_theme(theme_id)
     if theme is None:
         raise HTTPException(status_code=404, detail="테마를 찾을 수 없습니다.")
 
     max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
-    base = bounded_base_date(None, max_row.get("max_date"))
+    base = bounded_base_date(requested_date, max_row.get("max_date"))
     year = int(theme["year"])
     # 관리 연도가 과거면 그 해 12월까지를 단가 조회 상한으로 삼는다.
     month_to = base if year == base.year else min(base, date(year, 12, 31))
@@ -2886,17 +3321,17 @@ def savings_theme_detail(theme_id: int) -> dict[str, Any]:
                 )
                 if overlaps and verification["status"] in ("verified", "review", "unverified"):
                     verification["status"] = "duplicate"
-                    verification["statusLabel"] = "중복 구간"
+                    verification["statusLabel"] = "과제별 구분 어려움"
                     verification["reason"] = (
-                        f"'{sibling['title']}' 테마와 검증 구간이 겹쳐 이 테마만의 몫으로 나누기"
-                        " 어렵습니다. 공장별 총량 대사(에너지 절감 화면)를 함께 확인하세요."
+                        f"'{sibling['title']}' 과제와 확인 기간이 겹쳐 이 과제만의 효과로 나누기"
+                        " 어렵습니다. '생산량을 고려한 실제 절감 확인'을 함께 보세요."
                     )
                     break
     else:
         verify_service = import_core("app.services.savings_verification_service")
         verification = {
             "status": "pending", "statusLabel": verify_service.STATUS_LABELS["pending"],
-            "reason": "시행월이 입력되지 않아 검증할 수 없습니다.", "window": None,
+            "reason": "시행월이 없어 과제 시행 전·후의 실제 사용량을 비교할 수 없습니다.", "window": None,
         }
     verification.pop("window", None)
 
@@ -2922,6 +3357,14 @@ def savings_theme_detail(theme_id: int) -> dict[str, Any]:
         "plannedAmount": computed["plannedAmount"],
         "actualAmount": computed["actualAmount"],
         "rate": computed["rate"],
+        "annualPlannedQty": computed["annualPlannedQty"],
+        "plannedYtdQty": computed["plannedYtdQty"],
+        "actualYtdQty": computed["actualYtdQty"],
+        "annualProgressRate": computed["annualProgressRate"],
+        "ytdRate": computed["ytdRate"],
+        "actualEnteredMonths": computed["actualEnteredMonths"],
+        "plannedYtdAmount": computed["plannedYtdAmount"],
+        "actualYtdAmount": computed["actualYtdAmount"],
         "verification": verification,
     })
 

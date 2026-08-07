@@ -43,7 +43,7 @@ STRONG_EXPLAIN_PCT = 70.0   # 등록 실적의 이 비율 이상을 원단위 �
 WEAK_EXPLAIN_PCT = 30.0     # 이 비율 미만이면 '미확인' — 우연한 변동과 구분되지 않음
 
 STATUS_LABELS: dict[str, str] = {
-    "verified": "검증됨", "review": "재확인", "unverified": "미확인", "pending": "판정 보류",
+    "verified": "효과 확인", "review": "추가 확인 필요", "unverified": "효과 미확인", "pending": "데이터 부족",
 }
 
 
@@ -89,14 +89,14 @@ def verify_theme(
         return {
             "status": "pending",
             "statusLabel": STATUS_LABELS["pending"],
-            "reason": "전·후 구간 또는 전년 동기의 원단위를 계산할 수 없어(해당 기간 생산실적 없음) 검증을 보류합니다.",
+            "reason": "시행 전·후 또는 전년 같은 기간의 생산실적이 없어 실제 에너지 원단위를 비교할 수 없습니다.",
             "intensities": intensities,
         }
     if not actual_qty_after or actual_qty_after <= 0:
         return {
             "status": "pending",
             "statusLabel": STATUS_LABELS["pending"],
-            "reason": "시행 이후 등록된 절감 실적이 없어 검증을 보류합니다.",
+            "reason": "시행 이후 등록된 절감 실적이 없어 실제 사용량과 비교할 수 없습니다.",
             "intensities": intensities,
         }
 
@@ -108,24 +108,24 @@ def verify_theme(
 
     if delta > 0:
         status = "unverified"
-        reason = "시행 후 원단위가 전년 동기 대비 오히려 더 나빠져, 절감 효과가 원단위에서 확인되지 않습니다."
+        reason = "시행 후 에너지 원단위가 전년 같은 기간보다 나빠져 실제 사용량에서 절감 효과가 확인되지 않습니다."
     elif explain_pct is None or explain_pct < WEAK_EXPLAIN_PCT:
         status = "unverified"
         reason = (
-            f"원단위 개선분이 등록 실적의 {explain_pct:.0f}%만 설명해 우연한 변동과 구분되지 않습니다."
-            if explain_pct is not None else "설명률을 계산할 수 없습니다."
+            f"등록 실적 대비 추정 원단위 개선량이 {explain_pct:.0f}%에 그쳐 절감 효과로 보기 어렵습니다."
+            if explain_pct is not None else "등록 실적 대비 추정 개선량 비율을 계산할 수 없습니다."
         )
     elif explain_pct < STRONG_EXPLAIN_PCT or after_months < MIN_AFTER_MONTHS:
         status = "review"
         parts = []
         if explain_pct < STRONG_EXPLAIN_PCT:
-            parts.append(f"설명률 {explain_pct:.0f}%로 일부만 설명됩니다")
+            parts.append(f"등록 실적 대비 추정 원단위 개선량이 {explain_pct:.0f}%입니다")
         if after_months < MIN_AFTER_MONTHS:
             parts.append(f"관측 기간이 {after_months}개월로 짧습니다")
         reason = " · ".join(parts) + "."
     else:
         status = "verified"
-        reason = f"원단위 개선이 등록 실적의 {explain_pct:.0f}%를 설명해 절감이 뒷받침됩니다."
+        reason = f"등록 실적 대비 추정 원단위 개선량이 {explain_pct:.0f}%입니다."
 
     return {
         "status": status,
@@ -141,32 +141,130 @@ def verify_theme(
     }
 
 
+def production_adjusted_expected_usage(periods: list[dict[str, float]]) -> float | None:
+    """같은 월·물리공장끼리 맞춘 BAU 사용량 합계를 만든다.
+
+    연간 합계 원단위를 한 번만 적용하면 계절별 원단위나 공장별 제품 믹스가 다른
+    경우 생산 비중 변화 자체를 절감으로 오인한다. 따라서 서버가 완전성이 확인된
+    월 × 물리공장 셀을 넘기고, 이 함수는 각 셀의 전년 원단위를 올해 같은 셀의
+    생산량에 적용해 합산한다.
+    """
+    if not periods:
+        return None
+    expected = 0.0
+    for period in periods:
+        previous_usage = period["previousUsage"]
+        previous_production = period["previousProductionTon"]
+        current_production = period["currentProductionTon"]
+        if previous_usage <= 0 or previous_production <= 0 or current_production <= 0:
+            return None
+        expected += previous_usage / previous_production * current_production
+    return expected
+
+
 def reconcile_factory_energy_type(
     current_year: WindowTotals,
     previous_year: WindowTotals,
     registered_qty: float,
+    *,
+    comparable: bool = True,
+    expected_usage: float | None = None,
+    registration_complete: bool = True,
 ) -> dict[str, Any]:
-    """공장·에너지원 단위 총량 대사 — 개별 테마 귀속과 무관하게, 실제 연간 사용량
-    감소분과 그 공장에 등록된 절감 실적 합을 맞춰본다.
+    """생산량을 보정한 공장·에너지원 단위 절감 효과 추정.
 
-    테마별 검증은 같은 구간에 테마가 겹치면 개별 귀속이 불가능하지만, 이 대사는
-    공장 전체를 한 덩어리로 보므로 겹쳐도 새지 않는다 — 절감 실적 과대보고를
-    잡는 최종 안전장치(설계서 §6-⑥).
+    expected_usage에는 같은 월·물리공장별로 계산한
+    Σ(전년 사용량/생산량 × 올해 생산량)을 받는다. 호출자가 생략한 경우에만
+    단일 공장·단일 구간 테스트와의 호환을 위해 합계 원단위 방식으로 계산한다.
+
+        estimated_avoided = expected_usage - current_usage
+        expected_after_registered = max(expected_usage - registered_qty, 0)
+        residual = current_usage - expected_after_registered
+
+    explainPct는 추정 절감량 ÷ 등록 절감량이다. 100%를 넘을 수 있으며 이는
+    등록량보다 실제 사용량 감소 추정치가 더 크다는 뜻이다.
     """
     usage_change = current_year["usage"] - previous_year["usage"]
-    if usage_change >= 0:
-        return {
-            "verdict": "역행" if registered_qty > 0 else "해당없음",
-            "usageChange": usage_change,
-            "avoidedUsage": None,
-            "explainPct": None,
-        }
-    avoided_usage = -usage_change
-    explain_pct = (registered_qty / avoided_usage * 100) if avoided_usage > 0 else None
-    verdict = "과대" if (explain_pct is not None and explain_pct > 130.0) else "정합"
-    return {
-        "verdict": verdict,
+    current_production = current_year["productionTon"]
+    previous_production = previous_year["productionTon"]
+    base_result = {
         "usageChange": usage_change,
-        "avoidedUsage": avoided_usage,
-        "explainPct": explain_pct,
+        "productionChangePct": (
+            (current_production / previous_production - 1) * 100
+            if comparable and previous_production > 0 else None
+        ),
+        "usageChangePct": (
+            (current_year["usage"] / previous_year["usage"] - 1) * 100
+            if comparable and previous_year["usage"] > 0 else None
+        ),
+    }
+    if expected_usage is None and comparable and current_production > 0 and previous_production > 0:
+        expected_usage = previous_year["usage"] / previous_production * current_production
+    if (
+        not comparable
+        or current_production <= 0
+        or previous_production <= 0
+        or expected_usage is None
+        or expected_usage <= 0
+    ):
+        return {
+            **base_result,
+            "verdict": "비교불가",
+            "previousIntensity": None,
+            "currentIntensity": None,
+            "intensityChangePct": None,
+            "expectedUsage": None,
+            "expectedAfterRegistered": None,
+            "normalizedUsageChange": None,
+            "avoidedUsage": None,
+            "residualQty": None,
+            "explainPct": None,
+            "registeredExceedsBaseline": None,
+        }
+
+    previous_intensity = previous_year["usage"] / previous_production
+    current_intensity = current_year["usage"] / current_production
+    normalized_change = current_year["usage"] - expected_usage
+    estimated_avoided = -normalized_change
+    registered_exceeds_baseline = registered_qty > expected_usage
+    expected_after_registered = max(expected_usage - registered_qty, 0.0)
+    residual_qty = current_year["usage"] - expected_after_registered
+    realization_pct = (
+        max(estimated_avoided, 0.0) / registered_qty * 100
+        if registered_qty > 0 else None
+    )
+
+    if not registration_complete:
+        verdict = "등록미완료"
+    elif registered_qty <= 0:
+        verdict = "해당없음"
+    elif registered_exceeds_baseline:
+        verdict = "과대"
+    elif estimated_avoided < 0:
+        verdict = "역행"
+    elif estimated_avoided == 0:
+        verdict = "과대"
+    elif realization_pct is not None and realization_pct < STRONG_EXPLAIN_PCT:
+        verdict = "과대"
+    else:
+        verdict = "정합"
+
+    return {
+        **base_result,
+        "verdict": verdict,
+        "previousIntensity": previous_intensity,
+        "currentIntensity": current_intensity,
+        # 합계 원단위끼리의 단순 비교 대신 월·공장 보정 예상치 대비 실제 변화율.
+        "intensityChangePct": (current_year["usage"] / expected_usage - 1) * 100,
+        "expectedUsage": expected_usage,
+        "expectedAfterRegistered": (
+            expected_after_registered if registration_complete else None
+        ),
+        "normalizedUsageChange": normalized_change,
+        "avoidedUsage": estimated_avoided if estimated_avoided >= 0 else None,
+        "residualQty": residual_qty if registration_complete else None,
+        "explainPct": realization_pct if registration_complete else None,
+        "registeredExceedsBaseline": (
+            registered_exceeds_baseline if registration_complete else None
+        ),
     }
