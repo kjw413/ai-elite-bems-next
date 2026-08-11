@@ -18,7 +18,9 @@ import { PivotTable } from "@/components/pivot-table";
 import { ToggleLegend, useSeriesToggle, type LegendItem } from "@/components/toggle-legend";
 
 type CostMetric = "total" | "power" | "fuel";
-type CostScope = "ytd" | "mtd";
+// 비용 화면의 조회 모드 — 사용량·원단위 화면(energyModes)과 같은 어휘를 쓴다.
+// 기간별이 없는 이유: 비용은 월 단위로 마감·정산되어 임의 구간 합계에 실무 의미가 없다.
+type CostMode = "month" | "year";
 type NullableNumber = number | null;
 
 type CostBridge = {
@@ -46,10 +48,23 @@ type CostPeriod = {
   previousCostPerTon: NullableNumber;
   coverage: NullableNumber;
   previousCoverage: NullableNumber;
+  priceEffect: NullableNumber;
   bridge: CostBridge | null;
   bridgeNote: string | null;
   costChangeComparable: boolean;
   costChangeNote: string | null;
+};
+
+// 주차 집계 (월간 모드) — 비용은 합산, 단가는 Σ비용÷Σ사용량 가중평균이다.
+type WeeklyCost = {
+  week: string;
+  span: string;
+  days: number;
+  partial: boolean;
+  cost: number;
+  usage: number;
+  price: NullableNumber;
+  coverage: NullableNumber;
 };
 
 type MonthlyCost = {
@@ -91,6 +106,7 @@ type EnergyCostData = {
   composition: { metric: string; label: string; cost: number; change: NullableNumber; share: number }[];
   matrix: CostMatrixRow[];
   dailyPrice: { date: string; price: number; usage: number }[];
+  weekly: WeeklyCost[];
   coverage: { expectedDays: number; presentDays: number; missingDays: number };
 };
 
@@ -111,6 +127,7 @@ const emptyPeriod = (): CostPeriod => ({
   previousCostPerTon: null,
   coverage: null,
   previousCoverage: null,
+  priceEffect: null,
   bridge: null,
   bridgeNote: null,
   costChangeComparable: true,
@@ -132,6 +149,7 @@ const emptyData = (metric: CostMetric): EnergyCostData => ({
   composition: [],
   matrix: [],
   dailyPrice: [],
+  weekly: [],
   coverage: { expectedDays: 0, presentDays: 0, missingDays: 0 },
 });
 
@@ -208,18 +226,19 @@ function CostBridgeView({ bridge }: { bridge: CostBridge }) {
 
 export function EnergyCost({ factory, requestedDate }: { factory: string; requestedDate: string }) {
   const [metric, setMetric] = useState<CostMetric>("total");
-  const [scope, setScope] = useState<CostScope>("ytd");
+  const [mode, setMode] = useState<CostMode>("month");
   const [data, setData] = useState<EnergyCostData>(() => emptyData("total"));
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(false);
   const monthlyLegend = useSeriesToggle();
+  const weeklyLegend = useSeriesToggle();
 
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
     setLoading(true);
     apiGet<EnergyCostData>(
-      `/energy-cost?${query({ factory, date: requestedDate, metric })}`,
+      `/energy-cost?${query({ factory, date: requestedDate, metric, mode })}`,
       emptyData(metric),
       controller.signal,
     ).then(result => {
@@ -234,8 +253,13 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
       current = false;
       controller.abort();
     };
-  }, [factory, requestedDate, metric]);
+  }, [factory, requestedDate, metric, mode]);
 
+  // 원인분해·KPI 기간은 조회 모드를 따른다 — 별도 YTD/MTD 토글을 두면 같은 화면의
+  // 카드들이 서로 다른 기간을 보여 비교가 성립하지 않는다.
+  const scope: "ytd" | "mtd" = mode === "year" ? "ytd" : "mtd";
+  const scopeLabel = mode === "year" ? "연 누계" : "당월";
+  const previousLabel = mode === "year" ? "전년 동기" : "전년 동월";
   const period = data[scope];
   const isTotal = metric === "total";
   const secondaryKey = isTotal ? "costPerTon" : "price";
@@ -261,6 +285,14 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
   const coverageNote = period.coverage != null && period.coverage < 0.99
     ? `비용 반영률 ${(period.coverage * 100).toFixed(1)}%`
     : undefined;
+  const weekly = data.weekly ?? [];
+  const weeklyCostTotal = weekly.reduce((acc, row) => acc + (row.cost ?? 0), 0);
+  const weeklyUsageTotal = weekly.reduce((acc, row) => acc + (row.usage ?? 0), 0);
+  const weeklyPartial = weekly.some(row => row.partial);
+  const weeklyLegendItems: LegendItem[] = [
+    { key: "cost", label: "주 비용", color: "var(--chart-power)" },
+    ...(isTotal ? [] : [{ key: "price", label: `${data.label} 단가`, color: "var(--chart-fuel)" }]),
+  ];
 
   if (loading) return <div className="loading inline-loading" role="status"><RefreshCw className="spin"/>비용 데이터를 불러오는 중입니다.</div>;
   if (!live) return <section className="data-warning" role="alert"><CircleDollarSign size={20}/><div><strong>비용 API 연결 실패</strong><p>비용·단가는 예시값으로 대체하지 않습니다. API와 DB 연결을 확인하세요.</p></div></section>;
@@ -270,9 +302,9 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
       <div className="segmented" role="group" aria-label="비용 에너지원 선택">
         {metricDefs.map(item => <button type="button" key={item.id} className={metric === item.id ? "active" : ""} aria-pressed={metric === item.id} onClick={() => setMetric(item.id)}>{item.label}</button>)}
       </div>
-      <div className="segmented" role="group" aria-label="비용 원인분해 기간">
-        <button type="button" className={scope === "ytd" ? "active" : ""} aria-pressed={scope === "ytd"} onClick={() => setScope("ytd")}>연 누계 YTD</button>
-        <button type="button" className={scope === "mtd" ? "active" : ""} aria-pressed={scope === "mtd"} onClick={() => setScope("mtd")}>당월 MTD</button>
+      <div className="segmented" role="group" aria-label="비용 조회 모드">
+        <button type="button" className={mode === "month" ? "active" : ""} aria-pressed={mode === "month"} onClick={() => setMode("month")}>월간</button>
+        <button type="button" className={mode === "year" ? "active" : ""} aria-pressed={mode === "year"} onClick={() => setMode("year")}>연간</button>
       </div>
       <span className="period-chip">기준 {data.baseDate}</span>
     </div>
@@ -281,14 +313,18 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
     {period.costChangeNote && <section className="alert warning cost-scope-note"><Activity size={19}/><div><strong>전년비 비교 주의</strong><p>{period.costChangeNote}</p></div></section>}
 
     <section className="kpi-grid">
-      <CostKpi label="연 누계 비용" value={data.ytd.cost} unit="백만원" change={data.ytd.costChange} note={data.ytd.coverage != null && data.ytd.coverage < 0.99 ? `비용 반영률 ${(data.ytd.coverage * 100).toFixed(1)}%` : undefined} icon={CircleDollarSign}/>
-      <CostKpi label="당월 비용" value={data.mtd.cost} unit="백만원" change={data.mtd.costChange} icon={CircleDollarSign}/>
-      <CostKpi label={`연 누계 ${secondaryLabel}`} value={isTotal ? toThousandWonPerTon(data.ytd.costPerTon) : data.ytd.price} unit={secondaryUnit} change={isTotal ? null : data.ytd.priceChange} icon={Gauge}/>
-      <CostKpi label={`당월 ${secondaryLabel}`} value={isTotal ? toThousandWonPerTon(data.mtd.costPerTon) : data.mtd.price} unit={secondaryUnit} change={isTotal ? null : data.mtd.priceChange} icon={Gauge}/>
+      <CostKpi label={`${scopeLabel} 비용`} value={period.cost} unit="백만원" change={period.costChange} note={coverageNote} icon={CircleDollarSign}/>
+      <CostKpi label={`${previousLabel} 비용`} value={period.previousCost} unit="백만원" icon={CircleDollarSign}/>
+      <CostKpi label={`${scopeLabel} ${secondaryLabel}`} value={isTotal ? toThousandWonPerTon(period.costPerTon) : period.price} unit={secondaryUnit} change={isTotal ? null : period.priceChange} icon={Gauge}/>
+      {/* 4번째 타일은 지표에 따라 갈린다 — 단가 효과는 전력·연료에서만 계산되므로(전력+연료 합은
+          kWh 와 Nm³ 를 더할 수 없어 단가가 없다) 합계에서는 빈 타일 대신 전년 톤당 비용을 둔다. */}
+      {isTotal
+        ? <CostKpi label={`${previousLabel} ${secondaryLabel}`} value={toThousandWonPerTon(period.previousCostPerTon)} unit={secondaryUnit} icon={Gauge}/>
+        : <CostKpi label={`${scopeLabel} 단가 효과`} value={period.priceEffect} unit="백만원" note="단가가 전년 그대로였다면 달라졌을 금액" icon={Activity}/>}
     </section>
 
     <section className="content-grid">
-      <article className="card chart-card span-all">
+      {mode === "year" && <article className="card chart-card span-all">
         <header className="card-title"><h3>월별 비용·{secondaryLabel}</h3><div className="card-title-side"><span>{data.year}년 · 비용 백만원 / {secondaryUnit}</span></div></header>
         <div className="chart cost-monthly-chart"><ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={monthly}>
@@ -307,36 +343,62 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
           { key: previousSecondaryKey, label: `전년 ${secondaryLabel}(${secondaryUnit})`, values: monthly.map(row => row[previousSecondaryKey]), total: isTotal ? toThousandWonPerTon(data.ytd.previousCostPerTon) : data.ytd.previousPrice, format: value => value == null ? "-" : fmt(Number(value), 2) },
           { key: secondaryKey, label: `금년 ${secondaryLabel}(${secondaryUnit})`, values: monthly.map(row => row[secondaryKey]), total: isTotal ? toThousandWonPerTon(data.ytd.costPerTon) : data.ytd.price, format: value => value == null ? "-" : fmt(Number(value), 2) },
         ]}/></DataToggle>
-      </article>
+      </article>}
 
-      <article className="card chart-card">
-        <header className="card-title"><h3>{scope === "ytd" ? "연 누계" : "당월"} 비용 증감 원인</h3><div className="card-title-side"><span>생산량 · 효율 · 단가</span></div></header>
-        {period.bridge ? <CostBridgeView bridge={period.bridge}/> : <div className="cost-empty"><Factory size={24}/><p>{isTotal ? "전력 또는 연료를 선택하면 3요인 원인분해를 볼 수 있습니다." : period.bridgeNote ?? "비교 가능한 전년 실적이 없어 원인분해를 표시하지 않습니다."}</p></div>}
-        {period.bridgeNote && period.bridge && <p className="cost-note">{period.bridgeNote}</p>}
-        {coverageNote && <p className="cost-note warning">{coverageNote} — 비용이 없는 사용량은 원인분해에서 제외됩니다.</p>}
-      </article>
+      {/* 폭이 적게 필요한 카드는 한 띠에 나란히 — 주간 집계·원인분해·비용 구성이 각자 전폭을
+          쓰면 화면의 절반이 빈 채로 세로만 길어진다. */}
+      <div className="aux-grid span-all">
+        {mode === "month" && weekly.length > 0 && <article className="card chart-card">
+          <header className="card-title"><h3>주간 비용 집계</h3><div className="card-title-side"><span>백만원{isTotal ? "" : ` / ${data.priceUnit}`}</span></div></header>
+          <div className="chart aux-chart"><ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={weekly}>
+              <CartesianGrid vertical={false}/><XAxis dataKey="week" tick={{ fontSize: 10 }}/><YAxis yAxisId="cost"/>{!isTotal && <YAxis yAxisId="price" orientation="right" domain={["auto","auto"]}/>}
+              <Tooltip {...tooltipStyle} formatter={(value: unknown, name: unknown) => [fmt(value, 2), String(name ?? "")]}/>
+              {!weeklyLegend.isHidden("cost") && <Bar yAxisId="cost" dataKey="cost" name="주 비용(백만원)" fill="var(--chart-power)" radius={[3,3,0,0]} maxBarSize={34}/>}
+              {!isTotal && !weeklyLegend.isHidden("price") && <Line yAxisId="price" type="linear" dataKey="price" name={`${data.label} 단가(${data.priceUnit})`} stroke="var(--chart-fuel)" strokeWidth={2} dot={{ r: 3, fill: "var(--chart-fuel)", stroke: "var(--card)", strokeWidth: 2 }} connectNulls/>}
+            </ComposedChart>
+          </ResponsiveContainer></div>
+          <ToggleLegend items={weeklyLegendItems} hidden={weeklyLegend.hidden} onToggle={weeklyLegend.toggle}/>
+          <p className="cost-note">주 단가는 그 주의 Σ비용÷Σ사용량 가중평균입니다 — 일별 단가를 산술평균하면 저부하일이 과대 반영됩니다.{weeklyPartial ? " 마지막 주는 7일을 채우지 못한 부분 주라 비용 막대가 작게 보입니다." : ""}</p>
+          <DataToggle><PivotTable periods={weekly.map(row => row.week)} periodLabel="주차" totalLabel="당월 누계" rows={[
+            { key: "cost", label: "비용(백만원)", values: weekly.map(row => row.cost), total: Math.round(weeklyCostTotal * 100) / 100, format: value => value == null ? "-" : fmt(Number(value), 2) },
+            ...(isTotal ? [] : [
+              { key: "usage", label: `사용량(${data.usageUnit})`, values: weekly.map(row => row.usage), total: Math.round(weeklyUsageTotal * 10) / 10 },
+              { key: "price", label: `단가(${data.priceUnit})`, values: weekly.map(row => row.price), total: weeklyUsageTotal > 0 ? Math.round(weeklyCostTotal * 1_000_000 / weeklyUsageTotal * 100) / 100 : null, format: (value: unknown) => value == null ? "-" : fmt(Number(value), 2) },
+            ]),
+            { key: "days", label: "집계일수", values: weekly.map(row => row.days), total: weekly.reduce((acc, row) => acc + (row.days ?? 0), 0) },
+          ]}/></DataToggle>
+        </article>}
 
-      <article className="card list">
-        <header className="card-title"><h3>에너지원별 비용 구성</h3><div className="card-title-side"><span>YTD · 백만원</span></div></header>
-        <div className="cost-composition">
-          {data.composition.map(row => <div key={row.metric}>
-            <p><span>{row.label}</span><b>{fmt(row.cost)} <small>({fmt(row.share)}%)</small></b></p>
-            <i><em className={row.metric} style={{ width: `${Math.max(0, Math.min(100, row.share))}%` }}/></i>
-            <small className={row.change != null && row.change > 0 ? "bad" : "good"}>{row.change == null ? "전년비 -" : `전년비 ${row.change > 0 ? "+" : ""}${fmt(row.change)}%`}</small>
-          </div>)}
-        </div>
-      </article>
+        <article className="card chart-card">
+          <header className="card-title"><h3>{scopeLabel} 비용 증감 원인</h3><div className="card-title-side"><span>생산량 · 효율 · 단가</span></div></header>
+          {period.bridge ? <CostBridgeView bridge={period.bridge}/> : <div className="cost-empty"><Factory size={24}/><p>{isTotal ? "전력 또는 연료를 선택하면 3요인 원인분해를 볼 수 있습니다." : period.bridgeNote ?? "비교 가능한 전년 실적이 없어 원인분해를 표시하지 않습니다."}</p></div>}
+          {period.bridgeNote && period.bridge && <p className="cost-note">{period.bridgeNote}</p>}
+          {coverageNote && <p className="cost-note warning">{coverageNote} — 비용이 없는 사용량은 원인분해에서 제외됩니다.</p>}
+        </article>
+
+        {mode === "year" && <article className="card list">
+          <header className="card-title"><h3>에너지원별 비용 구성</h3><div className="card-title-side"><span>YTD · 백만원</span></div></header>
+          <div className="cost-composition">
+            {data.composition.map(row => <div key={row.metric}>
+              <p><span>{row.label}</span><b>{fmt(row.cost)} <small>({fmt(row.share)}%)</small></b></p>
+              <i><em className={row.metric} style={{ width: `${Math.max(0, Math.min(100, row.share))}%` }}/></i>
+              <small className={row.change != null && row.change > 0 ? "bad" : "good"}>{row.change == null ? "전년비 -" : `전년비 ${row.change > 0 ? "+" : ""}${fmt(row.change)}%`}</small>
+            </div>)}
+          </div>
+        </article>}
+      </div>
 
       <article className="card table-card span-all">
-        <header className="card-title"><h3>공장별 비용·단가 매트릭스</h3><div className="card-title-side"><span>YTD</span></div></header>
+        <header className="card-title"><h3>공장별 비용·단가 매트릭스</h3><div className="card-title-side"><span>{scopeLabel}</span></div></header>
         <div className="table-wrap"><table className="cost-matrix"><thead><tr><th>공장</th><th>비용(백만원)</th>{!isTotal && <th>사용량({data.usageUnit})</th>}<th>{secondaryLabel}({secondaryUnit})</th>{!isTotal && <th>단가 전년비</th>}<th>비용 반영률</th></tr></thead><tbody>
           {data.matrix.map(row => <tr key={row.factory}><td>{row.factory}</td><td>{fmt(row.cost)}</td>{!isTotal && <td>{fmt(row.usage)}</td>}<td>{fmt(isTotal ? toThousandWonPerTon(row.costPerTon) : row.price, 2)}</td>{!isTotal && <td className={row.priceChange != null && row.priceChange <= 0 ? "good" : "bad"}>{row.priceChange == null ? "-" : `${row.priceChange > 0 ? "+" : ""}${fmt(row.priceChange)}%`}</td>}<td>{row.coverage == null ? "-" : `${(row.coverage * 100).toFixed(1)}%`}</td></tr>)}
         </tbody></table></div>
       </article>
 
-      {!isTotal && <article className="card chart-card span-all">
-        <header className="card-title"><h3>최근 일별 {data.label} 단가</h3><div className="card-title-side"><span>최근 90일 · {data.priceUnit}</span></div></header>
-        <div className="chart"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={data.dailyPrice}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={22}/><YAxis/><Tooltip {...tooltipStyle} formatter={(value: unknown) => [fmt(value, 2), data.priceUnit ?? "단가"]}/><Line type="linear" dataKey="price" name={`${data.label} 단가`} stroke={metric === "power" ? "var(--chart-power)" : "var(--chart-fuel)"} strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls={false}/></ComposedChart></ResponsiveContainer></div>
+      {!isTotal && mode === "month" && data.dailyPrice.length > 0 && <article className="card chart-card span-all">
+        <header className="card-title"><h3>당월 일별 {data.label} 단가</h3><div className="card-title-side"><span>{data.priceUnit}</span></div></header>
+        <div className="chart"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={data.dailyPrice}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={22}/><YAxis domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={(value: unknown) => [fmt(value, 2), data.priceUnit ?? "단가"]}/><Line type="linear" dataKey="price" name={`${data.label} 단가`} stroke={metric === "power" ? "var(--chart-power)" : "var(--chart-fuel)"} strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls={false}/></ComposedChart></ResponsiveContainer></div>
       </article>}
     </section>
   </div>;

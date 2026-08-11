@@ -488,9 +488,9 @@ def resolve_production_period(
 ENERGY_RANGE_MAX_DAYS = 731
 ENERGY_YOY_METRICS = ("power", "fuel", "water", "wastewater")
 
-# 일별 단가 추이 조회 폭. 전력단가의 주중/주말·피크 파형이 보이려면 최소 두어 달이
-# 필요하고, 그보다 길면 일 단위 파형이 뭉개져 월별 차트와 다를 바 없어진다.
-COST_DAILY_PRICE_DAYS = 90
+# 에너지·원단위·비용 화면의 조회 모드 — 생산실적 화면(PRODUCTION_MODES)과 같은 어휘를 쓴다.
+# 비용 화면만 기간 지정이 없다(일별 비용 단가를 임의 구간으로 끊을 실무 수요가 없음).
+ENERGY_MODES = {"month", "range", "year"}
 
 
 def resolve_energy_window(base: date, date_from: date | None, date_to: date | None) -> tuple[date, date]:
@@ -511,6 +511,62 @@ def resolve_energy_window(base: date, date_from: date | None, date_to: date | No
             detail=f"조회 기간은 최대 {ENERGY_RANGE_MAX_DAYS}일까지 지정할 수 있습니다.",
         )
     return date_from, date_to
+
+
+def resolve_energy_period(
+    mode: str, base: date, date_from: date | None, date_to: date | None,
+) -> tuple[date, date]:
+    """조회 모드별 에너지 계열 화면의 집계 구간 (월간/기간별/연간).
+
+    연간을 12월 31일까지로 잡지 않고 연 누계(1월 1일~기준일)로 두는 이유:
+    설비 구성·공장별 누계·결측일(period_coverage)이 아직 오지 않은 날을
+    '데이터 없음'으로 세어 화면이 거짓 경고를 내기 때문. 12개월 추이는
+    별도의 월별 집계(yoy·monthly)가 이미 담당한다.
+    """
+    if mode not in ENERGY_MODES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 조회 모드입니다: {mode}")
+    if mode == "year":
+        return date(base.year, 1, 1), base
+    if mode == "month":
+        return base.replace(day=1), base
+    return resolve_energy_window(base, date_from, date_to)
+
+
+def week_buckets(date_from: date, date_to: date) -> list[dict[str, Any]]:
+    """월간 모드 주차 구간 — 시작일부터 7일씩 끊는다(달의 1~7·8~14·…·29~말일).
+
+    ISO 주(월~일)를 쓰지 않는 이유: 월 경계에서 주가 잘려 이전·다음 달 실적이
+    한 막대에 섞이고, 그러면 "이 달 몇 주차" 라는 현장 표현과도 어긋난다.
+    7일을 채우지 못한 주(월말 자투리·기준일에서 잘린 주)는 partial 로 표시한다 —
+    합계 막대만 보면 실적이 준 것처럼 읽히므로 화면이 일평균으로 보라고 알린다.
+    """
+    buckets: list[dict[str, Any]] = []
+    start = date_from
+    index = 1
+    while start <= date_to:
+        natural_end = start + timedelta(days=6)
+        end = min(natural_end, date_to)
+        buckets.append({
+            "index": index,
+            "label": f"{index}주({start.day:02d}~{end.day:02d})",
+            "span": f"{start:%m.%d}~{end:%m.%d}",
+            "from": start,
+            "to": end,
+            "partial": natural_end > date_to,
+        })
+        start = natural_end + timedelta(days=1)
+        index += 1
+    return buckets
+
+
+def week_bucket_index(buckets: list[dict[str, Any]], value: date | None) -> int | None:
+    """일자가 속한 주차 버킷의 인덱스. 구간 밖이면 None."""
+    if value is None:
+        return None
+    for index, bucket in enumerate(buckets):
+        if bucket["from"] <= value <= bucket["to"]:
+            return index
+    return None
 
 
 def _apply_monthly_energy_fallback(
@@ -1481,22 +1537,54 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
     })
 
 
+ENERGY_DAILY_KEYS = ("power", "fuel", "water", "wastewater", "freezing", "compressor", "other")
+
+
+def _weekly_energy(rows: list[dict[str, Any]], window_from: date, window_to: date) -> list[dict[str, Any]]:
+    """일별 사용량 행을 주차별 합계로 접는다 — 월간 모드의 주간 실적 집계용."""
+    buckets = week_buckets(window_from, window_to)
+    totals = [dict.fromkeys(ENERGY_DAILY_KEYS, 0.0) for _ in buckets]
+    days = [0] * len(buckets)
+    for row in rows:
+        index = week_bucket_index(buckets, normalize_date(row.get("date")))
+        if index is None:
+            continue
+        days[index] += 1
+        for key in ENERGY_DAILY_KEYS:
+            totals[index][key] += scalar(row.get(key))
+    weekly: list[dict[str, Any]] = []
+    for bucket, total, day_count in zip(buckets, totals, days):
+        if day_count == 0:
+            continue
+        weekly.append({
+            "week": bucket["label"], "span": bucket["span"],
+            "days": day_count, "partial": bucket["partial"],
+            **{key: round(value, 2) for key, value in total.items()},
+            **{f"{key}Avg": round(value / day_count, 2) for key, value in total.items()},
+        })
+    return weekly
+
+
 @app.get("/api/v1/energy")
 def energy(
     factory: str = "전사",
+    mode: str = "month",
     requested_date: date | None = Query(None, alias="date"),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
 ) -> dict[str, Any]:
     max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
-    window_from, window_to = resolve_energy_window(base, date_from, date_to)
-    # 설비 구성·공장별 집계 범위: 기간 지정 시 그 기간, 기본은 기준월 1일~기준일(기존 동작).
-    ranged = date_from is not None
-    summary_from = window_from if ranged else base.replace(day=1)
-    summary_to = window_to if ranged else base
+    # mode 를 보내지 않는 호출(구버전 프런트·직접 조회)도 기존처럼 동작하게 — 날짜 범위가
+    # 오면 기간별로 본다.
+    if mode == "month" and date_from is not None:
+        mode = "range"
+    window_from, window_to = resolve_energy_period(mode, base, date_from, date_to)
+    # 설비 구성·공장별 집계는 조회 구간과 같은 범위로 본다(월간=당월 누계, 연간=연 누계).
+    summary_from, summary_to = window_from, window_to
     clause, values = factory_clause(factory)
-    rows = fetch_all(
+    # 연간 모드는 12개월 추이(yoy)로 읽는 화면이라 365개 일별 행을 내려보내지 않는다.
+    rows = [] if mode == "year" else fetch_all(
         """
         SELECT date, SUM(total_power_kwh)/1000 power, SUM(fuel_nm3)/1000 fuel,
                SUM(water_ton)/1000 water, SUM(wastewater_ton)/1000 wastewater,
@@ -1508,6 +1596,7 @@ def energy(
     # 전력 설비 분해(legacy 일별 추이) — 기타 = 전체 − 냉동 − 공압, 음수 방지.
     for row in rows:
         row["other"] = round(max(0.0, scalar(row.get("power")) - scalar(row.get("freezing")) - scalar(row.get("compressor"))), 2)
+    weekly = _weekly_energy(rows, window_from, window_to) if mode == "month" else []
     equipment = fetch_one(
         """
         SELECT SUM(freezing_power_kwh) freezing, SUM(air_compressor_kwh) compressor,
@@ -1558,7 +1647,7 @@ def energy(
     # "전사(경산 제외)"는 5개 공장 필터가 되도록. 조건만 is_company_wide로 바꾸고
     # 필터를 안 붙이면 "경산 제외"를 골라도 비교 라인에 경산이 그대로 그려진다.
     daily_by_factory: list[dict[str, Any]] = []
-    if is_company_wide(factory):
+    if mode != "year" and is_company_wide(factory):
         compare_clause, compare_values = factory_clause(factory)
         per_factory_rows = fetch_all(
             """
@@ -1582,10 +1671,11 @@ def energy(
         daily_by_factory = [merged[key] for key in sorted(merged)]
     return json_safe({
         "baseDate": base,
-        "mode": "range" if ranged else "recent",
+        "mode": mode,
         "dateFrom": window_from,
         "dateTo": window_to,
         "daily": [{**row, "date": row["date"].strftime("%m.%d")} for row in rows],
+        "weekly": weekly,
         "dailyByFactory": daily_by_factory,
         "equipment": equipment_rows,
         "factories": list(combined.values()),
@@ -1611,11 +1701,12 @@ def period_coverage(factory: str, date_from: date, date_to: date) -> dict[str, A
 def intensity_analysis(
     factory: str = "전사",
     metric: str = "power",
+    mode: str = "month",
     requested_date: date | None = Query(None, alias="date"),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
 ) -> dict[str, Any]:
-    """원단위 분석: 일별 추이 + 월별 금년/전년/목표 추이 + 가중 누계 + 공장 매트릭스."""
+    """원단위 분석: 일별·주간 추이 + 월별 금년/전년/목표 추이 + 가중 누계 + 공장 매트릭스."""
     spec = INTENSITY_METRICS.get(metric)
     if spec is None:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 지표입니다: {metric}")
@@ -1624,15 +1715,19 @@ def intensity_analysis(
 
     max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
-    window_from, window_to = resolve_energy_window(base, date_from, date_to)
+    if mode == "month" and date_from is not None:
+        mode = "range"
+    window_from, window_to = resolve_energy_period(mode, base, date_from, date_to)
     history_start = min(date(base.year - 1, 1, 1), window_from)
 
     clause, values = factory_clause(factory)
-    daily_rows = fetch_all(
+    # 연간 모드는 월별 추이로 읽는 화면이라 일별 행을 내려보내지 않는다.
+    daily_rows = [] if mode == "year" else fetch_all(
         f"""
         SELECT date,
                SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN {unit_col} * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END), 0) unit_value,
-               SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) production_kg
+               SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) production_kg,
+               SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN {usage_col} ELSE 0 END) usage_value
         FROM energy_daily WHERE date BETWEEN %s AND %s
         """ + clause + " GROUP BY date ORDER BY date",
         (window_from, window_to, *values),
@@ -1649,6 +1744,36 @@ def intensity_analysis(
             "value": round(value, 2) if value is not None else None,
             "productionTon": round(prod_ton, 3),
         })
+
+    # 주간 실적 집계 — 원단위는 비율이라 주 평균을 단순 산술평균으로 내면 안 된다.
+    # 일별 저장 원단위를 그 날 믹스생산량으로 가중 평균해야 주 전체를 한 덩어리로
+    # 집계한 값과 일치한다(월 누계·YTD 가 쓰는 규칙과 동일).
+    weekly: list[dict[str, Any]] = []
+    if mode == "month":
+        buckets = week_buckets(window_from, window_to)
+        cells = [{"weighted": 0.0, "kg": 0.0, "usage": 0.0, "days": 0} for _ in buckets]
+        for row in daily_rows:
+            index = week_bucket_index(buckets, normalize_date(row.get("date")))
+            if index is None:
+                continue
+            value = optional_scalar(row.get("unit_value"))
+            production_kg = scalar(row.get("production_kg"))
+            cells[index]["usage"] += scalar(row.get("usage_value"))
+            if value is None or production_kg <= 0:
+                continue
+            cells[index]["weighted"] += value * production_kg
+            cells[index]["kg"] += production_kg
+            cells[index]["days"] += 1
+        for bucket, cell in zip(buckets, cells):
+            if cell["days"] == 0:
+                continue
+            weekly.append({
+                "week": bucket["label"], "span": bucket["span"],
+                "days": int(cell["days"]), "partial": bucket["partial"],
+                "value": round(cell["weighted"] / cell["kg"], 2) if cell["kg"] > 0 else None,
+                "productionTon": round(cell["kg"] / 1000, 1),
+                "usage": round(cell["usage"], 1),
+            })
 
     monthly_rows = fetch_all(
         f"""
@@ -1740,10 +1865,15 @@ def intensity_analysis(
             "change": rate_change(cur, prv) if (cur is not None and prv) else None,
         }
 
+    # 공장 효율 매트릭스는 조회 구간을 그대로 따른다 — 월간이면 당월 누계, 연간이면
+    # 연 누계. 모드를 바꿔도 매트릭스만 MTD 로 남아 있으면 같은 화면의 다른 카드와
+    # 기간이 어긋나 비교가 성립하지 않는다.
+    matrix_prev_from = previous_year_date(window_from)
+    matrix_prev_to = previous_year_date(window_to)
     matrix = []
     for display_factory in DISPLAY_FACTORIES:
-        cur = period_intensity(display_factory, base.replace(day=1), base)
-        prv = period_intensity(display_factory, prev_base.replace(day=1), prev_base)
+        cur = period_intensity(display_factory, window_from, window_to)
+        prv = period_intensity(display_factory, matrix_prev_from, matrix_prev_to)
         if cur is None:
             continue
         matrix.append({
@@ -1807,10 +1937,11 @@ def intensity_analysis(
         "unit": spec["unit"],
         "year": base.year,
         "targetPct": target_pct,
-        "mode": "range" if date_from is not None else "recent",
+        "mode": mode,
         "dateFrom": window_from,
         "dateTo": window_to,
         "daily": daily,
+        "weekly": weekly,
         "summary": summary,
         "monthly": monthly,
         "yoyCumulative": weighted_intensity_yoy(monthly_weighted_values, monthly_production, base.year),
@@ -2031,6 +2162,7 @@ def _aggregate_cost_totals(
 def energy_cost(
     factory: str = "전사",
     metric: str = "power",
+    mode: str = "year",
     requested_date: date | None = Query(None, alias="date"),
 ) -> dict[str, Any]:
     """에너지 비용 분석: KPI · 월별 비용/단가 · 3단 원인분해 · 공장 매트릭스 · 일별 단가.
@@ -2042,6 +2174,9 @@ def energy_cost(
     cost_service = import_core("app.services.energy_cost_service")
     if not cost_service.is_supported_metric(metric):
         raise HTTPException(status_code=400, detail=f"지원하지 않는 지표입니다: {metric}")
+    # 비용 화면은 월간/연간만 쓴다 — 임의 기간 비용 집계는 요구가 없다.
+    if mode not in ("month", "year"):
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 조회 모드입니다: {mode}")
     is_total = metric == cost_service.TOTAL_METRIC
     spec = cost_service.metric_spec(metric)
     data_start: date = cost_service.COST_DATA_START
@@ -2191,14 +2326,17 @@ def energy_cost(
     for entry in composition:
         entry["share"] = round(entry["cost"] * 1_000_000 / composition_total * 100, 1) if composition_total > 0 else None
 
-    # 공장별 비용·단가 매트릭스 (YTD)
+    # 공장별 비용·단가 매트릭스 — 조회 모드와 같은 기간으로 본다(월간=당월, 연간=연 누계).
+    # 모드를 바꿔도 매트릭스만 YTD 로 남으면 같은 화면의 KPI·원인분해와 기간이 어긋난다.
+    matrix_from = base.replace(day=1) if mode == "month" else base.replace(month=1, day=1)
+    matrix_prev_from = prev_base.replace(day=1) if mode == "month" else prev_base.replace(month=1, day=1)
     matrix: list[dict[str, Any]] = []
     for display_factory in DISPLAY_FACTORIES:
-        curr = _cost_totals(display_factory, metric, base.replace(month=1, day=1), base)
-        prev = _cost_totals(display_factory, metric, prev_base.replace(month=1, day=1), prev_base)
+        curr = _cost_totals(display_factory, metric, matrix_from, base)
+        prev = _cost_totals(display_factory, metric, matrix_prev_from, prev_base)
         if curr["cost"] <= 0:
             continue
-        ton = actual_production_kg(actual_records, display_factory, base.replace(month=1, day=1), base) / 1000
+        ton = actual_production_kg(actual_records, display_factory, matrix_from, base) / 1000
         price = cost_service.weighted_price(curr["pricedCost"], curr["pricedUsage"])
         previous_price = cost_service.weighted_price(prev["pricedCost"], prev["pricedUsage"])
         matrix.append({
@@ -2212,11 +2350,12 @@ def energy_cost(
             "coverage": _round_or_none(curr["coverage"], 3),
         })
 
-    # 일별 단가 추이 — 전력단가는 일별로 변동하고 연료단가는 월 단위 고정이라,
+    # 당월 일별 단가 추이 — 전력단가는 일별로 변동하고 연료단가는 월 단위 고정이라,
     # 월 평균만 보면 주말 저부하 하락과 피크 상승이 상쇄되어 사라진다.
+    # 연간 모드는 월별 비용·단가 차트가 같은 자리를 맡으므로 조회하지 않는다.
+    month_from = max(data_start, base.replace(day=1))
     daily_price: list[dict[str, Any]] = []
-    if not is_total:
-        window_from = max(data_start, base - timedelta(days=COST_DAILY_PRICE_DAYS - 1))
+    if not is_total and mode == "month":
         # 비용이 붙은 사용량만 짝지어 합산한다 — 비용 미적재 공장이 섞인 날의
         # 사용량을 분모에 넣으면 그 날 단가만 뚝 떨어져 파형이 거짓으로 흔들린다.
         daily_rows = fetch_all(
@@ -2228,7 +2367,7 @@ def energy_cost(
                                      THEN {spec['usage_col']} ELSE 0 END),0) usage_sum
             FROM energy_daily WHERE date BETWEEN %s AND %s
             """ + clause + " GROUP BY date ORDER BY date",
-            (window_from, base, *values),
+            (month_from, base, *values),
         )
         for row in daily_rows:
             row_date = normalize_date(row.get("date"))
@@ -2241,8 +2380,45 @@ def energy_cost(
                 "usage": round(usage_sum, 1),
             })
 
+    # 주간 실적 집계 (월간 모드) — 비용은 합산, 단가는 Σ비용÷Σ사용량 가중평균이다.
+    # 주 단위 평균단가를 일별 단가의 산술평균으로 내면 저부하일이 과대 반영된다.
+    weekly: list[dict[str, Any]] = []
+    if mode == "month":
+        buckets = week_buckets(month_from, base)
+        cells = [
+            {"cost": 0.0, "usage": 0.0, "pricedCost": 0.0, "pricedUsage": 0.0, "days": 0}
+            for _ in buckets
+        ]
+        weekly_rows = fetch_all(
+            f"SELECT date, {_COST_SUM_SQL} FROM energy_daily WHERE date BETWEEN %s AND %s"
+            + clause + " GROUP BY date ORDER BY date",
+            (month_from, base, *values),
+        )
+        for row in weekly_rows:
+            index = week_bucket_index(buckets, normalize_date(row.get("date")))
+            if index is None:
+                continue
+            totals = _cost_row_totals(row, metric)
+            cells[index]["days"] += 1
+            for key in ("cost", "usage", "pricedCost", "pricedUsage"):
+                cells[index][key] += totals[key] or 0.0
+        for bucket, cell in zip(buckets, cells):
+            if cell["days"] == 0 or cell["cost"] <= 0:
+                continue
+            weekly.append({
+                "week": bucket["label"], "span": bucket["span"],
+                "days": int(cell["days"]), "partial": bucket["partial"],
+                "cost": round(cell["cost"] / 1_000_000, 2),
+                "usage": round(cell["usage"], 1),
+                "price": _round_or_none(
+                    cost_service.weighted_price(cell["pricedCost"], cell["pricedUsage"]), 2),
+                "coverage": _round_or_none(
+                    cost_service.cost_coverage(cell["pricedUsage"], cell["usage"]), 3),
+            })
+
     return json_safe({
         "baseDate": base,
+        "mode": mode,
         "metric": metric,
         "label": spec["label"] if spec else "합계",
         "priceUnit": spec["price_unit"] if spec else None,
@@ -2257,7 +2433,12 @@ def energy_cost(
         "composition": composition,
         "matrix": matrix,
         "dailyPrice": daily_price,
-        "coverage": period_coverage(factory, base.replace(month=1, day=1), base),
+        "weekly": weekly,
+        "coverage": period_coverage(
+            factory,
+            base.replace(day=1) if mode == "month" else base.replace(month=1, day=1),
+            base,
+        ),
     })
 
 

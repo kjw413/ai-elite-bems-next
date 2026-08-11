@@ -297,11 +297,13 @@ function BridgeBars({ bridge, unit }: { bridge: AnyData; unit: string }) {
   </div>;
 }
 
-type EnergyMode = "recent" | "range";
+// 에너지·원단위 화면의 조회 모드 — 생산실적 화면(productionModes)과 같은 어휘·순서를 쓴다.
+type EnergyMode = "month" | "range" | "year";
 type EnergyView = "usage" | "cost";
 const energyModes: { id: EnergyMode; label: string }[] = [
-  { id: "recent", label: "당월" },
-  { id: "range", label: "기간 지정" },
+  { id: "month", label: "월간" },
+  { id: "range", label: "기간별" },
+  { id: "year", label: "연간" },
 ];
 const energyMetricLabels: Record<string, string> = { power: "전력", fuel: "연료", water: "용수", wastewater: "폐수" };
 // 에너지원 상징색 (2026-07-18 사용자 지정) — globals.css의 --chart-* 변수와 동기.
@@ -345,7 +347,7 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
   const [compareFactories, setCompareFactories] = useState(false);
   const values = data.daily?.map((r: AnyData) => Number(r[metric]) || 0) ?? []; const total = values.reduce((a: number,b: number)=>a+b,0);
   const periodLabel = data.dateFrom && data.dateTo ? `${data.dateFrom} ~ ${data.dateTo}` : "";
-  const summaryMeta = mode === "range" ? "선택 기간" : "당월";
+  const summaryMeta = mode === "range" ? "선택 기간" : mode === "year" ? "연 누계" : "당월";
   // 공장별 비교 (legacy compare_factories) — 전사 조회에서만 서버가 공장별 시리즈 제공
   const byFactoryRows = (data.dailyByFactory ?? []).map((row: AnyData) => ({
     date: row.date,
@@ -382,12 +384,48 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
   });
   const showDailyLegend = dailyRowDefs.length > 1;
   const yoyLegend = useSeriesToggle();
+  // 주간 실적 집계 (월간 모드) — 일별 차트는 요일 잡음이 커서 "이번 달 어느 주가 무거웠나"가
+  // 잘 안 보인다. 주 합계 막대 + 일평균 선을 겹쳐, 조업일수가 다른 주(마지막 부분 주 포함)도
+  // 같은 기준으로 비교되게 한다.
+  const weeklyRows: AnyData[] = data.weekly ?? [];
+  const weeklyLegend = useSeriesToggle();
+  const weeklyStackKeys = metric === "power" ? ["freezing", "compressor", "other"] : [metric];
+  const weeklyStackDefs: LegendItem[] = metric === "power"
+    ? [
+        { key: "freezing", label: "냉동", color: palette.actual },
+        { key: "compressor", label: "공압", color: palette.target },
+        { key: "other", label: "기타", color: palette.previous },
+      ]
+    : [{ key: metric, label: energyMetricLabels[metric], color: energyMetricColors[metric] }];
+  const weeklyLegendItems: LegendItem[] = [...weeklyStackDefs, { key: "avg", label: "일평균", color: energyMetricColors[metric] }];
+  const weeklyVisibleStack = weeklyStackKeys.filter(key => !weeklyLegend.isHidden(key));
+  const weeklyPartial = weeklyRows.some((row: AnyData) => row.partial);
+  const weeklySum = (key: string) => weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row[key]) || 0), 0);
+  const weeklyDays = weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row.days) || 0), 0);
+  // 연간 모드 KPI — 일별 행이 없으므로 월별 금년 실적에서 뽑는다.
+  const yearMonths = yoyTable.rows.filter((row: AnyData) => row.current != null);
+  const yearTotal = Number(yoyTable.total?.current ?? 0);
   // 현장 이벤트를 일별 차트에 점선 마커로 — 스파이크 옆에서 원인 메모를 바로 읽게 한다.
   const fieldEvents = useFieldEvents(factory, data.dateFrom ?? "", data.dateTo ?? "");
   const dailyEvents = groupEventsByLabel(fieldEvents, metric as EventTarget, dayLabelOf);
+  const equipmentCard = <article className="card list"><CardTitle title="설비 구성" meta={summaryMeta}/>{data.equipment?.map((r:AnyData)=><div className="progress" key={r.name}><div><span>{r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{width:`${r.value}%`}}/></i></div>)}</article>;
+  const factoryTableCard = <article className="card table-card"><CardTitle title="공장별 사용량" meta={`${summaryMeta} 누계`}><CsvButton filename="energy_factories" rows={data.factories} columns={["factory","power","fuel","water","wastewater"]} labels={{factory:"공장",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><DataTable rows={data.factories} columns={["factory",metric]} labels={{factory:"공장",[metric]:units[metric]}}/></article>;
+  const wasteRatioCard = <article className="card chart-card"><CardTitle title="공장별 폐수/용수 비율" meta={`${summaryMeta} · 낮을수록 양호`}><CsvButton filename={`wastewater_ratio_${data.dateFrom ?? ""}`} rows={wasteRatioRows} columns={["factory","water","wastewater","ratio"]} labels={{factory:"공장",water:"용수(천 ton)",wastewater:"폐수(천 ton)",ratio:"폐수/용수"}}/></CardTitle><Chart className="aux-chart"><BarChart data={wasteRatioRows}><CartesianGrid vertical={false}/><XAxis dataKey="factory"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="ratio" name="폐수/용수 비율" fill={energyMetricColors.wastewater} radius={[4,4,0,0]} maxBarSize={22}/></BarChart></Chart></article>;
+  const yoyCard = <article className="card chart-card span-all"><CardTitle title={`전년대비 ${energyMetricLabels[metric]} 사용량`} meta={`${data.yoyYear ?? ""}년 vs 전년 · ${yoyUnit}`}><CsvButton filename={`energy_yoy_${metric}_${data.yoyYear ?? ""}`} rows={yoyCsvRows} columns={["month","previous","current","diff","diffPct"]} labels={{month:"월",previous:`전년(${yoyUnit})`,current:`금년(${yoyUnit})`,diff:`증감량(${yoyUnit})`,diffPct:"증감률(%)"}}/></CardTitle>
+    <Chart><LineChart data={yoyTable.rows}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!yoyLegend.isHidden("previous") && <Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/>}{!yoyLegend.isHidden("current") && <Line type="linear" dataKey="current" name="금년" stroke={energyMetricColors[metric]} strokeWidth={2} dot={seriesDot(energyMetricColors[metric])} activeDot={{ r: 5 }} connectNulls/>}</LineChart></Chart>
+    <ToggleLegend items={[{key:"previous",label:"전년",color:palette.previous},{key:"current",label:"금년",color:energyMetricColors[metric]}]} hidden={yoyLegend.hidden} onToggle={yoyLegend.toggle}/>
+    <DataToggle><PivotTable periods={yoyTable.rows.map(row => row.month)} periodLabel="월" totalLabel={yoyTable.total?.month ?? "누계"} rows={[
+      { key: "previous", label: `전년 실적(${yoyUnit})`, values: yoyTable.rows.map(row => row.previous), total: yoyTable.total?.previous ?? null },
+      { key: "current", label: `금년 실적(${yoyUnit})`, values: yoyTable.rows.map(row => row.current), total: yoyTable.total?.current ?? null },
+      { key: "diff", label: `증감량(${yoyUnit})`, values: yoyTable.rows.map(row => row.diff), total: yoyTable.total?.diff ?? null },
+      { key: "diffPct", label: "증감률(%)", values: yoyTable.rows.map(row => row.diffPct), total: yoyTable.total?.diffPct ?? null,
+        format: value => value == null ? "-" : `${Number(value) > 0 ? "+" : ""}${fmt(Number(value))}`,
+        className: value => value == null ? undefined : Number(value) > 0 ? "bad" : "good" },
+    ]}/></DataToggle></article>;
   return <><div className="segmented energy-view-switch" role="group" aria-label="에너지 분석 구분"><button type="button" className={view==="usage"?"active":""} aria-pressed={view==="usage"} onClick={()=>onViewChange("usage")}>사용량</button><button type="button" className={view==="cost"?"active":""} aria-pressed={view==="cost"} onClick={()=>onViewChange("cost")}>비용·단가</button></div>
-    {view==="cost"?<EnergyCost factory={factory} requestedDate={requestedDate}/>:<><div className="segmented" role="group" aria-label="에너지 지표 선택">{Object.entries(energyMetricLabels).map(([id,label])=><button type="button" className={metric===id?"active":""} aria-pressed={metric===id} onClick={()=>setMetric(id)} key={id}>{label}</button>)}</div>
+    {view==="cost"?<EnergyCost factory={factory} requestedDate={requestedDate}/>:<>
     <div className="mode-row">
+      <div className="segmented" role="group" aria-label="에너지 지표 선택">{Object.entries(energyMetricLabels).map(([id,label])=><button type="button" className={metric===id?"active":""} aria-pressed={metric===id} onClick={()=>setMetric(id)} key={id}>{label}</button>)}</div>
       <div className="segmented" role="group" aria-label="사용량 조회 방식">{energyModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
       {mode === "range" && <div className="range-fields">
         <label><span>시작일</span><input type="date" value={rangeFrom} max={rangeTo} onChange={event => onRangeChange(event.target.value, rangeTo)}/></label>
@@ -397,9 +435,12 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
       {periodLabel && <span className="period-chip">{periodLabel}</span>}
       <CoverageChip coverage={data.coverage}/>
     </div>
-    <section className="kpi-grid compact"><Kpi label="기간 누계" value={total} unit={units[metric]} icon={Bolt}/><Kpi label="일평균" value={values.length?total/values.length:0} unit={units[metric]} icon={Activity}/><Kpi label="최대 사용량" value={values.length?Math.max(...values):0} unit={units[metric]} icon={Gauge}/></section>
+    {mode === "year"
+      ? <section className="kpi-grid compact"><Kpi label="연 누계" value={yearTotal} unit={units[metric]} change={yoyTable.total?.diffPct ?? null} icon={Bolt}/><Kpi label="월평균" value={yearMonths.length?yearTotal/yearMonths.length:0} unit={units[metric]} icon={Activity}/><Kpi label="최대 월 사용량" value={yearMonths.length?Math.max(...yearMonths.map((row: AnyData)=>Number(row.current)||0)):0} unit={units[metric]} icon={Gauge}/></section>
+      : <section className="kpi-grid compact"><Kpi label="기간 누계" value={total} unit={units[metric]} icon={Bolt}/><Kpi label="일평균" value={values.length?total/values.length:0} unit={units[metric]} icon={Activity}/><Kpi label="최대 사용량" value={values.length?Math.max(...values):0} unit={units[metric]} icon={Gauge}/></section>}
     <section className="content-grid">
-      <article className="card chart-card wide"><CardTitle title={comparing ? "일별 사용 추이 · 공장별 비교" : metric === "power" ? "일별 사용 추이 · 설비 분해" : "일별 사용 추이"} meta={units[metric]}>{comparing
+      {mode === "year" ? yoyCard : <>
+      <article className="card chart-card span-all"><CardTitle title={comparing ? "일별 사용 추이 · 공장별 비교" : metric === "power" ? "일별 사용 추이 · 설비 분해" : "일별 사용 추이"} meta={units[metric]}>{comparing
         ? <CsvButton filename={`energy_daily_factories_${metric}`} rows={byFactoryRows} columns={["date", ...compareNames]} labels={{date:"일자",...Object.fromEntries(compareNames.map(name=>[name,`${name}(${units[metric]})`]))}}/>
         : <CsvButton filename={`energy_daily_${metric}`} rows={data.daily} columns={["date","power","freezing","compressor","other","fuel","water","wastewater"]} labels={{date:"일자",power:"전력(MWh)",freezing:"냉동(MWh)",compressor:"공압(MWh)",other:"기타(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/>}</CardTitle>
         <Chart>{comparing
@@ -409,23 +450,27 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
         : <AreaChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Area type="linear" dataKey={metric} stroke={energyMetricColors[metric]} strokeWidth={2} fill={energyMetricColors[metric]} fillOpacity={0.1}/>{eventMarkers(dailyEvents)}</AreaChart>}</Chart>
         {showDailyLegend && <ToggleLegend items={dailyRowDefs} hidden={dailyLegend.hidden} onToggle={dailyLegend.toggle}/>}
         <EventMarkerHint count={dailyEvents.size}/>
-        <DataToggle><PivotTable periods={dailyPeriods} rows={dailyPivotRows} totalLabel="누계"/></DataToggle></article>
-      <article className="card list"><CardTitle title="설비 구성" meta={summaryMeta}/>{data.equipment?.map((r:AnyData)=><div className="progress" key={r.name}><div><span>{r.name}</span><b>{fmt(r.value)}%</b></div><i><em style={{width:`${r.value}%`}}/></i></div>)}</article>
-      <article className="card chart-card wide"><CardTitle title={`전년대비 ${energyMetricLabels[metric]} 사용량`} meta={`${data.yoyYear ?? ""}년 vs 전년 · ${yoyUnit}`}><CsvButton filename={`energy_yoy_${metric}_${data.yoyYear ?? ""}`} rows={yoyCsvRows} columns={["month","previous","current","diff","diffPct"]} labels={{month:"월",previous:`전년(${yoyUnit})`,current:`금년(${yoyUnit})`,diff:`증감량(${yoyUnit})`,diffPct:"증감률(%)"}}/></CardTitle>
-        <Chart><LineChart data={yoyTable.rows}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!yoyLegend.isHidden("previous") && <Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/>}{!yoyLegend.isHidden("current") && <Line type="linear" dataKey="current" name="금년" stroke={energyMetricColors[metric]} strokeWidth={2} dot={seriesDot(energyMetricColors[metric])} activeDot={{ r: 5 }} connectNulls/>}</LineChart></Chart>
-        <ToggleLegend items={[{key:"previous",label:"전년",color:palette.previous},{key:"current",label:"금년",color:energyMetricColors[metric]}]} hidden={yoyLegend.hidden} onToggle={yoyLegend.toggle}/>
-        <DataToggle><PivotTable periods={yoyTable.rows.map(row => row.month)} totalLabel={yoyTable.total?.month ?? "누계"} rows={[
-          { key: "previous", label: `전년 실적(${yoyUnit})`, values: yoyTable.rows.map(row => row.previous), total: yoyTable.total?.previous ?? null },
-          { key: "current", label: `금년 실적(${yoyUnit})`, values: yoyTable.rows.map(row => row.current), total: yoyTable.total?.current ?? null },
-          { key: "diff", label: `증감량(${yoyUnit})`, values: yoyTable.rows.map(row => row.diff), total: yoyTable.total?.diff ?? null },
-          { key: "diffPct", label: "증감률(%)", values: yoyTable.rows.map(row => row.diffPct), total: yoyTable.total?.diffPct ?? null,
-            format: value => value == null ? "-" : `${Number(value) > 0 ? "+" : ""}${fmt(Number(value))}`,
-            className: value => value == null ? undefined : Number(value) > 0 ? "bad" : "good" },
-        ]}/></DataToggle></article>
-      {isWater
-        ? <article className="card chart-card"><CardTitle title="공장별 폐수/용수 비율" meta={`${summaryMeta} · 낮을수록 양호`}><CsvButton filename={`wastewater_ratio_${data.dateFrom ?? ""}`} rows={wasteRatioRows} columns={["factory","water","wastewater","ratio"]} labels={{factory:"공장",water:"용수(천 ton)",wastewater:"폐수(천 ton)",ratio:"폐수/용수"}}/></CardTitle><Chart><BarChart data={wasteRatioRows}><CartesianGrid vertical={false}/><XAxis dataKey="factory"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Bar dataKey="ratio" name="폐수/용수 비율" fill={energyMetricColors.wastewater} radius={[4,4,0,0]} maxBarSize={22}/></BarChart></Chart></article>
-        : <article className="card table-card"><CardTitle title="공장별 사용량" meta={`${summaryMeta} 누계`}><CsvButton filename="energy_factories" rows={data.factories} columns={["factory","power","fuel","water","wastewater"]} labels={{factory:"공장",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><DataTable rows={data.factories} columns={["factory",metric]} labels={{factory:"공장",[metric]:units[metric]}}/></article>}
-      {isWater && <article className="card table-card span-all"><CardTitle title="공장별 사용량" meta={`${summaryMeta} 누계`}><CsvButton filename="energy_factories" rows={data.factories} columns={["factory","power","fuel","water","wastewater"]} labels={{factory:"공장",power:"전력(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/></CardTitle><DataTable rows={data.factories} columns={["factory",metric]} labels={{factory:"공장",[metric]:units[metric]}}/></article>}
+        <DataToggle><PivotTable periods={dailyPeriods} rows={dailyPivotRows} totalLabel="누계"/></DataToggle></article></>}
+      {/* 필요 폭이 좁은 카드(주간 집계·설비 구성·공장 표)는 한 띠에 나란히 둔다 — 각각 전폭을 쓰면
+          오른쪽이 통째로 빈다. auto-fit이라 카드 수(2~4장)에 따라 열이 자동으로 맞춰진다. */}
+      <div className="aux-grid span-all">
+        {mode === "month" && weeklyRows.length > 0 && <article className="card chart-card"><CardTitle title="주간 사용량 집계" meta={`${units[metric]} · 주 합계 · 일평균`}><CsvButton filename={`energy_weekly_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={weeklyRows} columns={["week","span","days",metric,`${metric}Avg`]} labels={{week:"주차",span:"기간",days:"집계일수",[metric]:`주 합계(${units[metric]})`,[`${metric}Avg`]:`일평균(${units[metric]})`}}/></CardTitle>
+          <Chart className="aux-chart"><ComposedChart data={weeklyRows}><CartesianGrid vertical={false}/><XAxis dataKey="week" tick={{ fontSize: 10 }}/><YAxis yAxisId="sum"/><YAxis yAxisId="avg" orientation="right"/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>
+            {weeklyVisibleStack.map((key, index) => <Bar key={key} yAxisId="sum" dataKey={key} name={`${weeklyStackDefs.find(def => def.key === key)?.label ?? key} 주 합계`} stackId="w" fill={weeklyStackDefs.find(def => def.key === key)?.color} stroke="var(--card)" strokeWidth={1} maxBarSize={34} radius={index === weeklyVisibleStack.length - 1 ? [4,4,0,0] : undefined}/>)}
+            {!weeklyLegend.isHidden("avg") && <Line yAxisId="avg" type="linear" dataKey={`${metric}Avg`} name={`일평균(${units[metric]})`} stroke={energyMetricColors[metric]} strokeWidth={2} dot={seriesDot(energyMetricColors[metric])} connectNulls/>}
+          </ComposedChart></Chart>
+          <ToggleLegend items={weeklyLegendItems} hidden={weeklyLegend.hidden} onToggle={weeklyLegend.toggle}/>
+          {weeklyPartial && <p className="quad-caption">마지막 주는 7일을 채우지 못한 부분 주입니다 — 합계 막대가 아니라 일평균 선으로 비교하세요.</p>}
+          <DataToggle><PivotTable periods={weeklyRows.map((row: AnyData) => row.week)} periodLabel="주차" totalLabel="누계" rows={[
+            ...(metric === "power" ? [{ key: "power", label: `전체 전력(${units.power})`, values: weeklyRows.map((row: AnyData) => row.power), total: weeklySum("power") }] : []),
+            ...weeklyStackDefs.map(def => ({ key: def.key, label: `${metric === "power" ? "└ " : ""}${def.label}(${units[metric]})`, values: weeklyRows.map((row: AnyData) => row[def.key]), total: weeklySum(def.key) })),
+            { key: "avg", label: `일평균(${units[metric]})`, values: weeklyRows.map((row: AnyData) => row[`${metric}Avg`]), total: weeklyDays > 0 ? Math.round(weeklySum(metric) / weeklyDays * 100) / 100 : null },
+            { key: "days", label: "집계일수", values: weeklyRows.map((row: AnyData) => row.days), total: weeklyDays },
+          ]}/></DataToggle></article>}
+        {equipmentCard}
+        {factoryTableCard}
+        {isWater && wasteRatioCard}
+      </div>
     </section></>}</>;
 }
 
@@ -484,11 +529,40 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
     useFieldEvents(factory, data.dateFrom ?? "", data.dateTo ?? ""), metric as EventTarget, dayLabelOf,
   );
   // P1-2 원인분해 — 원단위는 사용량÷생산량이라 값만으로는 악화 원인을 알 수 없다.
-  const [bridgeScope, setBridgeScope] = useState<"ytd" | "mtd">("ytd");
-  const bridge: AnyData | null = data.bridge?.[bridgeScope] ?? null;
-  return <><div className="segmented" role="group" aria-label="원단위 지표 선택">{intensityMetrics.map(item=><button type="button" key={item.id} className={metric===item.id?"active":""} aria-pressed={metric===item.id} onClick={()=>onMetricChange(item.id)}>{item.label}</button>)}</div>
+  // 기간은 조회 모드를 따른다(월간=당월 MTD, 연간=연 누계 YTD) — 같은 화면의
+  // 다른 카드와 기간이 어긋나면 원인분해 결과를 옆 차트와 맞춰 읽을 수 없다.
+  const bridgeScope: "ytd" | "mtd" = mode === "year" ? "ytd" : "mtd";
+  const bridge: AnyData | null = mode === "range" ? null : data.bridge?.[bridgeScope] ?? null;
+  // 주간 실적 집계 (월간 모드) — 원단위는 비율이라 주 평균이 산술평균이면 안 된다.
+  // 서버가 일별 원단위를 그 날 믹스생산량으로 가중 평균해 내려준다.
+  const weeklyRows: AnyData[] = data.weekly ?? [];
+  const weeklyLegend = useSeriesToggle();
+  const weeklyTonTotal = weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row.productionTon) || 0), 0);
+  const weeklyWeighted = weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row.value) || 0) * (Number(row.productionTon) || 0), 0);
+  const weeklyPartial = weeklyRows.some((row: AnyData) => row.partial);
+  const monthAverage = data.summary?.mtd?.current;
+  const summaryMeta = mode === "range" ? "선택 기간" : mode === "year" ? "연 누계" : "당월";
+  const scopeKpi = mode === "year" ? data.summary?.ytd : data.summary?.mtd;
+  const scopeTon = mode === "range" ? Math.round(dailyTonTotal * 10) / 10 : data.bridge?.[bridgeScope]?.tonCurr;
+  const scopeTonChange = mode === "range" ? null : data.bridge?.[bridgeScope]?.tonChange ?? null;
+  const matrixCard = <article className="card table-card"><CardTitle title="공장 효율 매트릭스" meta={`${summaryMeta} 기준`}><CsvButton filename={`intensity_matrix_${metric}`} rows={data.matrix} columns={["factory","current","previous","change"]} labels={{factory:"공장",current:`금년(${data.unit})`,previous:`전년(${data.unit})`,change:"증감률(%)"}}/></CardTitle><DataTable rows={data.matrix} columns={["factory","current","previous","change"]} labels={{factory:"공장",current:"금년",previous:"전년",change:"증감률(%)"}}/><p className="quad-caption">{WIP_FOOTNOTE}</p></article>;
+  const bridgeCard = bridge && <article className="card chart-card">
+    <CardTitle title="원단위 변동 원인" meta={`${bridgeScope === "ytd" ? "연 누계" : "당월"} · 전년 동기 대비 · ${data.unit}`}/>
+    <p className="quad-caption">원단위는 사용량 ÷ 생산량이라 값만 봐서는 어느 쪽 때문에 변했는지 알 수 없습니다. 두 효과의 합은 전체 변동과 정확히 일치합니다.</p>
+    <BridgeBars bridge={bridge} unit={data.unit}/>
+    <div className="table-wrap"><table>
+      <thead><tr><th>구분</th><th>전년 동기</th><th>금년</th><th>증감</th></tr></thead>
+      <tbody>
+        <tr><td>사용량</td><td>{fmt(bridge.usagePrev)}</td><td>{fmt(bridge.usageCurr)}</td><td className={Number(bridge.usageChange) > 0 ? "bad" : "good"}>{bridge.usageChange == null ? "-" : `${Number(bridge.usageChange) > 0 ? "+" : ""}${fmt(bridge.usageChange)}%`}</td></tr>
+        <tr><td>생산량(ton)</td><td>{fmt(bridge.tonPrev)}</td><td>{fmt(bridge.tonCurr)}</td><td className={Number(bridge.tonChange) >= 0 ? "good" : "bad"}>{bridge.tonChange == null ? "-" : `${Number(bridge.tonChange) > 0 ? "+" : ""}${fmt(bridge.tonChange)}%`}</td></tr>
+        <tr className="total-row"><td>원단위({data.unit})</td><td>{fmt(bridge.previous, 2)}</td><td>{fmt(bridge.current, 2)}</td><td className={bridge.current > bridge.previous ? "bad" : "good"}>{`${bridge.current > bridge.previous ? "+" : ""}${fmt(bridge.current - bridge.previous, 2)}`}</td></tr>
+      </tbody>
+    </table></div>
+  </article>;
+  return <>
     <div className="mode-row">
-      <div className="segmented" role="group" aria-label="원단위 일별 조회 방식">{energyModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
+      <div className="segmented" role="group" aria-label="원단위 지표 선택">{intensityMetrics.map(item=><button type="button" key={item.id} className={metric===item.id?"active":""} aria-pressed={metric===item.id} onClick={()=>onMetricChange(item.id)}>{item.label}</button>)}</div>
+      <div className="segmented" role="group" aria-label="원단위 조회 방식">{energyModes.map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div>
       {mode === "range" && <div className="range-fields">
         <label><span>시작일</span><input type="date" value={rangeFrom} max={rangeTo} onChange={event => onRangeChange(event.target.value, rangeTo)}/></label>
         <label><span>종료일</span><input type="date" value={rangeTo} min={rangeFrom} onChange={event => onRangeChange(rangeFrom, event.target.value)}/></label>
@@ -496,9 +570,9 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
       {periodLabel && <span className="period-chip">{periodLabel}</span>}
       <CoverageChip coverage={data.coverage}/>
     </div>
-    <section className="kpi-grid compact"><Kpi label="MTD 원단위" value={data.summary?.mtd?.current} unit={data.unit} change={data.summary?.mtd?.change} icon={Gauge}/><Kpi label="YTD 원단위" value={data.summary?.ytd?.current} unit={data.unit} change={data.summary?.ytd?.change} icon={CalendarDays}/><Kpi label="절감 목표" value={data.targetPct} unit="%" icon={ShieldCheck}/></section>
+    <section className="kpi-grid compact"><Kpi label={`${summaryMeta} 원단위`} value={mode === "range" ? dailyWeightedTotal : scopeKpi?.current} unit={data.unit} change={mode === "range" ? null : scopeKpi?.change} icon={mode === "year" ? CalendarDays : Gauge}/><Kpi label={`${summaryMeta} 생산량`} value={scopeTon} unit="ton" change={scopeTonChange} goodWhen="up" icon={Factory}/><Kpi label="절감 목표" value={data.targetPct} unit="%" icon={ShieldCheck}/></section>
     <section className="content-grid">
-      <article className="card chart-card span-all"><CardTitle title="일별 원단위 추이" meta={`${data.unit} · ${operatingOnly ? "가동일" : "실적 있는 날 전체"}`}>
+      {mode !== "year" && <article className="card chart-card span-all"><CardTitle title="일별 원단위 추이" meta={`${data.unit} · ${operatingOnly ? "가동일" : "실적 있는 날 전체"}`}>
           <label className="check-toggle"><input type="checkbox" checked={operatingOnly} onChange={event => setOperatingOnly(event.target.checked)}/>가동일만 보기</label>
           <CsvButton filename={`intensity_daily_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={measuredDays} columns={["date","value","productionTon"]} labels={{date:"일자",value:`원단위(${data.unit})`,productionTon:"생산량(ton)"}}/></CardTitle>
         <Chart><LineChart data={dailySeries}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Line type="linear" dataKey="value" name={`원단위(${data.unit})`} stroke={metricColor} strokeWidth={2} connectNulls={false} dot={seriesDot(metricColor)} activeDot={{ r: 5 }}/>{eventMarkers(intensityEvents)}</LineChart></Chart>
@@ -511,34 +585,35 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
             className: (_value, index) => index >= 0 && !isOperating(measuredDays[index]) ? "off-day" : undefined },
           { key: "productionTon", label: "생산량(ton)", values: measuredDays.map((row: AnyData) => row.productionTon), total: Math.round(dailyTonTotal * 10) / 10,
             className: (_value, index) => index >= 0 && !isOperating(measuredDays[index]) ? "off-day" : undefined },
-        ]}/></DataToggle></article>
-      <article className="card chart-card wide"><CardTitle title={`${data.year}년 원단위 추이${showCumulative ? " · 누계" : ""}`} meta={data.unit}><label className="check-toggle"><input type="checkbox" checked={showCumulative} onChange={event => setShowCumulative(event.target.checked)}/>누계 추이 보기</label><CsvButton filename={`intensity_monthly_${metric}_${data.year}`} rows={monthlySeries} columns={["month","previous","target","current"]} labels={{month:"월",previous:`전년(${data.unit})`,target:`목표(${data.unit})`,current:`금년(${data.unit})`}}/></CardTitle>
+        ]}/></DataToggle></article>}
+      {mode === "year" && <article className="card chart-card span-all"><CardTitle title={`${data.year}년 원단위 추이${showCumulative ? " · 누계" : ""}`} meta={data.unit}><label className="check-toggle"><input type="checkbox" checked={showCumulative} onChange={event => setShowCumulative(event.target.checked)}/>누계 추이 보기</label><CsvButton filename={`intensity_monthly_${metric}_${data.year}`} rows={monthlySeries} columns={["month","previous","target","current"]} labels={{month:"월",previous:`전년(${data.unit})`,target:`목표(${data.unit})`,current:`금년(${data.unit})`}}/></CardTitle>
         <Chart><LineChart data={monthlySeries}><CartesianGrid vertical={false}/><XAxis dataKey="month"/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!monthlyLegend.isHidden("previous") && <Line type="linear" dataKey="previous" name="전년" stroke={palette.previous} strokeWidth={2} dot={seriesDot(palette.previous)} connectNulls/>}{!monthlyLegend.isHidden("target") && <Line type="linear" dataKey="target" name="목표" stroke={palette.target} strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls/>}{!monthlyLegend.isHidden("current") && <Line type="linear" dataKey="current" name="금년" stroke={metricColor} strokeWidth={2} dot={seriesDot(metricColor)} activeDot={{ r: 5 }} connectNulls/>}</LineChart></Chart>
         <ToggleLegend items={[{key:"previous",label:"전년",color:palette.previous},{key:"target",label:"목표",color:palette.target},{key:"current",label:"금년",color:metricColor}]} hidden={monthlyLegend.hidden} onToggle={monthlyLegend.toggle}/>
-        <DataToggle><PivotTable periods={yoyRows.map((row: AnyData) => row.month)} totalLabel={showMonthlyTotal ? `누계(1~${cumulative.lastMonth}월)·가중` : "-"} rows={[
+        <DataToggle><PivotTable periods={yoyRows.map((row: AnyData) => row.month)} periodLabel="월" totalLabel={showMonthlyTotal ? `누계(1~${cumulative.lastMonth}월)·가중` : "-"} rows={[
           { key: "previous", label: "전년", values: yoyRows.map((row: AnyData) => row.previous), total: showMonthlyTotal ? cumulative.previous : null, format: value => value == null ? "-" : fmt(Number(value), 2) },
           { key: "current", label: "금년", values: yoyRows.map((row: AnyData) => row.current), total: showMonthlyTotal ? cumulative.current : null, format: value => value == null ? "-" : fmt(Number(value), 2) },
           { key: "change", label: "증감률(%)", values: yoyRows.map((row: AnyData) => row.change), total: showMonthlyTotal ? cumulative.change : null,
             format: value => value == null ? "-" : `${Number(value) > 0 ? "+" : ""}${fmt(Number(value))}`,
             className: value => value == null ? undefined : Number(value) > 0 ? "bad" : "good" },
-        ]}/><p className="quad-caption">누계 추이 보기는 RawDB 수식 원단위를 엑셀 믹스생산량으로 가중 평균합니다.</p></DataToggle></article>
-      {bridge && <article className="card chart-card span-all">
-        <CardTitle title="원단위 변동 원인" meta={`${bridgeScope === "ytd" ? "연 누계" : "당월"} · 전년 동기 대비 · ${data.unit}`}/>
-        <div className="segmented" role="group" aria-label="원인분해 기간">
-          {([["ytd", "연 누계"], ["mtd", "당월"]] as const).map(([id, label]) => <button type="button" key={id} className={bridgeScope === id ? "active" : ""} aria-pressed={bridgeScope === id} onClick={() => setBridgeScope(id)}>{label}</button>)}
-        </div>
-        <p className="quad-caption">원단위는 사용량 ÷ 생산량이라 값만 봐서는 어느 쪽 때문에 변했는지 알 수 없습니다. 두 효과의 합은 전체 변동과 정확히 일치합니다.</p>
-        <BridgeBars bridge={bridge} unit={data.unit}/>
-        <div className="table-wrap"><table>
-          <thead><tr><th>구분</th><th>전년 동기</th><th>금년</th><th>증감</th></tr></thead>
-          <tbody>
-            <tr><td>사용량</td><td>{fmt(bridge.usagePrev)}</td><td>{fmt(bridge.usageCurr)}</td><td className={Number(bridge.usageChange) > 0 ? "bad" : "good"}>{bridge.usageChange == null ? "-" : `${Number(bridge.usageChange) > 0 ? "+" : ""}${fmt(bridge.usageChange)}%`}</td></tr>
-            <tr><td>생산량(ton)</td><td>{fmt(bridge.tonPrev)}</td><td>{fmt(bridge.tonCurr)}</td><td className={Number(bridge.tonChange) >= 0 ? "good" : "bad"}>{bridge.tonChange == null ? "-" : `${Number(bridge.tonChange) > 0 ? "+" : ""}${fmt(bridge.tonChange)}%`}</td></tr>
-            <tr className="total-row"><td>원단위({data.unit})</td><td>{fmt(bridge.previous, 2)}</td><td>{fmt(bridge.current, 2)}</td><td className={bridge.current > bridge.previous ? "bad" : "good"}>{`${bridge.current > bridge.previous ? "+" : ""}${fmt(bridge.current - bridge.previous, 2)}`}</td></tr>
-          </tbody>
-        </table></div>
-      </article>}
-      <article className="card table-card span-all"><CardTitle title="공장 효율 매트릭스" meta="MTD 기준"><CsvButton filename={`intensity_matrix_${metric}`} rows={data.matrix} columns={["factory","current","previous","change"]} labels={{factory:"공장",current:`금년(${data.unit})`,previous:`전년(${data.unit})`,change:"증감률(%)"}}/></CardTitle><DataTable rows={data.matrix} columns={["factory","current","previous","change"]} labels={{factory:"공장",current:"금년",previous:"전년",change:"증감률(%)"}}/><p className="quad-caption">{WIP_FOOTNOTE}</p></article>
+        ]}/><p className="quad-caption">누계 추이 보기는 RawDB 수식 원단위를 엑셀 믹스생산량으로 가중 평균합니다.</p></DataToggle></article>}
+      {/* 폭이 적게 필요한 카드는 한 줄에 둘씩 — 주간 집계·원인분해·매트릭스는 전폭을 쓰면 여백만 늘어난다. */}
+      <div className="aux-grid span-all">
+        {mode === "month" && weeklyRows.length > 0 && <article className="card chart-card"><CardTitle title="주간 원단위 집계" meta={`${data.unit} · 생산량 가중`}><CsvButton filename={`intensity_weekly_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={weeklyRows} columns={["week","span","days","value","productionTon","usage"]} labels={{week:"주차",span:"기간",days:"가동일수",value:`원단위(${data.unit})`,productionTon:"생산량(ton)",usage:"사용량"}}/></CardTitle>
+          <Chart className="aux-chart"><ComposedChart data={weeklyRows}><CartesianGrid vertical={false}/><XAxis dataKey="week" tick={{ fontSize: 10 }}/><YAxis yAxisId="ton"/><YAxis yAxisId="unit" orientation="right" domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>
+            {!weeklyLegend.isHidden("productionTon") && <Bar yAxisId="ton" dataKey="productionTon" name="생산량(ton)" fill={palette.previous} radius={[4,4,0,0]} maxBarSize={34}/>}
+            {!weeklyLegend.isHidden("value") && <Line yAxisId="unit" type="linear" dataKey="value" name={`원단위(${data.unit})`} stroke={metricColor} strokeWidth={2} dot={seriesDot(metricColor)} activeDot={{ r: 5 }} connectNulls/>}
+            {monthAverage != null && <ReferenceLine yAxisId="unit" y={Number(monthAverage)} stroke="var(--muted)" strokeDasharray="4 4"/>}
+          </ComposedChart></Chart>
+          <ToggleLegend items={[{key:"productionTon",label:"생산량",color:palette.previous},{key:"value",label:`원단위(${data.unit})`,color:metricColor}]} hidden={weeklyLegend.hidden} onToggle={weeklyLegend.toggle}/>
+          <p className="quad-caption">점선은 당월 평균 원단위입니다{weeklyPartial ? " — 마지막 주는 7일을 채우지 못한 부분 주입니다" : ""}. 주 원단위는 산술평균이 아니라 그 주 생산량으로 가중한 값이라, 주별 값을 다시 가중 평균하면 당월 누계와 일치합니다.</p>
+          <DataToggle><PivotTable periods={weeklyRows.map((row: AnyData) => row.week)} periodLabel="주차" totalLabel={`가중 누계(${data.unit})`} rows={[
+            { key: "value", label: `원단위(${data.unit})`, values: weeklyRows.map((row: AnyData) => row.value), total: weeklyTonTotal > 0 ? Math.round(weeklyWeighted / weeklyTonTotal * 100) / 100 : null, format: value => value == null ? "-" : fmt(Number(value), 2) },
+            { key: "productionTon", label: "생산량(ton)", values: weeklyRows.map((row: AnyData) => row.productionTon), total: Math.round(weeklyTonTotal * 10) / 10 },
+            { key: "days", label: "가동일수", values: weeklyRows.map((row: AnyData) => row.days), total: weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row.days) || 0), 0) },
+          ]}/></DataToggle></article>}
+        {bridgeCard}
+        {matrixCard}
+      </div>
     </section></>;
 }
 
@@ -820,7 +895,7 @@ function Prediction({ data, factory, date, isAdmin }: { data: AnyData; factory: 
 }
 
 function CardTitle({ title, meta, children }: { title: string; meta: string; children?: React.ReactNode }) { return <header className="card-title"><h3>{title}</h3><div className="card-title-side">{children}<span>{meta}</span></div></header> }
-function Chart({ children }: { children: React.ReactElement }) { return <div className="chart"><ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer></div> }
+function Chart({ children, className }: { children: React.ReactElement; className?: string }) { return <div className={className ? `chart ${className}` : "chart"}><ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer></div> }
 function DataTable({ rows=[], columns, labels }: { rows?: AnyData[]; columns:string[]; labels:AnyData }) { return <div className="table-wrap"><table><thead><tr>{columns.map(c=><th key={c}>{labels[c]??c}</th>)}</tr></thead><tbody>{rows.map((r,i)=><tr key={i}>{columns.map(c=><td key={c}>{typeof r[c]==="number"?fmt(r[c]):r[c]??"-"}</td>)}</tr>)}</tbody></table></div> }
 
 export function BemsApp() {
@@ -847,13 +922,13 @@ export function BemsApp() {
     return {from:`${from.getFullYear()}-${String(from.getMonth()+1).padStart(2,"0")}-${String(from.getDate()).padStart(2,"0")}`,to:today};
   });
   const [energyView,setEnergyView]=useState<EnergyView>("usage");
-  const [energyMode,setEnergyMode]=useState<EnergyMode>("recent");
+  const [energyMode,setEnergyMode]=useState<EnergyMode>("month");
   const [energyRange,setEnergyRange]=useState<{from:string;to:string}>(()=>{
     const today=localYesterday();
     const from=new Date(Date.parse(`${today}T00:00:00`)-30*86_400_000);
     return {from:`${from.getFullYear()}-${String(from.getMonth()+1).padStart(2,"0")}-${String(from.getDate()).padStart(2,"0")}`,to:today};
   });
-  const [intensityMode,setIntensityMode]=useState<EnergyMode>("recent");
+  const [intensityMode,setIntensityMode]=useState<EnergyMode>("month");
   const [intensityRange,setIntensityRange]=useState<{from:string;to:string}>(()=>{
     const today=localYesterday();
     const from=new Date(Date.parse(`${today}T00:00:00`)-30*86_400_000);
@@ -881,9 +956,9 @@ export function BemsApp() {
     setLoading(true);
     const suffix=query({
       factory,date,
-      ...(screen==="intensity"?{metric:intensityMetric,...(intensityMode==="range"?{date_from:intensityRange.from,date_to:intensityRange.to}:{})}:{}),
+      ...(screen==="intensity"?{metric:intensityMetric,mode:intensityMode,...(intensityMode==="range"?{date_from:intensityRange.from,date_to:intensityRange.to}:{})}:{}),
       ...(screen==="production"?{mode:productionMode,...(productionMode==="range"?{date_from:productionRange.from,date_to:productionRange.to}:{})}:{}),
-      ...(screen==="energy"&&energyMode==="range"?{date_from:energyRange.from,date_to:energyRange.to}:{}),
+      ...(screen==="energy"?{mode:energyMode,...(energyMode==="range"?{date_from:energyRange.from,date_to:energyRange.to}:{})}:{}),
     });
     apiGet(`${endpoint[screen]}?${suffix}`,fallback,controller.signal).then(r=>{setData(r.data);setLive(r.live);setLoading(false)}).catch(()=>{});
     return()=>controller.abort();
@@ -895,7 +970,15 @@ export function BemsApp() {
     (screen==="energy"&&energyView==="usage"&&energyMode==="range") ||
     (screen==="intensity"&&intensityMode==="range") ||
     (screen==="production"&&productionMode==="range");
-  const dateLabel = screen==="production"&&productionMode!=="range" ? (productionMode==="year"?"기준 연도":"기준 월") : "기준일";
+  const yearScoped =
+    (screen==="production"&&productionMode==="year") ||
+    (screen==="energy"&&energyMode==="year") ||
+    (screen==="intensity"&&intensityMode==="year");
+  const monthScoped =
+    (screen==="production"&&productionMode==="month") ||
+    (screen==="energy"&&energyView==="usage"&&energyMode==="month") ||
+    (screen==="intensity"&&intensityMode==="month");
+  const dateLabel = yearScoped ? "기준 연도" : monthScoped ? "기준 월" : "기준일";
   const statusLive=isDataScreen(screen)?live:sessionLive;
   const statusTitle=isDataScreen(screen)?(live?"Local DB":"예시 데이터"):(sessionLive?"BEMS API":"API 연결 실패");
   const statusDetail=isDataScreen(screen)?(live?"MySQL 연결됨":"API 연결 실패"):(sessionLive?"권한 확인됨":"세션 확인 실패");

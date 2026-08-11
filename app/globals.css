@@ -113,6 +113,14 @@
 
 /* 4분면 카드 전체 폭 스팬 */
 .span-all{grid-column:1/-1}
+/* 폭이 적게 필요한 카드(주간 집계 차트·설비 구성·공장 표·원인분해)를 한 띠에 나란히
+   놓는 보조 그리드. auto-fit 이라 카드 수(1~4장)에 따라 열 수가 자동으로 맞춰져,
+   조건부로 카드가 빠져도 남은 카드가 남는 폭을 채운다(빈 칸이 생기지 않는다). */
+.aux-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;align-items:start}
+.aux-grid>.card{min-width:0}
+.aux-grid:empty{display:none}
+.aux-chart{height:225px}
+@media(max-width:600px){.aux-grid{grid-template-columns:1fr}.aux-chart{height:210px}}
 
 /* ── 2026-07-18 P2: 도넛·인사이트·모니터링·토글 ── */
 .check-toggle{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
