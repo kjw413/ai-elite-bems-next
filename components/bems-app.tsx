@@ -385,9 +385,10 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
   const showDailyLegend = dailyRowDefs.length > 1;
   const yoyLegend = useSeriesToggle();
   // 주간 실적 집계 (월간 모드) — 일별 차트는 요일 잡음이 커서 "이번 달 어느 주가 무거웠나"가
-  // 잘 안 보인다. 주 합계 막대 + 일평균 선을 겹쳐, 조업일수가 다른 주(마지막 부분 주 포함)도
-  // 같은 기준으로 비교되게 한다.
+  // 잘 안 보인다. 월~일 7일을 채운 주만 주 합계 막대로 쌓고, 실적이 없는 날이 섞인 주도
+  // 같은 기준으로 읽히도록 일평균 선을 겹친다.
   const weeklyRows: AnyData[] = data.weekly ?? [];
+  const weeklyExcluded: string[] = data.weeklyExcluded ?? [];
   const weeklyLegend = useSeriesToggle();
   const weeklyStackKeys = metric === "power" ? ["freezing", "compressor", "other"] : [metric];
   const weeklyStackDefs: LegendItem[] = metric === "power"
@@ -399,7 +400,6 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
     : [{ key: metric, label: energyMetricLabels[metric], color: energyMetricColors[metric] }];
   const weeklyLegendItems: LegendItem[] = [...weeklyStackDefs, { key: "avg", label: "일평균", color: energyMetricColors[metric] }];
   const weeklyVisibleStack = weeklyStackKeys.filter(key => !weeklyLegend.isHidden(key));
-  const weeklyPartial = weeklyRows.some((row: AnyData) => row.partial);
   const weeklySum = (key: string) => weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row[key]) || 0), 0);
   const weeklyDays = weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row.days) || 0), 0);
   // 연간 모드 KPI — 일별 행이 없으므로 월별 금년 실적에서 뽑는다.
@@ -454,18 +454,18 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
       {/* 필요 폭이 좁은 카드(주간 집계·설비 구성·공장 표)는 한 띠에 나란히 둔다 — 각각 전폭을 쓰면
           오른쪽이 통째로 빈다. auto-fit이라 카드 수(2~4장)에 따라 열이 자동으로 맞춰진다. */}
       <div className="aux-grid span-all">
-        {mode === "month" && weeklyRows.length > 0 && <article className="card chart-card"><CardTitle title="주간 사용량 집계" meta={`${units[metric]} · 주 합계 · 일평균`}><CsvButton filename={`energy_weekly_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={weeklyRows} columns={["week","span","days",metric,`${metric}Avg`]} labels={{week:"주차",span:"기간",days:"집계일수",[metric]:`주 합계(${units[metric]})`,[`${metric}Avg`]:`일평균(${units[metric]})`}}/></CardTitle>
+        {mode === "month" && weeklyRows.length > 0 && <article className="card chart-card"><CardTitle title="주간 사용량 집계" meta={`${units[metric]} · 월~일 7일`}><CsvButton filename={`energy_weekly_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={weeklyRows} columns={["week","span","days",metric,`${metric}Avg`]} labels={{week:"주차",span:"기간",days:"실적일수",[metric]:`주 합계(${units[metric]})`,[`${metric}Avg`]:`일평균(${units[metric]})`}}/></CardTitle>
           <Chart className="aux-chart"><ComposedChart data={weeklyRows}><CartesianGrid vertical={false}/><XAxis dataKey="week" tick={{ fontSize: 10 }}/><YAxis yAxisId="sum"/><YAxis yAxisId="avg" orientation="right"/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>
             {weeklyVisibleStack.map((key, index) => <Bar key={key} yAxisId="sum" dataKey={key} name={`${weeklyStackDefs.find(def => def.key === key)?.label ?? key} 주 합계`} stackId="w" fill={weeklyStackDefs.find(def => def.key === key)?.color} stroke="var(--card)" strokeWidth={1} maxBarSize={34} radius={index === weeklyVisibleStack.length - 1 ? [4,4,0,0] : undefined}/>)}
             {!weeklyLegend.isHidden("avg") && <Line yAxisId="avg" type="linear" dataKey={`${metric}Avg`} name={`일평균(${units[metric]})`} stroke={energyMetricColors[metric]} strokeWidth={2} dot={seriesDot(energyMetricColors[metric])} connectNulls/>}
           </ComposedChart></Chart>
           <ToggleLegend items={weeklyLegendItems} hidden={weeklyLegend.hidden} onToggle={weeklyLegend.toggle}/>
-          {weeklyPartial && <p className="quad-caption">마지막 주는 7일을 채우지 못한 부분 주입니다 — 합계 막대가 아니라 일평균 선으로 비교하세요.</p>}
-          <DataToggle><PivotTable periods={weeklyRows.map((row: AnyData) => row.week)} periodLabel="주차" totalLabel="누계" rows={[
+          <p className="quad-caption">월~일 7일을 채운 주만 표시합니다{weeklyExcluded.length > 0 ? ` — ${weeklyExcluded.join(" · ")}은(는) 주가 완결되지 않아 제외했습니다` : ""}. 실적이 없는 날이 섞인 주는 합계가 작게 나오므로 일평균 선으로 비교하세요.</p>
+          <DataToggle><PivotTable periods={weeklyRows.map((row: AnyData) => row.week)} periodLabel="주차" totalLabel="표시 주 합계" rows={[
             ...(metric === "power" ? [{ key: "power", label: `전체 전력(${units.power})`, values: weeklyRows.map((row: AnyData) => row.power), total: weeklySum("power") }] : []),
             ...weeklyStackDefs.map(def => ({ key: def.key, label: `${metric === "power" ? "└ " : ""}${def.label}(${units[metric]})`, values: weeklyRows.map((row: AnyData) => row[def.key]), total: weeklySum(def.key) })),
             { key: "avg", label: `일평균(${units[metric]})`, values: weeklyRows.map((row: AnyData) => row[`${metric}Avg`]), total: weeklyDays > 0 ? Math.round(weeklySum(metric) / weeklyDays * 100) / 100 : null },
-            { key: "days", label: "집계일수", values: weeklyRows.map((row: AnyData) => row.days), total: weeklyDays },
+            { key: "days", label: "실적일수", values: weeklyRows.map((row: AnyData) => row.days), total: weeklyDays },
           ]}/></DataToggle></article>}
         {equipmentCard}
         {factoryTableCard}
@@ -536,10 +536,10 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
   // 주간 실적 집계 (월간 모드) — 원단위는 비율이라 주 평균이 산술평균이면 안 된다.
   // 서버가 일별 원단위를 그 날 믹스생산량으로 가중 평균해 내려준다.
   const weeklyRows: AnyData[] = data.weekly ?? [];
+  const weeklyExcluded: string[] = data.weeklyExcluded ?? [];
   const weeklyLegend = useSeriesToggle();
   const weeklyTonTotal = weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row.productionTon) || 0), 0);
   const weeklyWeighted = weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row.value) || 0) * (Number(row.productionTon) || 0), 0);
-  const weeklyPartial = weeklyRows.some((row: AnyData) => row.partial);
   const monthAverage = data.summary?.mtd?.current;
   const summaryMeta = mode === "range" ? "선택 기간" : mode === "year" ? "연 누계" : "당월";
   const scopeKpi = mode === "year" ? data.summary?.ytd : data.summary?.mtd;
@@ -598,15 +598,15 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
         ]}/><p className="quad-caption">누계 추이 보기는 RawDB 수식 원단위를 엑셀 믹스생산량으로 가중 평균합니다.</p></DataToggle></article>}
       {/* 폭이 적게 필요한 카드는 한 줄에 둘씩 — 주간 집계·원인분해·매트릭스는 전폭을 쓰면 여백만 늘어난다. */}
       <div className="aux-grid span-all">
-        {mode === "month" && weeklyRows.length > 0 && <article className="card chart-card"><CardTitle title="주간 원단위 집계" meta={`${data.unit} · 생산량 가중`}><CsvButton filename={`intensity_weekly_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={weeklyRows} columns={["week","span","days","value","productionTon","usage"]} labels={{week:"주차",span:"기간",days:"가동일수",value:`원단위(${data.unit})`,productionTon:"생산량(ton)",usage:"사용량"}}/></CardTitle>
+        {mode === "month" && weeklyRows.length > 0 && <article className="card chart-card"><CardTitle title="주간 원단위 집계" meta={`${data.unit} · 월~일 7일 · 생산량 가중`}><CsvButton filename={`intensity_weekly_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={weeklyRows} columns={["week","span","days","value","productionTon","usage"]} labels={{week:"주차",span:"기간",days:"가동일수",value:`원단위(${data.unit})`,productionTon:"생산량(ton)",usage:"사용량"}}/></CardTitle>
           <Chart className="aux-chart"><ComposedChart data={weeklyRows}><CartesianGrid vertical={false}/><XAxis dataKey="week" tick={{ fontSize: 10 }}/><YAxis yAxisId="ton"/><YAxis yAxisId="unit" orientation="right" domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>
             {!weeklyLegend.isHidden("productionTon") && <Bar yAxisId="ton" dataKey="productionTon" name="생산량(ton)" fill={palette.previous} radius={[4,4,0,0]} maxBarSize={34}/>}
             {!weeklyLegend.isHidden("value") && <Line yAxisId="unit" type="linear" dataKey="value" name={`원단위(${data.unit})`} stroke={metricColor} strokeWidth={2} dot={seriesDot(metricColor)} activeDot={{ r: 5 }} connectNulls/>}
             {monthAverage != null && <ReferenceLine yAxisId="unit" y={Number(monthAverage)} stroke="var(--muted)" strokeDasharray="4 4"/>}
           </ComposedChart></Chart>
           <ToggleLegend items={[{key:"productionTon",label:"생산량",color:palette.previous},{key:"value",label:`원단위(${data.unit})`,color:metricColor}]} hidden={weeklyLegend.hidden} onToggle={weeklyLegend.toggle}/>
-          <p className="quad-caption">점선은 당월 평균 원단위입니다{weeklyPartial ? " — 마지막 주는 7일을 채우지 못한 부분 주입니다" : ""}. 주 원단위는 산술평균이 아니라 그 주 생산량으로 가중한 값이라, 주별 값을 다시 가중 평균하면 당월 누계와 일치합니다.</p>
-          <DataToggle><PivotTable periods={weeklyRows.map((row: AnyData) => row.week)} periodLabel="주차" totalLabel={`가중 누계(${data.unit})`} rows={[
+          <p className="quad-caption">월~일 7일을 채운 주만 표시하며 점선은 당월 평균 원단위입니다{weeklyExcluded.length > 0 ? ` — ${weeklyExcluded.join(" · ")}은(는) 주가 완결되지 않아 제외했습니다` : ""}. 주 원단위는 산술평균이 아니라 그 주 생산량으로 가중한 값입니다.</p>
+          <DataToggle><PivotTable periods={weeklyRows.map((row: AnyData) => row.week)} periodLabel="주차" totalLabel={`표시 주 가중(${data.unit})`} rows={[
             { key: "value", label: `원단위(${data.unit})`, values: weeklyRows.map((row: AnyData) => row.value), total: weeklyTonTotal > 0 ? Math.round(weeklyWeighted / weeklyTonTotal * 100) / 100 : null, format: value => value == null ? "-" : fmt(Number(value), 2) },
             { key: "productionTon", label: "생산량(ton)", values: weeklyRows.map((row: AnyData) => row.productionTon), total: Math.round(weeklyTonTotal * 10) / 10 },
             { key: "days", label: "가동일수", values: weeklyRows.map((row: AnyData) => row.days), total: weeklyRows.reduce((acc: number, row: AnyData) => acc + (Number(row.days) || 0), 0) },

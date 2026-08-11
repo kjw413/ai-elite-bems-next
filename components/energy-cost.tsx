@@ -55,12 +55,12 @@ type CostPeriod = {
   costChangeNote: string | null;
 };
 
-// 주차 집계 (월간 모드) — 비용은 합산, 단가는 Σ비용÷Σ사용량 가중평균이다.
+// 주차 집계 (월간 모드) — 월~일 7일을 채운 주만 담긴다.
+// 비용은 합산, 단가는 Σ비용÷Σ사용량 가중평균이다.
 type WeeklyCost = {
   week: string;
   span: string;
   days: number;
-  partial: boolean;
   cost: number;
   usage: number;
   price: NullableNumber;
@@ -107,6 +107,7 @@ type EnergyCostData = {
   matrix: CostMatrixRow[];
   dailyPrice: { date: string; price: number; usage: number }[];
   weekly: WeeklyCost[];
+  weeklyExcluded: string[];
   coverage: { expectedDays: number; presentDays: number; missingDays: number };
 };
 
@@ -150,6 +151,7 @@ const emptyData = (metric: CostMetric): EnergyCostData => ({
   matrix: [],
   dailyPrice: [],
   weekly: [],
+  weeklyExcluded: [],
   coverage: { expectedDays: 0, presentDays: 0, missingDays: 0 },
 });
 
@@ -286,9 +288,9 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
     ? `비용 반영률 ${(period.coverage * 100).toFixed(1)}%`
     : undefined;
   const weekly = data.weekly ?? [];
+  const weeklyExcluded = data.weeklyExcluded ?? [];
   const weeklyCostTotal = weekly.reduce((acc, row) => acc + (row.cost ?? 0), 0);
   const weeklyUsageTotal = weekly.reduce((acc, row) => acc + (row.usage ?? 0), 0);
-  const weeklyPartial = weekly.some(row => row.partial);
   const weeklyLegendItems: LegendItem[] = [
     { key: "cost", label: "주 비용", color: "var(--chart-power)" },
     ...(isTotal ? [] : [{ key: "price", label: `${data.label} 단가`, color: "var(--chart-fuel)" }]),
@@ -349,7 +351,7 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
           쓰면 화면의 절반이 빈 채로 세로만 길어진다. */}
       <div className="aux-grid span-all">
         {mode === "month" && weekly.length > 0 && <article className="card chart-card">
-          <header className="card-title"><h3>주간 비용 집계</h3><div className="card-title-side"><span>백만원{isTotal ? "" : ` / ${data.priceUnit}`}</span></div></header>
+          <header className="card-title"><h3>주간 비용 집계</h3><div className="card-title-side"><span>월~일 7일 · 백만원{isTotal ? "" : ` / ${data.priceUnit}`}</span></div></header>
           <div className="chart aux-chart"><ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={weekly}>
               <CartesianGrid vertical={false}/><XAxis dataKey="week" tick={{ fontSize: 10 }}/><YAxis yAxisId="cost"/>{!isTotal && <YAxis yAxisId="price" orientation="right" domain={["auto","auto"]}/>}
@@ -359,14 +361,14 @@ export function EnergyCost({ factory, requestedDate }: { factory: string; reques
             </ComposedChart>
           </ResponsiveContainer></div>
           <ToggleLegend items={weeklyLegendItems} hidden={weeklyLegend.hidden} onToggle={weeklyLegend.toggle}/>
-          <p className="cost-note">주 단가는 그 주의 Σ비용÷Σ사용량 가중평균입니다 — 일별 단가를 산술평균하면 저부하일이 과대 반영됩니다.{weeklyPartial ? " 마지막 주는 7일을 채우지 못한 부분 주라 비용 막대가 작게 보입니다." : ""}</p>
-          <DataToggle><PivotTable periods={weekly.map(row => row.week)} periodLabel="주차" totalLabel="당월 누계" rows={[
+          <p className="cost-note">월~일 7일을 채운 주만 표시합니다{weeklyExcluded.length > 0 ? ` — ${weeklyExcluded.join(" · ")}은(는) 주가 완결되지 않아 제외했습니다` : ""}. 주 단가는 그 주의 Σ비용÷Σ사용량 가중평균입니다 — 일별 단가를 산술평균하면 저부하일이 과대 반영됩니다.</p>
+          <DataToggle><PivotTable periods={weekly.map(row => row.week)} periodLabel="주차" totalLabel="표시 주 합계" rows={[
             { key: "cost", label: "비용(백만원)", values: weekly.map(row => row.cost), total: Math.round(weeklyCostTotal * 100) / 100, format: value => value == null ? "-" : fmt(Number(value), 2) },
             ...(isTotal ? [] : [
               { key: "usage", label: `사용량(${data.usageUnit})`, values: weekly.map(row => row.usage), total: Math.round(weeklyUsageTotal * 10) / 10 },
               { key: "price", label: `단가(${data.priceUnit})`, values: weekly.map(row => row.price), total: weeklyUsageTotal > 0 ? Math.round(weeklyCostTotal * 1_000_000 / weeklyUsageTotal * 100) / 100 : null, format: (value: unknown) => value == null ? "-" : fmt(Number(value), 2) },
             ]),
-            { key: "days", label: "집계일수", values: weekly.map(row => row.days), total: weekly.reduce((acc, row) => acc + (row.days ?? 0), 0) },
+            { key: "days", label: "실적일수", values: weekly.map(row => row.days), total: weekly.reduce((acc, row) => acc + (row.days ?? 0), 0) },
           ]}/></DataToggle>
         </article>}
 

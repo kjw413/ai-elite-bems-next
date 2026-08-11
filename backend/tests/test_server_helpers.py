@@ -795,57 +795,90 @@ class ServerHelperTests(unittest.TestCase):
             server.resolve_energy_period("quarter", base, None, None)
         self.assertEqual(raised.exception.status_code, 400)
 
-    def test_week_buckets_split_month_into_seven_day_spans(self) -> None:
-        buckets = server.week_buckets(date(2026, 7, 1), date(2026, 7, 17))
-        self.assertEqual(
-            [bucket["label"] for bucket in buckets],
-            ["1주(01~07)", "2주(08~14)", "3주(15~17)"],
-        )
+    def test_week_buckets_keep_only_complete_monday_to_sunday_weeks(self) -> None:
+        # 2026-08-01 은 토요일 — 월초 자투리(토·일)와 진행 중인 주는 버킷이 되지 않는다
+        buckets = server.week_buckets(date(2026, 8, 1), date(2026, 8, 17))
+        self.assertEqual([bucket["label"] for bucket in buckets], ["1주(03~09)", "2주(10~16)"])
         self.assertEqual(
             [(bucket["from"], bucket["to"]) for bucket in buckets],
             [
-                (date(2026, 7, 1), date(2026, 7, 7)),
-                (date(2026, 7, 8), date(2026, 7, 14)),
-                (date(2026, 7, 15), date(2026, 7, 17)),
+                (date(2026, 8, 3), date(2026, 8, 9)),
+                (date(2026, 8, 10), date(2026, 8, 16)),
             ],
         )
-        # 기준일에서 잘린 마지막 주만 부분 주로 표시된다
-        self.assertEqual([bucket["partial"] for bucket in buckets], [False, False, True])
-        # 완결된 달은 마지막 주도 부분이 아니다(29~31일은 자연 경계와 같음)
-        full = server.week_buckets(date(2026, 6, 1), date(2026, 6, 30))
-        self.assertEqual(len(full), 5)
-        self.assertTrue(full[-1]["partial"])
-        self.assertEqual(server.week_buckets(date(2026, 7, 10), date(2026, 7, 1)), [])
+        # 모든 버킷은 예외 없이 월요일에 시작해 일요일에 끝나는 7일이다
+        for bucket in buckets:
+            self.assertEqual(bucket["from"].weekday(), 0)
+            self.assertEqual(bucket["to"].weekday(), 6)
+            self.assertEqual((bucket["to"] - bucket["from"]).days, 6)
+        # 구간이 월요일에 시작하면 그 주부터 바로 잡는다
+        self.assertEqual(
+            server.week_buckets(date(2026, 8, 3), date(2026, 8, 9))[0]["from"],
+            date(2026, 8, 3),
+        )
+        # 완결된 주가 하나도 없으면 빈 목록
+        self.assertEqual(server.week_buckets(date(2026, 8, 1), date(2026, 8, 5)), [])
+        self.assertEqual(server.week_buckets(date(2026, 8, 10), date(2026, 8, 1)), [])
+
+    def test_week_excluded_spans_report_clipped_days(self) -> None:
+        window = (date(2026, 8, 1), date(2026, 8, 17))
+        buckets = server.week_buckets(*window)
+        self.assertEqual(
+            server.week_excluded_spans(*window, buckets),
+            ["08.01~08.02", "08.17~08.17"],
+        )
+        # 구간이 완결 주와 정확히 맞으면 빠지는 날이 없다
+        aligned = (date(2026, 8, 3), date(2026, 8, 9))
+        self.assertEqual(
+            server.week_excluded_spans(*aligned, server.week_buckets(*aligned)), [],
+        )
+        # 완결 주가 하나도 없으면 구간 전체가 제외 구간이다
+        self.assertEqual(
+            server.week_excluded_spans(date(2026, 8, 1), date(2026, 8, 5), []),
+            ["08.01~08.05"],
+        )
 
     def test_week_bucket_index_maps_dates_and_rejects_outside(self) -> None:
-        buckets = server.week_buckets(date(2026, 7, 1), date(2026, 7, 17))
-        self.assertEqual(server.week_bucket_index(buckets, date(2026, 7, 7)), 0)
-        self.assertEqual(server.week_bucket_index(buckets, date(2026, 7, 8)), 1)
-        self.assertEqual(server.week_bucket_index(buckets, date(2026, 7, 17)), 2)
-        self.assertIsNone(server.week_bucket_index(buckets, date(2026, 7, 18)))
+        buckets = server.week_buckets(date(2026, 8, 1), date(2026, 8, 17))
+        self.assertEqual(server.week_bucket_index(buckets, date(2026, 8, 3)), 0)
+        self.assertEqual(server.week_bucket_index(buckets, date(2026, 8, 9)), 0)
+        self.assertEqual(server.week_bucket_index(buckets, date(2026, 8, 10)), 1)
+        # 완결 주 밖의 자투리 날은 어느 주에도 속하지 않는다
+        self.assertIsNone(server.week_bucket_index(buckets, date(2026, 8, 2)))
+        self.assertIsNone(server.week_bucket_index(buckets, date(2026, 8, 17)))
         self.assertIsNone(server.week_bucket_index(buckets, None))
 
     def test_weekly_energy_sums_days_and_reports_daily_average(self) -> None:
         rows = [
-            {"date": date(2026, 7, day), "power": 10.0, "fuel": 1.0, "water": 2.0,
+            {"date": date(2026, 8, day), "power": 10.0, "fuel": 1.0, "water": 2.0,
              "wastewater": 1.5, "freezing": 4.0, "compressor": 2.0, "other": 4.0}
-            for day in range(1, 10)
+            for day in range(1, 18)
         ]
-        weekly = server._weekly_energy(rows, date(2026, 7, 1), date(2026, 7, 9))
-        self.assertEqual([row["week"] for row in weekly], ["1주(01~07)", "2주(08~09)"])
-        self.assertEqual(weekly[0]["power"], 70.0)
-        self.assertEqual(weekly[0]["days"], 7)
+        buckets = server.week_buckets(date(2026, 8, 1), date(2026, 8, 17))
+        weekly = server._weekly_energy(rows, buckets)
+        self.assertEqual([row["week"] for row in weekly], ["1주(03~09)", "2주(10~16)"])
+        # 자투리 날(08.01~02, 08.17)은 어느 주에도 더해지지 않는다
+        self.assertEqual([row["power"] for row in weekly], [70.0, 70.0])
+        self.assertEqual([row["days"] for row in weekly], [7, 7])
         self.assertEqual(weekly[0]["powerAvg"], 10.0)
-        # 부분 주는 합계가 작게 나오지만 일평균은 같아야 한다 — 화면이 그 기준으로 비교한다
-        self.assertEqual(weekly[1]["power"], 20.0)
-        self.assertEqual(weekly[1]["days"], 2)
-        self.assertEqual(weekly[1]["powerAvg"], 10.0)
-        self.assertTrue(weekly[1]["partial"])
         # 설비 분해 합은 전체 전력과 일치한다(주간 스택 막대의 전제)
         self.assertEqual(
             weekly[0]["freezing"] + weekly[0]["compressor"] + weekly[0]["other"],
             weekly[0]["power"],
         )
+
+    def test_weekly_energy_reports_missing_days_within_a_complete_week(self) -> None:
+        # 주는 항상 7일이지만 실적이 없는 날이 있으면 days < 7 — 일평균은 실적일 기준이다
+        rows = [
+            {"date": date(2026, 8, day), "power": 10.0, "fuel": 0.0, "water": 0.0,
+             "wastewater": 0.0, "freezing": 0.0, "compressor": 0.0, "other": 0.0}
+            for day in (3, 4, 5, 6, 7)
+        ]
+        weekly = server._weekly_energy(rows, server.week_buckets(date(2026, 8, 1), date(2026, 8, 16)))
+        self.assertEqual(len(weekly), 1)
+        self.assertEqual(weekly[0]["days"], 5)
+        self.assertEqual(weekly[0]["power"], 50.0)
+        self.assertEqual(weekly[0]["powerAvg"], 10.0)
 
     def test_energy_yoy_builds_12_months_with_missing_as_none(self) -> None:
         rows = [

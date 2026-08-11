@@ -533,30 +533,50 @@ def resolve_energy_period(
 
 
 def week_buckets(date_from: date, date_to: date) -> list[dict[str, Any]]:
-    """월간 모드 주차 구간 — 시작일부터 7일씩 끊는다(달의 1~7·8~14·…·29~말일).
+    """조회 구간 안에서 월~일 7일을 온전히 채운 주만 돌려준다.
 
-    ISO 주(월~일)를 쓰지 않는 이유: 월 경계에서 주가 잘려 이전·다음 달 실적이
-    한 막대에 섞이고, 그러면 "이 달 몇 주차" 라는 현장 표현과도 어긋난다.
-    7일을 채우지 못한 주(월말 자투리·기준일에서 잘린 주)는 partial 로 표시한다 —
-    합계 막대만 보면 실적이 준 것처럼 읽히므로 화면이 일평균으로 보라고 알린다.
+    주차는 항상 월요일에 시작한다 — 주마다 요일 구성이 같아야 주끼리 바로 비교되고,
+    "몇째 주" 가 현장 주간회의 단위와 일치한다.
+    구간 앞뒤에서 7일을 못 채운 자투리(월초 며칠·아직 진행 중인 주)는 버킷을 아예
+    만들지 않는다. 부분 주 막대는 실적이 줄어든 것처럼 읽혀 오독을 부르기 때문이며,
+    빠진 날은 호출부가 week_excluded_spans() 로 화면에 함께 알린다.
     """
     buckets: list[dict[str, Any]] = []
-    start = date_from
+    if date_from > date_to:
+        return buckets
+    # 구간 안의 첫 월요일 (weekday(): 월=0)
+    start = date_from + timedelta(days=(7 - date_from.weekday()) % 7)
     index = 1
-    while start <= date_to:
-        natural_end = start + timedelta(days=6)
-        end = min(natural_end, date_to)
+    while start + timedelta(days=6) <= date_to:
+        end = start + timedelta(days=6)
         buckets.append({
             "index": index,
-            "label": f"{index}주({start.day:02d}~{end.day:02d})",
+            # x축이 좁아 같은 달이면 일자만 — 달을 넘는 주만 월.일로 표기한다.
+            "label": f"{index}주({start.day:02d}~{end.day:02d})" if start.month == end.month
+                     else f"{index}주({start:%m.%d}~{end:%m.%d})",
             "span": f"{start:%m.%d}~{end:%m.%d}",
             "from": start,
             "to": end,
-            "partial": natural_end > date_to,
         })
-        start = natural_end + timedelta(days=1)
+        start = end + timedelta(days=1)
         index += 1
     return buckets
+
+
+def week_excluded_spans(
+    date_from: date, date_to: date, buckets: list[dict[str, Any]],
+) -> list[str]:
+    """주차 집계에서 빠진 자투리 구간 라벨 — 화면이 "왜 안 보이는지" 를 함께 알린다."""
+    if date_from > date_to:
+        return []
+    if not buckets:
+        return [f"{date_from:%m.%d}~{date_to:%m.%d}"]
+    spans: list[str] = []
+    if date_from < buckets[0]["from"]:
+        spans.append(f"{date_from:%m.%d}~{buckets[0]['from'] - timedelta(days=1):%m.%d}")
+    if buckets[-1]["to"] < date_to:
+        spans.append(f"{buckets[-1]['to'] + timedelta(days=1):%m.%d}~{date_to:%m.%d}")
+    return spans
 
 
 def week_bucket_index(buckets: list[dict[str, Any]], value: date | None) -> int | None:
@@ -1540,9 +1560,10 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
 ENERGY_DAILY_KEYS = ("power", "fuel", "water", "wastewater", "freezing", "compressor", "other")
 
 
-def _weekly_energy(rows: list[dict[str, Any]], window_from: date, window_to: date) -> list[dict[str, Any]]:
+def _weekly_energy(
+    rows: list[dict[str, Any]], buckets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """일별 사용량 행을 주차별 합계로 접는다 — 월간 모드의 주간 실적 집계용."""
-    buckets = week_buckets(window_from, window_to)
     totals = [dict.fromkeys(ENERGY_DAILY_KEYS, 0.0) for _ in buckets]
     days = [0] * len(buckets)
     for row in rows:
@@ -1558,7 +1579,8 @@ def _weekly_energy(rows: list[dict[str, Any]], window_from: date, window_to: dat
             continue
         weekly.append({
             "week": bucket["label"], "span": bucket["span"],
-            "days": day_count, "partial": bucket["partial"],
+            # 주는 항상 7일이지만 실적이 없는 날(휴무·미도착)이 있으면 days < 7 이다.
+            "days": day_count,
             **{key: round(value, 2) for key, value in total.items()},
             **{f"{key}Avg": round(value / day_count, 2) for key, value in total.items()},
         })
@@ -1596,7 +1618,9 @@ def energy(
     # 전력 설비 분해(legacy 일별 추이) — 기타 = 전체 − 냉동 − 공압, 음수 방지.
     for row in rows:
         row["other"] = round(max(0.0, scalar(row.get("power")) - scalar(row.get("freezing")) - scalar(row.get("compressor"))), 2)
-    weekly = _weekly_energy(rows, window_from, window_to) if mode == "month" else []
+    week_spans = week_buckets(window_from, window_to) if mode == "month" else []
+    weekly = _weekly_energy(rows, week_spans) if mode == "month" else []
+    weekly_excluded = week_excluded_spans(window_from, window_to, week_spans) if mode == "month" else []
     equipment = fetch_one(
         """
         SELECT SUM(freezing_power_kwh) freezing, SUM(air_compressor_kwh) compressor,
@@ -1676,6 +1700,7 @@ def energy(
         "dateTo": window_to,
         "daily": [{**row, "date": row["date"].strftime("%m.%d")} for row in rows],
         "weekly": weekly,
+        "weeklyExcluded": weekly_excluded,
         "dailyByFactory": daily_by_factory,
         "equipment": equipment_rows,
         "factories": list(combined.values()),
@@ -1749,8 +1774,10 @@ def intensity_analysis(
     # 일별 저장 원단위를 그 날 믹스생산량으로 가중 평균해야 주 전체를 한 덩어리로
     # 집계한 값과 일치한다(월 누계·YTD 가 쓰는 규칙과 동일).
     weekly: list[dict[str, Any]] = []
+    weekly_excluded: list[str] = []
     if mode == "month":
         buckets = week_buckets(window_from, window_to)
+        weekly_excluded = week_excluded_spans(window_from, window_to, buckets)
         cells = [{"weighted": 0.0, "kg": 0.0, "usage": 0.0, "days": 0} for _ in buckets]
         for row in daily_rows:
             index = week_bucket_index(buckets, normalize_date(row.get("date")))
@@ -1769,7 +1796,8 @@ def intensity_analysis(
                 continue
             weekly.append({
                 "week": bucket["label"], "span": bucket["span"],
-                "days": int(cell["days"]), "partial": bucket["partial"],
+                # 주는 항상 7일이고, days 는 그중 생산 실적이 있던 가동일 수다.
+                "days": int(cell["days"]),
                 "value": round(cell["weighted"] / cell["kg"], 2) if cell["kg"] > 0 else None,
                 "productionTon": round(cell["kg"] / 1000, 1),
                 "usage": round(cell["usage"], 1),
@@ -1942,6 +1970,7 @@ def intensity_analysis(
         "dateTo": window_to,
         "daily": daily,
         "weekly": weekly,
+        "weeklyExcluded": weekly_excluded,
         "summary": summary,
         "monthly": monthly,
         "yoyCumulative": weighted_intensity_yoy(monthly_weighted_values, monthly_production, base.year),
@@ -2383,8 +2412,10 @@ def energy_cost(
     # 주간 실적 집계 (월간 모드) — 비용은 합산, 단가는 Σ비용÷Σ사용량 가중평균이다.
     # 주 단위 평균단가를 일별 단가의 산술평균으로 내면 저부하일이 과대 반영된다.
     weekly: list[dict[str, Any]] = []
+    weekly_excluded: list[str] = []
     if mode == "month":
         buckets = week_buckets(month_from, base)
+        weekly_excluded = week_excluded_spans(month_from, base, buckets)
         cells = [
             {"cost": 0.0, "usage": 0.0, "pricedCost": 0.0, "pricedUsage": 0.0, "days": 0}
             for _ in buckets
@@ -2407,7 +2438,7 @@ def energy_cost(
                 continue
             weekly.append({
                 "week": bucket["label"], "span": bucket["span"],
-                "days": int(cell["days"]), "partial": bucket["partial"],
+                "days": int(cell["days"]),
                 "cost": round(cell["cost"] / 1_000_000, 2),
                 "usage": round(cell["usage"], 1),
                 "price": _round_or_none(
@@ -2434,6 +2465,7 @@ def energy_cost(
         "matrix": matrix,
         "dailyPrice": daily_price,
         "weekly": weekly,
+        "weeklyExcluded": weekly_excluded,
         "coverage": period_coverage(
             factory,
             base.replace(day=1) if mode == "month" else base.replace(month=1, day=1),
