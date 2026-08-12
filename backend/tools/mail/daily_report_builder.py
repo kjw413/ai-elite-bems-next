@@ -17,7 +17,7 @@ Daily Energy Alert Report Builder
 
 주간/월간 메일은 period_report_builder.py가 본 모듈의 공용 집계 함수 +
 차트 렌더러(_render_metric_grid_chart)를 재사용한다(일간 자체는 표만 사용, 차트 없음).
-생산량과 원단위는 RawDB_에너지.xlsx 동기화 값을 사용한다. 원단위는 엑셀 수식값을
+생산량과 원단위는 DB_에너지.xlsx 동기화 값을 사용한다. 원단위는 엑셀 수식값을
 그대로 보존하고 여러 행을 합칠 때만 엑셀 믹스생산량으로 가중 평균한다.
 """
 
@@ -83,7 +83,7 @@ FACTORY_DISPLAY_ORDER: List[Tuple[str, Optional[List[str]]]] = [
 # 이전 버전의 icon(⚡🔥💧🚿🍦)은 사내 그룹웨어 "전달" 시 Namo 에디터의 sanitizer가
 # Supplementary Plane 이모지를 통째로 잘라내 빈 칸으로 보이는 이슈가 있어 제거.
 # 시각 구분은 header_bg + border-top color 만으로 유지한다.
-# RawDB_에너지 수식 결과 열을 그대로 사용하는 원단위 5종.
+# DB_에너지 수식 결과 열을 그대로 사용하는 원단위 5종.
 INTENSITY_METRICS = [
     {"key": "power",      "label": "전력 원단위", "unit": "kWh/ton",
      "color": "#F6C90E", "chart_color": "#D97706", "header_bg": "#FDF4CF", "cell_bg": "#FEFAEC",
@@ -551,7 +551,7 @@ def _fetch_rows_range(
     date_to: date,
     factories: Optional[List[str]] = None,
 ) -> List[dict]:
-    """기간 내 RawDB_에너지 동기화 행과 수식 원단위를 조회."""
+    """기간 내 DB_에너지 동기화 행과 수식 원단위를 조회."""
     sql = """
         SELECT factory, date,
                total_power_kwh, freezing_power_kwh, air_compressor_kwh,

@@ -198,7 +198,7 @@ def weighted_stored_unit_rate(
     *,
     production_col: str = "mix_prod_kg",
 ) -> float | None:
-    """RawDB_에너지 수식 원단위를 믹스생산량으로 가중 집계한다.
+    """DB_에너지 수식 원단위를 믹스생산량으로 가중 집계한다.
 
     일별 원단위를 사용량/생산량으로 다시 만들지 않는다. 엑셀 수식 결과를
     단일 기준으로 삼고, 여러 일자·공장을 합칠 때만 같은 엑셀 생산량으로

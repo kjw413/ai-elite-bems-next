@@ -2,7 +2,7 @@
 
 생산 KPI·예측 특성처럼 운영 생산량이 필요한 소비처만
 ``production_daily.actual_qty`` 합계를 사용한다. 광주는 판매용 재공품 환산량을
-추가한다. 에너지 원단위는 ``RawDB_에너지.xlsx`` 수식 결과가 단일 기준이므로
+추가한다. 에너지 원단위는 ``DB_에너지.xlsx`` 수식 결과가 단일 기준이므로
 이 모듈이 ``power_per_ton_kwh`` 등 원단위 열을 다시 계산하거나 수정하지 않는다.
 """
 from __future__ import annotations
@@ -143,7 +143,7 @@ def overlay_actual_production(
 
     광주는 DB_생산실적+판매용 재공품 환산량, 그 외 공장은 DB_생산실적이다.
     생산실적 행이 없는 공장·일자는 RawDB 예측값으로 되돌아가지 않고 0으로 둔다.
-    RawDB_에너지의 원단위 수식 결과 열은 수정하지 않는다.
+    DB_에너지의 원단위 수식 결과 열은 수정하지 않는다.
     """
     if energy is None or energy.empty:
         return energy

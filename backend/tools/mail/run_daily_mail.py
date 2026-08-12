@@ -35,7 +35,7 @@ def _env_flag(name: str, default: bool = True) -> bool:
 
 
 def _sync_latest_energy_data(log) -> int:
-    """메일 실적 생성 전에 RawDB_에너지.xlsx 변경분을 DB에 반영한다."""
+    """메일 실적 생성 전에 DB_에너지.xlsx 변경분을 DB에 반영한다."""
     if not _env_flag("DAILY_REPORT_SYNC_BEFORE_BUILD", True):
         log.info("메일 전 에너지 데이터 자동 동기화 비활성화(DAILY_REPORT_SYNC_BEFORE_BUILD=false)")
         return 0
@@ -113,7 +113,7 @@ def main() -> int:
     # 1) 기준일 결정
     ref = _parse_date(args.ref_date) if args.ref_date else None
 
-    # 2) 최신 RawDB_에너지.xlsx 변경분을 DB에 먼저 반영
+    # 2) 최신 DB_에너지.xlsx 변경분을 DB에 먼저 반영
     sync_rc = _sync_latest_energy_data(log)
     if sync_rc != 0:
         return sync_rc

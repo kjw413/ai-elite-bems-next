@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS energy_daily (
     -- 생산량
     mix_prod_kg             DOUBLE NOT NULL DEFAULT 0,
 
-    -- 원단위: RawDB_에너지.xlsx 수식 결과가 단일 기준이다.
+    -- 원단위: DB_에너지.xlsx 수식 결과가 단일 기준이다.
     -- Python은 일별 값을 다시 계산하거나 덮어쓰지 않는다. 여러 일자·공장 집계만
     -- 같은 파일의 mix_prod_kg를 가중치로 사용한다. 폐수는 폐수/용수 비로 대체한다.
     freezing_power_per_ton_kwh  DOUBLE NOT NULL DEFAULT 0,

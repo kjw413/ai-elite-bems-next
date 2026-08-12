@@ -17,10 +17,10 @@ MIS 에너지 수집 화면이 `유틸리티 일자별 사용량 추이` → `�
 | 항목 | 변경 내용 |
 |---|---|
 | 수집 화면 | `원단위 실적입력(일단위)` 단일 화면. 구 화면 수집 코드·좌표 제거 |
-| **파일 단일화** | `RawDB_에너지.xlsx` **하나만** 남음 (행=일자, 열=항목). 중간 산출물 `DB_에너지.xlsx` 와 재가공 단계(`build_dataset`) **폐지** |
-| **웹앱 입력 경로** | `v5_common.PATH_ENERGY_SOURCE` 가 **`RawDB_에너지.xlsx`** 를 가리켜야 함 ⚠ |
+| **파일 단일화** | `DB_에너지.xlsx` **하나만** 남음 (행=일자, 열=항목). 중간 산출물 `DB_에너지.xlsx` 와 재가공 단계(`build_dataset`) **폐지** |
+| **웹앱 입력 경로** | `v5_common.PATH_ENERGY_SOURCE` 가 **`DB_에너지.xlsx`** 를 가리켜야 함 ⚠ |
 | 신규 항목 | 전력비·전력단가·연료비·연료단가·원수COD·배출수COD 열 추가 |
-| 믹스생산량·원단위 | `RawDB_에너지.xlsx`에서 유지. 원단위는 엑셀 수식으로 자동 갱신되며 DB에 그대로 적재 |
+| 믹스생산량·원단위 | `DB_에너지.xlsx`에서 유지. 원단위는 엑셀 수식으로 자동 갱신되며 DB에 그대로 적재 |
 | 데이터 기간 | 생산실적과 시간축을 맞추기 위해 2021~2023 삭제 → **2024-01 부터** |
 
 ### 왜 파일을 단일화했나
@@ -44,7 +44,7 @@ is_transposed=False
 ### 믹스생산량·원단위 기준 변경
 
 유틸리티 실적이 수정되면 같은 파일의 원단위도 즉시 따라 바뀌도록
-`RawDB_에너지.xlsx`의 수식 결과를 단일 기준으로 사용합니다.
+`DB_에너지.xlsx`의 수식 결과를 단일 기준으로 사용합니다.
 
 - 일별 냉동·공압·전력·연료·용수 원단위는 엑셀 수식 결과를 그대로 DB에 적재합니다.
 - Python 조회·메일·분석 계층은 사용량÷운영 생산량으로 일별 원단위를 다시 만들거나 덮어쓰지 않습니다.
@@ -52,9 +52,9 @@ is_transposed=False
 - 생산 화면의 운영 생산량(`production_daily` 및 광주 WIP 보정)은 별도 KPI로 유지하며
   원단위 분모와 혼합하지 않습니다.
 
-## 3. 입력 파일 스펙 — `RawDB_에너지.xlsx`
+## 3. 입력 파일 스펙 — `DB_에너지.xlsx`
 
-- 위치: `SAMPLED_DB_DIR` (`E:\DB_MIS`), 파일명 **`RawDB_에너지.xlsx`**
+- 위치: `SAMPLED_DB_DIR` (`E:\DB_MIS`), 파일명 **`DB_에너지.xlsx`**
 - 시트: `남양주1` `남양주2` `김해` `광주` `논산` `경산`
 - 구조: **행 = 일자, 열 = 항목** (tidy — `DB_생산실적.daily` 와 같은 방향)
 - A1 = `날짜`, A2 부터 날짜 셀(`datetime`)이 위→아래로 누적. 기간 **2024-01-01 ~**
@@ -110,7 +110,7 @@ RPA 쪽 `energy_builder.FIELDS` 의 `key` 와 동일한 이름이라 양쪽 대�
 
 | # | 파일 : 행 | 심볼 | 작업 |
 |---|---|---|---|
-| 0 | `services/v5_common.py` : 124 | `PATH_ENERGY_SOURCE` | 파일명을 **`RawDB_에너지.xlsx`** 로. ⚠ 이것부터 |
+| 0 | `services/v5_common.py` : 124 | `PATH_ENERGY_SOURCE` | 파일명을 **`DB_에너지.xlsx`** 로. ⚠ 이것부터 |
 | 1 | `database/schema.sql` : 6~33 | `CREATE TABLE energy_daily` | 6개 컬럼 추가. `DOUBLE NOT NULL DEFAULT 0` (기존 관례) — 신규 설치용 |
 | 2 | `database/db_connection.py` : **243** | `_PENDING_COLUMN_MIGRATIONS` | 기존 DB 용 멱등 `ADD COLUMN` 6줄:<br>`("energy_daily", "power_cost_krw", "ADD COLUMN power_cost_krw DOUBLE NOT NULL DEFAULT 0 AFTER water_per_ton_ton")` |
 | 3 | `utils/excel_parser.py` : **17** | `EXPECTED_COLUMNS` | 6개 추가. `NUMERIC_COLUMNS`(32행) 는 `EXPECTED_COLUMNS[1:]` 라 자동 반영 |
@@ -182,7 +182,7 @@ A열에 항목명이 들어오면) 행 필터가 되살아나 신규 6개가 사
 
 ## 6. 검증 절차
 
-0. **경로** — `PATH_ENERGY_SOURCE` 가 `RawDB_에너지.xlsx` 를 가리키는지 먼저 확인.
+0. **경로** — `PATH_ENERGY_SOURCE` 가 `DB_에너지.xlsx` 를 가리키는지 먼저 확인.
    `DB_에너지.xlsx` 를 계속 가리키면 파일이 없어 sync 가 조용히 건너뜁니다.
 1. **마이그레이션** — 서버 기동 시 `_apply_idempotent_migrations()` 로그에
    `migration: energy_daily.power_cost_krw added` 6줄이 찍히는지 확인
@@ -191,7 +191,7 @@ A열에 항목명이 들어오면) 행 필터가 되살아나 신규 6개가 사
    - 반환 DataFrame 에 6개 신규 컬럼이 있고 값이 `0` 이 아닌지
    - 행 수가 시트당 900+ 인지 (2024-01-01 부터 누적)
 3. **적재** — `2026-07-01` 기준 아래 값이 `energy_daily` 에 들어갔는지 대조
-   (`RawDB_에너지.xlsx` 실측값, 2026-07-30 확인):
+   (`DB_에너지.xlsx` 실측값, 2026-07-30 확인):
 
    | 공장 | 전력량 | 전력비 | 전력단가 | 연료량 | 연료비 | 연료단가 | 원수COD | 배출수COD |
    |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -266,6 +266,6 @@ cd /d E:\BEMS-energy-cost
    2024-01-01 부터입니다. 그 이전 날짜가 DB 에 없으면 overlay 가 `mix_prod_kg=0` 을 넣어
    해당 기간 원단위가 NaN 이 됩니다 — 에너지 데이터를 2024-01 부터로 맞춘 이유입니다.
 3. **RPA 레포 담당(완료 대기)**: `DB_에너지.xlsx` 의 믹스생산량·원단위를
-   `RawDB_에너지.xlsx` 로 옮긴 뒤 파일을 backup 으로 치우는 1회 스크립트
+   `DB_에너지.xlsx` 로 옮긴 뒤 파일을 backup 으로 치우는 1회 스크립트
    (`migrate_energy_drop_db_file.py`). 이 작업이 끝나기 전에 `PATH_ENERGY_SOURCE` 를
    바꾸면 믹스생산량 과거값이 일시적으로 비어 보입니다(원단위는 overlay 라 영향 없음).

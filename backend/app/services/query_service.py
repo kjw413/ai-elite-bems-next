@@ -29,7 +29,7 @@ USAGE_COLUMNS = [
     "mix_prod_kg",
 ]
 
-# 원단위 컬럼 (RawDB_에너지 수식 결과, 폐수 원단위는 폐기)
+# 원단위 컬럼 (DB_에너지 수식 결과, 폐수 원단위는 폐기)
 UNIT_CONSUMPTION_COLUMNS = list(ENERGY_UNIT_COLUMNS)
 
 
@@ -102,7 +102,7 @@ def get_daily_data(
     finally:
         conn.close()
 
-    # RawDB_에너지의 mix_prod_kg와 수식 원단위를 그대로 유지한다.
+    # DB_에너지의 mix_prod_kg와 수식 원단위를 그대로 유지한다.
     # 필터 처리 및 집계 로직
     if factories is not None:
         parts = []
@@ -149,7 +149,7 @@ def get_monthly_data(
     """
     월별 집계 데이터.
     사용량 = SUM(일별 값)
-    원단위 = RawDB_에너지 수식 결과의 믹스생산량 가중 평균
+    원단위 = DB_에너지 수식 결과의 믹스생산량 가중 평균
     """
     daily = get_daily_data(factories, date_from, date_to)
     if daily.empty:
@@ -279,7 +279,7 @@ FACTORY_ORDER = list(FACTORY_QUERY_ORDER)
 
 # calc 단위 rate 관련 처리를 담당합니다.
 def _stored_unit_rate(df: pd.DataFrame, unit_col: str):
-    """RawDB_에너지 수식 원단위를 믹스생산량으로 가중 집계."""
+    """DB_에너지 수식 원단위를 믹스생산량으로 가중 집계."""
     return weighted_stored_unit_rate(df, unit_col)
 
 

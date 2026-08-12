@@ -82,7 +82,7 @@ legacy `_fetch_energy_history`가 factory 컬럼 없이 `overlay_actual_producti
 
 - 업로드 **미리보기(2단계 확인)**: `POST /api/v1/upload/preview`(dry-run) +
   관리자 화면 1단계 검증·미리보기 → 2단계 DB 반영 흐름.
-  실제 RawDB_에너지.xlsx로 검증(공장 6곳, 덮어쓰기 10,210건 정확 산출, DB 무변경).
+  실제 DB_에너지.xlsx로 검증(공장 6곳, 덮어쓰기 10,210건 정확 산출, DB 무변경).
 - 이상 원인 진단: `POST /api/v1/predictions/diagnose`(캐시 우선, 재생성만 관리자) +
   예측 이력 표의 이탈 행 진단 버튼·마크다운 진단 패널. 캐시 건으로 검증(LLM 비용 0).
 - 동등성 스팟체크: 브리지 SQL vs 복사본 legacy pandas의 생산량 오버레이를

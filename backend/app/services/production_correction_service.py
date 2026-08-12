@@ -7,7 +7,7 @@ Production / Energy Mix Correction Service
 배경
 ----
 * `production_daily` : 빙그레가 자사 명의로 출하하는 **완제품** 일별 실적 (KG)
-* `energy_daily.mix_prod_kg` : RawDB_에너지에서 동기화된 raw 믹스 톤 값. 광주의 경우
+* `energy_daily.mix_prod_kg` : DB_에너지에서 동기화된 raw 믹스 톤 값. 광주의 경우
   자사 완제품(production_daily) 분량과 거의 일치 — **외부 판매용 재공품은 빠져있음**.
 
 특히 광주(광주공장)은 자사 발효유/스낵 외에도, 자사 명의 완제품이 아닌
@@ -19,7 +19,7 @@ raw 값을 분모로 쓰면 광주 원단위가 비현실적으로 높게 나옵
 믹스 톤 단위와 직접 합산할 수 없습니다 → ItemCode 별 ``WIP_MIX_CONVERSION`` 환산
 계수를 곱해 mix-equivalent kg 로 정규화합니다.
 
-이 모듈의 분해 API는 RawDB_에너지와 DB_생산실적의 차이를 진단하는 보조 도구로
+이 모듈의 분해 API는 DB_에너지와 DB_생산실적의 차이를 진단하는 보조 도구로
 유지합니다. 광주 WIP는 ``DB_재공품.xlsx`` 기반 7품목과 내부 MIS 사정으로
 ``production_daily``에 기록되는 2품목(129998·129999)을 원천별로 환산하며,
 ``production_actual_service``에서 운영 화면·메일·원단위 분모에 합산합니다.

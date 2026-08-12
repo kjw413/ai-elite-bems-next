@@ -69,7 +69,7 @@ def main() -> int:
     log.info("=" * 60)
     log.info(f"{args.period} 에너지 원단위 메일 자동화 시작")
 
-    # 1) 최신 RawDB_에너지.xlsx 변경분을 DB에 먼저 반영
+    # 1) 최신 DB_에너지.xlsx 변경분을 DB에 먼저 반영
     sync_rc = _sync_latest_energy_data(log)
     if sync_rc != 0:
         return sync_rc

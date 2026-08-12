@@ -4,7 +4,7 @@ r"""energy_daily 재동기화 복구 스크립트 (원본 엑셀 -> DB).
 ----
 로컬 MySQL 복구 당시 ``energy_daily`` / ``prediction_log`` / ``anomaly_analysis`` 3개
 테이블은 IMPORT TABLESPACE 실패로 **빈 테이블**로 남았다. 이 중 대시보드의 주
-데이터원인 ``energy_daily`` 는 원본 에너지 엑셀(``RawDB_에너지.xlsx``)에서 앱의 정규
+데이터원인 ``energy_daily`` 는 원본 에너지 엑셀(``DB_에너지.xlsx``)에서 앱의 정규
 동기화 경로로 재생성할 수 있다.
 
 주의 (2026-07-18 확인)
@@ -60,9 +60,9 @@ def _resolve_source(cli_source: str | None) -> Path | None:
         candidates.append(Path(env_file))
     sampled = os.getenv("SAMPLED_DB_DIR")
     if sampled:
-        candidates.append(Path(sampled) / "RawDB_에너지.xlsx")
-    candidates.append(Path(r"E:\DB_MIS") / "RawDB_에너지.xlsx")
-    candidates.append(Path.home() / "Downloads" / "Sampled DB" / "Sampled DB" / "RawDB_에너지.xlsx")
+        candidates.append(Path(sampled) / "DB_에너지.xlsx")
+    candidates.append(Path(r"E:\DB_MIS") / "DB_에너지.xlsx")
+    candidates.append(Path.home() / "Downloads" / "Sampled DB" / "Sampled DB" / "DB_에너지.xlsx")
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -82,7 +82,7 @@ def _row_count(table: str) -> int | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="원본 엑셀로 energy_daily 재동기화")
-    parser.add_argument("--source", help="RawDB_에너지.xlsx 경로 (미지정 시 자동 탐색)")
+    parser.add_argument("--source", help="DB_에너지.xlsx 경로 (미지정 시 자동 탐색)")
     parser.add_argument("--also-production", action="store_true",
                         help="production_daily 도 동기화 시도 (기본 off - 구 형식 파일 주의)")
     args = parser.parse_args()
@@ -94,7 +94,7 @@ def main() -> int:
 
     source = _resolve_source(args.source)
     if source is None:
-        print("[중단] RawDB_에너지.xlsx 를 찾지 못했습니다. --source 로 경로를 지정하세요.")
+        print("[중단] DB_에너지.xlsx 를 찾지 못했습니다. --source 로 경로를 지정하세요.")
         return 2
     # 서비스가 참조하는 경로를 원본 파일 위치로 맞춘다.
     os.environ["ENERGY_SOURCE_XLSX"] = str(source)

@@ -121,11 +121,11 @@ DEFAULT_MODEL_PATH = next(
 
 PATH_WEATHER = PREDICTIVE_MODEL_DIR / "DB_weather.xlsx"
 PATH_HOLIDAY = PREDICTIVE_MODEL_DIR / "DB_holiday.xlsx"
-PATH_ENERGY_SOURCE = sampled_db_path("RawDB_에너지.xlsx", "ENERGY_SOURCE_XLSX")
+PATH_ENERGY_SOURCE = sampled_db_path("DB_에너지.xlsx", "ENERGY_SOURCE_XLSX")
 PATH_WIP_SUMMARY = sampled_db_path("DB_재공품.xlsx", "WIP_SUMMARY_XLSX")
 PATH_WIP_ITEM_MASTER = sampled_db_path("RawDB_재공품.xlsx", "WIP_ITEM_MASTER_XLSX")
 
-# 라벨 문자열의 단일 출처는 RawDB_에너지.xlsx 의 머리글(RPA energy_builder.FIELDS).
+# 라벨 문자열의 단일 출처는 DB_에너지.xlsx 의 머리글(RPA energy_builder.FIELDS).
 # 'N㎥' 는 U+33A5(SQUARE M CUBED) 이며 'Nm3' 와 다른 문자다 — 부분매칭이 아니라
 # 완전일치로 쓰이는 자리이므로 원본 그대로 유지해야 한다.
 ENERGY_UPLOAD_TO_MODEL_COLUMNS = {
@@ -153,7 +153,7 @@ ENERGY_UPLOAD_TO_MODEL_COLUMNS = {
 STATION_MAP: dict[str, str] = dict(FACTORY_TO_WEATHER_STATION)
 
 # 마이그레이션 이전 양식의 Excel 시트명(F-코드) → 현재 한글 공장명 매핑.
-# RawDB_에너지.xlsx, DB_재공품.xlsx 등 외부 파일이 한글 시트로 통일되기 전까지
+# DB_에너지.xlsx, DB_재공품.xlsx 등 외부 파일이 한글 시트로 통일되기 전까지
 # 한글 ↔ F-코드 간 양방향 폴백을 위해 사용합니다.
 LEGACY_SHEET_TO_PLANT: dict[str, str] = {
     k: v for k, v in SHEET_TO_FACTORY_MAP.items() if str(k).startswith("F")
