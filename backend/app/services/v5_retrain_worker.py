@@ -257,7 +257,7 @@ def train_models(X_tr: pd.DataFrame, y_tr: np.ndarray, n_estimators: int) -> lis
 
 # 에너지 전체 데이터를 조회합니다.
 def _fetch_energy_all(factory: str) -> pd.DataFrame:
-    cols = ["date", "mix_prod_kg"] + [spec["db_col"] for spec in TARGET_SPECS.values()]
+    cols = ["factory", "date", "mix_prod_kg"] + [spec["db_col"] for spec in TARGET_SPECS.values()]
     col_sql = ", ".join(cols)
     query = f"""
         SELECT {col_sql}
@@ -270,7 +270,8 @@ def _fetch_energy_all(factory: str) -> pd.DataFrame:
         df = pd.read_sql_query(query, conn, params=(factory,))
     finally:
         conn.close()
-    return overlay_actual_production(df)
+    corrected = overlay_actual_production(df)
+    return corrected.drop(columns=["factory"], errors="ignore")
 
 
 # to korean 스키마 관련 처리를 담당합니다.

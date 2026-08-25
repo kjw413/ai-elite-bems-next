@@ -17,8 +17,9 @@ Daily Energy Alert Report Builder
 
 주간/월간 메일은 period_report_builder.py가 본 모듈의 공용 집계 함수 +
 차트 렌더러(_render_metric_grid_chart)를 재사용한다(일간 자체는 표만 사용, 차트 없음).
-생산량과 원단위는 DB_에너지.xlsx 동기화 값을 사용한다. 원단위는 엑셀 수식값을
-그대로 보존하고 여러 행을 합칠 때만 엑셀 믹스생산량으로 가중 평균한다.
+생산량과 원단위는 DB_에너지.xlsx 동기화 값을 사용하되, 광주는 완제품과 지정
+재공품 실적을 합친 생산량 및 이를 분모로 재산출한 원단위를 사용한다. 여러 행을
+합칠 때는 각 행의 유효 믹스생산량으로 원단위를 가중 평균한다.
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ from tools.mail.config import (
 from tools.mail.logger import get_logger
 from tools.mail.mail_service import InlineImage
 from app.database.db_connection import get_connection
+from app.services.production_actual_service import correct_gwangju_energy_rows
 from app.services.v5_common import load_holidays_excel
 
 log = get_logger("daily_report")
@@ -83,7 +85,7 @@ FACTORY_DISPLAY_ORDER: List[Tuple[str, Optional[List[str]]]] = [
 # 이전 버전의 icon(⚡🔥💧🚿🍦)은 사내 그룹웨어 "전달" 시 Namo 에디터의 sanitizer가
 # Supplementary Plane 이모지를 통째로 잘라내 빈 칸으로 보이는 이슈가 있어 제거.
 # 시각 구분은 header_bg + border-top color 만으로 유지한다.
-# DB_에너지 수식 결과 열을 그대로 사용하는 원단위 5종.
+# 비광주는 DB_에너지 수식값, 광주는 재공품 포함 생산량으로 보정하는 원단위 5종.
 INTENSITY_METRICS = [
     {"key": "power",      "label": "전력 원단위", "unit": "kWh/ton",
      "color": "#F6C90E", "chart_color": "#D97706", "header_bg": "#FDF4CF", "cell_bg": "#FEFAEC",
@@ -551,7 +553,7 @@ def _fetch_rows_range(
     date_to: date,
     factories: Optional[List[str]] = None,
 ) -> List[dict]:
-    """기간 내 DB_에너지 동기화 행과 수식 원단위를 조회."""
+    """기간 내 DB_에너지 행을 조회하고 광주 생산량·원단위를 보정한다."""
     sql = """
         SELECT factory, date,
                total_power_kwh, freezing_power_kwh, air_compressor_kwh,
@@ -577,19 +579,19 @@ def _fetch_rows_range(
         cursor.close()
         conn.close()
 
-    return rows
+    return correct_gwangju_energy_rows(rows, date_from, date_to)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 집계 / 포맷팅
 # ─────────────────────────────────────────────────────────────────────────────
 def _aggregate_weighted(rows: List[dict]) -> Optional[dict]:
-    """공장 행들을 합산하고 RawDB 수식 원단위를 생산량 가중 집계한다.
+    """공장 행들을 합산하고 유효 원단위를 생산량 가중 집계한다.
 
-    Python에서 사용량/생산량으로 원단위를 다시 만들지 않는다. 여러 일자·공장을
-    합칠 때만 엑셀 수식값을 같은 엑셀 믹스생산량으로 가중 평균한다. 단, 생산량 0인
-    행(비조업일 등)은 엑셀 원단위가 없어 가중평균에 참여할 수 없으므로 그 행의
-    사용량만 분자에 별도로 더한다 — 기간 원단위 = 기간 총사용량 / 기간 총생산량.
+    광주는 조회 시 재공품 포함 생산량으로 원단위를 다시 만들고, 비광주는 저장된
+    엑셀 수식값을 유지한다. 여러 일자·공장을 합칠 때 각 행의 유효 믹스생산량으로
+    가중 평균한다. 생산량 0인 행(비조업일 등)은 원단위가 없어 가중평균에 참여할 수
+    없으므로 그 행의 사용량만 분자에 별도로 더한다.
     """
     if not rows:
         return None

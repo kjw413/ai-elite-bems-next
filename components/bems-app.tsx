@@ -497,7 +497,7 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
   const isOperating = (row: AnyData) => medianTon <= 0 || (Number(row.productionTon) || 0) >= operatingThreshold;
   const dailySeries = operatingOnly ? measuredDays.filter(isOperating) : measuredDays;
   const excludedDays = measuredDays.length - dailySeries.length;
-  // 누계도 RawDB 수식 원단위를 엑셀 믹스생산량으로 가중 평균한다.
+  // 누계는 서버가 내려준 공장별 유효 생산량(광주는 지정 WIP 포함)으로 가중 평균한다.
   const monthlyBase = data.monthly ?? [];
   const monthlySeries = (() => {
     if (!showCumulative) return monthlyBase;
@@ -519,7 +519,7 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
     change: row.current != null && row.previous > 0 ? Math.round((row.current / row.previous - 1) * 1000) / 10 : null,
   }));
   const cumulative = data.yoyCumulative;
-  // 일별 누계는 저장 원단위×엑셀 생산량의 가중 평균이다.
+  // 일별 누계는 조회 원단위×유효 생산량의 가중 평균이다.
   const dailyTonTotal = measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.productionTon) || 0), 0);
   const dailyWeightedSum = measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.value) || 0) * (Number(row.productionTon) || 0), 0);
   const dailyWeightedTotal = dailyTonTotal > 0 ? Math.round(dailyWeightedSum / dailyTonTotal * 100) / 100 : null;
@@ -595,7 +595,7 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
           { key: "change", label: "증감률(%)", values: yoyRows.map((row: AnyData) => row.change), total: showMonthlyTotal ? cumulative.change : null,
             format: value => value == null ? "-" : `${Number(value) > 0 ? "+" : ""}${fmt(Number(value))}`,
             className: value => value == null ? undefined : Number(value) > 0 ? "bad" : "good" },
-        ]}/><p className="quad-caption">누계 추이 보기는 RawDB 수식 원단위를 엑셀 믹스생산량으로 가중 평균합니다.</p></DataToggle></article>}
+        ]}/><p className="quad-caption">누계 추이 보기는 공장별 유효 생산량(광주는 지정 WIP 포함)으로 원단위를 가중 평균합니다.</p></DataToggle></article>}
       {/* 폭이 적게 필요한 카드는 한 줄에 둘씩 — 주간 집계·원인분해·매트릭스는 전폭을 쓰면 여백만 늘어난다. */}
       <div className="aux-grid span-all">
         {mode === "month" && weeklyRows.length > 0 && <article className="card chart-card"><CardTitle title="주간 원단위 집계" meta={`${data.unit} · 월~일 7일 · 생산량 가중`}><CsvButton filename={`intensity_weekly_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={weeklyRows} columns={["week","span","days","value","productionTon","usage"]} labels={{week:"주차",span:"기간",days:"가동일수",value:`원단위(${data.unit})`,productionTon:"생산량(ton)",usage:"사용량"}}/></CardTitle>

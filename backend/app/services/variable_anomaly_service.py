@@ -133,7 +133,7 @@ def _fetch_baseline_inputs(
     hist_from = target_date - timedelta(days=int(bdays * 2.5) + 14)
 
     query = """
-        SELECT date, mix_prod_kg, total_power_kwh, fuel_nm3, water_ton
+        SELECT factory, date, mix_prod_kg, total_power_kwh, fuel_nm3, water_ton
         FROM energy_daily
         WHERE factory=%s AND date>=%s AND date<=%s
         ORDER BY date

@@ -1,9 +1,9 @@
-"""운영 기준 실제 생산량 조회와 선택적 energy_daily 생산량 오버레이.
+"""운영 기준 실제 생산량 조회와 선택적 energy_daily 생산량 보정.
 
-생산 KPI·예측 특성처럼 운영 생산량이 필요한 소비처만
+생산 KPI·예측 특성처럼 운영 생산량이 필요한 소비처는
 ``production_daily.actual_qty`` 합계를 사용한다. 광주는 판매용 재공품 환산량을
-추가한다. 에너지 원단위는 ``DB_에너지.xlsx`` 수식 결과가 단일 기준이므로
-이 모듈이 ``power_per_ton_kwh`` 등 원단위 열을 다시 계산하거나 수정하지 않는다.
+추가한다. 일반 생산량 오버레이는 ``DB_에너지.xlsx`` 원단위를 유지하지만,
+광주 에너지 조회는 재공품 포함 생산량을 분모로 5개 원단위를 다시 계산한다.
 """
 from __future__ import annotations
 
@@ -24,6 +24,15 @@ from app.services.production_correction_service import (
 
 
 ACTUAL_PRODUCTION_COLUMN = "actual_prod_kg"
+
+GWANGJU_FACTORY = "광주"
+GWANGJU_ENERGY_RATE_COLUMNS = (
+    ("freezing_power_kwh", "freezing_power_per_ton_kwh"),
+    ("air_compressor_kwh", "air_compressor_per_ton_kwh"),
+    ("total_power_kwh", "power_per_ton_kwh"),
+    ("fuel_nm3", "fuel_per_ton_nm3"),
+    ("water_ton", "water_per_ton_ton"),
+)
 
 
 def _normalize_date(value) -> date | None:
@@ -118,20 +127,111 @@ def fetch_actual_production(
     )
 
 
-def _actual_map(actual: pd.DataFrame) -> dict[tuple[date, str], float]:
-    if actual is None or actual.empty:
+def _actual_map(
+    actual: pd.DataFrame | Iterable[dict] | None,
+) -> dict[tuple[date, str], float]:
+    """실적 행을 일자×공장 맵으로 변환하고 중복 행은 합산한다."""
+    if actual is None:
+        return {}
+    frame = actual if isinstance(actual, pd.DataFrame) else pd.DataFrame(list(actual))
+    if frame.empty:
         return {}
     required = {"date", "factory", ACTUAL_PRODUCTION_COLUMN}
-    if not required.issubset(actual.columns):
-        raise ValueError(f"생산실적 데이터 필수 컬럼 누락: {sorted(required - set(actual.columns))}")
+    if not required.issubset(frame.columns):
+        raise ValueError(f"생산실적 데이터 필수 컬럼 누락: {sorted(required - set(frame.columns))}")
     result: dict[tuple[date, str], float] = {}
-    for row in actual.itertuples(index=False):
+    for row in frame.itertuples(index=False):
         normalized = _normalize_date(row.date)
         if normalized is None:
             continue
         value = pd.to_numeric(row.actual_prod_kg, errors="coerce")
-        result[(normalized, str(row.factory))] = 0.0 if pd.isna(value) else float(value)
+        key = (normalized, str(row.factory))
+        result[key] = result.get(key, 0.0) + (0.0 if pd.isna(value) else float(value))
     return result
+
+
+def correct_gwangju_energy_frame(
+    energy: pd.DataFrame,
+    *,
+    actual: pd.DataFrame | Iterable[dict] | None = None,
+) -> pd.DataFrame:
+    """광주 에너지 행을 재공품 포함 운영 생산량 기준으로 보정한다.
+
+    ``energy_daily`` 원본은 변경하지 않는다. 광주 행만 ``mix_prod_kg``를
+    완제품+지정 재공품 환산 생산량으로 교체하고, 존재하는 5개 원단위 열을
+    사용량 / 보정 생산톤으로 다시 계산한다. 생산량이 0이면 원단위도 0이다.
+    광주 외 공장의 생산량과 저장 원단위는 그대로 유지한다.
+    """
+    if energy is None or energy.empty:
+        return energy
+    required = {"date", "factory"}
+    if not required.issubset(energy.columns):
+        raise ValueError(f"에너지 데이터 필수 컬럼 누락: {sorted(required - set(energy.columns))}")
+
+    out = energy.copy()
+    gwangju_mask = out["factory"].astype(str).eq(GWANGJU_FACTORY)
+    if not gwangju_mask.any():
+        return out
+
+    normalized_dates = pd.to_datetime(out["date"], errors="coerce").dt.date
+    if actual is None:
+        valid_dates = normalized_dates[gwangju_mask].dropna()
+        actual = (
+            fetch_actual_production(valid_dates.min(), valid_dates.max())
+            if not valid_dates.empty
+            else pd.DataFrame(columns=["date", "factory", ACTUAL_PRODUCTION_COLUMN])
+        )
+
+    production_by_key = _actual_map(actual)
+    corrected_production = [
+        production_by_key.get((day, GWANGJU_FACTORY), 0.0)
+        for day in normalized_dates[gwangju_mask]
+    ]
+    out.loc[gwangju_mask, "mix_prod_kg"] = corrected_production
+
+    production_ton = (
+        pd.to_numeric(out.loc[gwangju_mask, "mix_prod_kg"], errors="coerce")
+        .fillna(0.0)
+        .div(1000.0)
+    )
+    positive_production = production_ton > 0
+    for usage_col, unit_col in GWANGJU_ENERGY_RATE_COLUMNS:
+        if usage_col not in out.columns or unit_col not in out.columns:
+            continue
+        usage = pd.to_numeric(out.loc[gwangju_mask, usage_col], errors="coerce").fillna(0.0)
+        corrected_rate = usage.div(production_ton.where(positive_production)).fillna(0.0)
+        out.loc[gwangju_mask, unit_col] = corrected_rate
+    return out
+
+
+def correct_gwangju_energy_rows(
+    rows: Iterable[dict],
+    date_from: date | str | None = None,
+    date_to: date | str | None = None,
+    *,
+    actual: pd.DataFrame | Iterable[dict] | None = None,
+) -> list[dict]:
+    """dict 에너지 행에 :func:`correct_gwangju_energy_frame`을 적용한다."""
+    copied = [dict(row) for row in rows]
+    if not copied or not any(str(row.get("factory")) == GWANGJU_FACTORY for row in copied):
+        return copied
+
+    if actual is None and (date_from is not None or date_to is not None):
+        frame_dates = pd.to_datetime(
+            [row.get("date") for row in copied if str(row.get("factory")) == GWANGJU_FACTORY],
+            errors="coerce",
+        )
+        valid_dates = [value.date() for value in frame_dates if not pd.isna(value)]
+        start = _normalize_date(date_from) or (min(valid_dates) if valid_dates else None)
+        end = _normalize_date(date_to) or (max(valid_dates) if valid_dates else None)
+        actual = (
+            fetch_actual_production(start, end)
+            if start is not None and end is not None
+            else pd.DataFrame(columns=["date", "factory", ACTUAL_PRODUCTION_COLUMN])
+        )
+
+    corrected = correct_gwangju_energy_frame(pd.DataFrame(copied), actual=actual)
+    return corrected.to_dict("records")
 
 
 def overlay_actual_production(
@@ -207,6 +307,9 @@ def get_actual_production_kg(factory: str, target_date: date | str) -> float | N
 
 __all__ = [
     "ACTUAL_PRODUCTION_COLUMN",
+    "GWANGJU_ENERGY_RATE_COLUMNS",
+    "correct_gwangju_energy_frame",
+    "correct_gwangju_energy_rows",
     "fetch_actual_production",
     "get_actual_production_kg",
     "operational_production_sum_sql",

@@ -17,6 +17,7 @@ from app.domain.factories import (
     weighted_stored_unit_rate,
 )
 from app.database.db_connection import get_connection
+from app.services.production_actual_service import correct_gwangju_energy_frame
 
 # 사용량 컬럼 (합계 대상)
 USAGE_COLUMNS = [
@@ -34,7 +35,7 @@ UNIT_CONSUMPTION_COLUMNS = list(ENERGY_UNIT_COLUMNS)
 
 
 def _aggregate_energy_rows(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
-    """사용량은 합산하고 RawDB 수식 원단위는 생산량 가중 평균한다."""
+    """사용량은 합산하고 행별 유효 원단위는 생산량 가중 평균한다."""
     if df.empty:
         return pd.DataFrame()
     rows: list[dict] = []
@@ -102,7 +103,10 @@ def get_daily_data(
     finally:
         conn.close()
 
-    # DB_에너지의 mix_prod_kg와 수식 원단위를 그대로 유지한다.
+    # 원본 energy_daily는 보존하되 광주는 완제품+지정 재공품 생산량과 그
+    # 생산량을 분모로 다시 계산한 5개 원단위를 조회 결과에 적용한다.
+    df = correct_gwangju_energy_frame(df)
+
     # 필터 처리 및 집계 로직
     if factories is not None:
         parts = []
@@ -149,7 +153,7 @@ def get_monthly_data(
     """
     월별 집계 데이터.
     사용량 = SUM(일별 값)
-    원단위 = DB_에너지 수식 결과의 믹스생산량 가중 평균
+    원단위 = 행별 유효 믹스생산량 가중 평균
     """
     daily = get_daily_data(factories, date_from, date_to)
     if daily.empty:
@@ -210,6 +214,7 @@ def get_yoy_data(
     finally:
         conn.close()
 
+    df = correct_gwangju_energy_frame(df)
     if df.empty:
         return pd.DataFrame()
 
@@ -279,7 +284,7 @@ FACTORY_ORDER = list(FACTORY_QUERY_ORDER)
 
 # calc 단위 rate 관련 처리를 담당합니다.
 def _stored_unit_rate(df: pd.DataFrame, unit_col: str):
-    """DB_에너지 수식 원단위를 믹스생산량으로 가중 집계."""
+    """행별 유효 원단위를 믹스생산량으로 가중 집계."""
     return weighted_stored_unit_rate(df, unit_col)
 
 
@@ -497,7 +502,7 @@ def get_production_usage_comparison(base_date: str) -> pd.DataFrame:
     df_prev_mtd = get_daily_data(date_from=p["prev_mtd"][0], date_to=p["prev_mtd"][1])
 
     usage_defs = [
-        ("생산량(RawDB 믹스)\n[ton]", "mix_prod_kg"),
+        ("생산량(유효 믹스)\n[ton]", "mix_prod_kg"),
         ("전력 사용량\n[kWh]", "total_power_kwh"),
         ("연료 사용량\n[Nm³]", "fuel_nm3"),
         ("용수 사용량\n[ton]", "water_ton"),

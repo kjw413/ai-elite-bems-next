@@ -198,11 +198,11 @@ def weighted_stored_unit_rate(
     *,
     production_col: str = "mix_prod_kg",
 ) -> float | None:
-    """DB_에너지 수식 원단위를 믹스생산량으로 가중 집계한다.
+    """행별 유효 원단위를 해당 행의 믹스생산량으로 가중 집계한다.
 
-    일별 원단위를 사용량/생산량으로 다시 만들지 않는다. 엑셀 수식 결과를
-    단일 기준으로 삼고, 여러 일자·공장을 합칠 때만 같은 엑셀 생산량으로
-    가중 평균한다.
+    비광주 행은 DB_에너지 수식값과 원본 생산량이고, 광주 조회 행은 지정
+    WIP가 포함된 운영 생산량으로 미리 재산출된 값이다. 이 함수는 전달받은
+    행을 다시 계산하지 않고 여러 일자·공장을 합칠 때만 가중 평균한다.
     """
     if df.empty or unit_col not in df.columns or production_col not in df.columns:
         return None

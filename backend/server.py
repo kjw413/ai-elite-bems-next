@@ -637,9 +637,9 @@ def _monthly_intensity_fallback_sources(
     """결측 물리 공장들만의 (연,월)별 (raw 사용량, 생산 kg) 합 — 없으면 None.
 
     dashboard()의 월별 전년비·intensity_analysis()의 월별 원단위가 함께 쓰는
-    가중 원단위(Σusage/Σproduction) 계산의 폴백 소스. 두 화면 모두 RawDB 저장
-    원단위(power_per_ton_kwh 등) × mix_prod_kg 의 가중평균을 쓰는데, 이 SQL은
-    `unit_col > 0 AND mix_prod_kg > 0` 인 날짜만 센다(데이터 품질 필터).
+    가중 원단위(Σusage/Σproduction) 계산의 폴백 소스. 두 화면 모두 행별 유효
+    원단위×유효 생산량(광주는 지정 재공품 포함)의 가중평균을 쓰며, 경산처럼
+    일별 행이 없는 달만 이 월별 원본으로 보충한다.
 
     ⚠ 반환값은 factory 라벨 전체가 아니라 **결측이 있는 물리 공장만의 합**이다 —
     호출자가 기존 SQL 결과(다른 공장들의 필터 통과분)에 "더해야" 한다(ADD).
@@ -1043,6 +1043,103 @@ def actual_production_daily_kg(
     return daily
 
 
+def corrected_energy_rows(
+    rows: list[dict[str, Any]],
+    actual_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """광주만 운영 생산량(완제품+지정 재공품)으로 분모와 5개 원단위를 보정한다."""
+    service = import_core("app.services.production_actual_service")
+    return _table_records(service.correct_gwangju_energy_rows(rows, actual=actual_records))
+
+
+def fetch_corrected_energy_rows(
+    date_from: date,
+    date_to: date,
+    actual_records: list[dict[str, Any]],
+    *,
+    factory: str | None = None,
+) -> list[dict[str, Any]]:
+    """일·공장 단위 energy_daily를 읽고 원본 적재를 바꾸지 않은 채 광주만 보정한다."""
+    clause, values = factory_clause(factory) if factory is not None else ("", [])
+    rows = fetch_all(
+        """
+        SELECT date, factory,
+               SUM(freezing_power_kwh) freezing_power_kwh,
+               SUM(air_compressor_kwh) air_compressor_kwh,
+               SUM(total_power_kwh) total_power_kwh,
+               SUM(fuel_nm3) fuel_nm3,
+               SUM(water_ton) water_ton,
+               SUM(wastewater_ton) wastewater_ton,
+               SUM(mix_prod_kg) mix_prod_kg,
+               SUM(CASE WHEN freezing_power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN freezing_power_per_ton_kwh * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN freezing_power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) freezing_power_per_ton_kwh,
+               SUM(CASE WHEN air_compressor_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN air_compressor_per_ton_kwh * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN air_compressor_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) air_compressor_per_ton_kwh,
+               SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN power_per_ton_kwh * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) power_per_ton_kwh,
+               SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN fuel_per_ton_nm3 * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) fuel_per_ton_nm3,
+               SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN water_per_ton_ton * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) water_per_ton_ton
+        FROM energy_daily WHERE date BETWEEN %s AND %s
+        """ + clause + " GROUP BY date, factory ORDER BY date, factory",
+        (date_from, date_to, *values),
+    )
+    return corrected_energy_rows(rows, actual_records)
+
+
+def _energy_rows_in_scope(
+    rows: list[dict[str, Any]],
+    factory: str,
+    date_from: date,
+    date_to: date,
+) -> list[dict[str, Any]]:
+    members = FACTORY_MEMBERS.get(factory)
+    targets = None if members == [] else set(members if members is not None else [factory])
+    scoped: list[dict[str, Any]] = []
+    for row in rows:
+        row_date = normalize_date(row.get("date"))
+        if row_date is None or not date_from <= row_date <= date_to:
+            continue
+        if targets is not None and str(row.get("factory")) not in targets:
+            continue
+        scoped.append(row)
+    return scoped
+
+
+def aggregate_energy_rows(
+    rows: list[dict[str, Any]],
+    factory: str,
+    date_from: date,
+    date_to: date,
+) -> dict[str, float | None]:
+    """보정된 일·공장 행을 저장 원단위의 생산량 가중 규칙으로 기간 집계한다."""
+    totals: dict[str, float | None] = {
+        "power": 0.0, "fuel": 0.0, "water": 0.0, "wastewater": 0.0,
+        "raw_production": 0.0,
+    }
+    weighted = {key: 0.0 for key in INTENSITY_METRICS}
+    unit_production = {key: 0.0 for key in INTENSITY_METRICS}
+    unit_usage = {key: 0.0 for key in INTENSITY_METRICS}
+    for row in _energy_rows_in_scope(rows, factory, date_from, date_to):
+        totals["power"] = scalar(totals["power"]) + scalar(row.get("total_power_kwh"))
+        totals["fuel"] = scalar(totals["fuel"]) + scalar(row.get("fuel_nm3"))
+        totals["water"] = scalar(totals["water"]) + scalar(row.get("water_ton"))
+        totals["wastewater"] = scalar(totals["wastewater"]) + scalar(row.get("wastewater_ton"))
+        production_kg = scalar(row.get("mix_prod_kg"))
+        totals["raw_production"] = scalar(totals["raw_production"]) + production_kg
+        for metric_key, spec in INTENSITY_METRICS.items():
+            value = optional_scalar(row.get(spec["unit_column"]))
+            if value is None or value <= 0 or production_kg <= 0:
+                continue
+            weighted[metric_key] += value * production_kg
+            unit_production[metric_key] += production_kg
+            unit_usage[metric_key] += scalar(row.get(spec["column"]))
+    for metric_key in INTENSITY_METRICS:
+        production_kg = unit_production[metric_key]
+        totals[f"{metric_key}_intensity"] = (
+            weighted[metric_key] / production_kg if production_kg > 0 else None
+        )
+        totals[f"{metric_key}_unit_production"] = production_kg
+        totals[f"{metric_key}_unit_usage"] = unit_usage[metric_key]
+    return totals
+
+
 @app.exception_handler(Exception)
 async def unhandled_error(request: Request, exc: Exception):
     """Catch-all 500. Starlette wires bare-`Exception` handlers into
@@ -1150,27 +1247,19 @@ def aggregate_period(
     *,
     actual_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, float]:
-    clause, values = factory_clause(factory)
-    row = fetch_one(
-        """
-        SELECT COALESCE(SUM(total_power_kwh),0) power,
-               COALESCE(SUM(fuel_nm3),0) fuel,
-               COALESCE(SUM(water_ton),0) water,
-               COALESCE(SUM(wastewater_ton),0) wastewater,
-               COALESCE(SUM(mix_prod_kg),0) raw_production,
-               SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN power_per_ton_kwh * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) power_intensity,
-               SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN fuel_per_ton_nm3 * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) fuel_intensity,
-               SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN water_per_ton_ton * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) water_intensity
-        FROM energy_daily WHERE date BETWEEN %s AND %s
-        """ + clause,
-        (date_from, date_to, *values),
-    ) or {}
     if actual_records is None:
         frame = fetch_actual_production_frame(date_from, date_to)
         actual_records = actual_production_records(frame)
-    totals = {key: scalar(row.get(key)) for key in ("power", "fuel", "water", "wastewater", "raw_production")}
+    rows = fetch_corrected_energy_rows(
+        date_from, date_to, actual_records, factory=factory,
+    )
+    aggregated = aggregate_energy_rows(rows, factory, date_from, date_to)
+    totals = {
+        key: scalar(aggregated.get(key))
+        for key in ("power", "fuel", "water", "wastewater", "raw_production")
+    }
     for key in ("power", "fuel", "water"):
-        totals[f"{key}_intensity"] = optional_scalar(row.get(f"{key}_intensity"))
+        totals[f"{key}_intensity"] = optional_scalar(aggregated.get(f"{key}_intensity"))
     totals["production"] = actual_production_kg(actual_records, factory, date_from, date_to)
     return totals
 
@@ -1273,54 +1362,18 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
     # 홈은 MTD/YTD × 전년 동기 × 5개 공장을 동시에 보여준다. aggregate_period를
     # 조합별로 호출하면 동일 기간 energy_daily를 20회 넘게 재조회하므로, 일·공장별
     # 원본을 한 번 읽고 아래에서 기간/공장 조건만 메모리 집계한다.
-    dashboard_energy_rows = fetch_all(
-        """
-        SELECT date, factory, SUM(total_power_kwh) power, SUM(fuel_nm3) fuel,
-               SUM(water_ton) water, SUM(wastewater_ton) wastewater,
-               SUM(mix_prod_kg) raw_production,
-               SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN power_per_ton_kwh * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) power_intensity,
-               SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN fuel_per_ton_nm3 * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) fuel_intensity,
-               SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN water_per_ton_ton * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) water_intensity,
-               SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) power_unit_production,
-               SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) fuel_unit_production,
-               SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) water_unit_production
-        FROM energy_daily WHERE date BETWEEN %s AND %s
-        GROUP BY date, factory ORDER BY date, factory
-        """,
-        (previous_ytd_start, base),
+    dashboard_energy_rows = fetch_corrected_energy_rows(
+        previous_ytd_start, base, actual_records,
     )
 
     def dashboard_aggregate(selected_factory: str, date_from: date, date_to: date) -> dict[str, float]:
-        members = FACTORY_MEMBERS.get(selected_factory)
-        targets = None if members == [] else set(members if members is not None else [selected_factory])
-        totals = {key: 0.0 for key in ("power", "fuel", "water", "wastewater")}
-        weighted = {key: 0.0 for key in ("power", "fuel", "water")}
-        weighted_production = {key: 0.0 for key in ("power", "fuel", "water")}
-        raw_production = 0.0
-        for energy_row in dashboard_energy_rows:
-            row_date = normalize_date(energy_row.get("date"))
-            if row_date is None or row_date < date_from or row_date > date_to:
-                continue
-            if targets is not None and str(energy_row.get("factory")) not in targets:
-                continue
-            for key in totals:
-                totals[key] += scalar(energy_row.get(key))
-            row_production = scalar(energy_row.get("raw_production"))
-            raw_production += row_production
-            for key in weighted:
-                value = optional_scalar(energy_row.get(f"{key}_intensity"))
-                unit_production = scalar(energy_row.get(f"{key}_unit_production"))
-                if value is not None and value > 0 and unit_production > 0:
-                    weighted[key] += value * unit_production
-                    weighted_production[key] += unit_production
-        totals["raw_production"] = raw_production
-        for key in weighted:
-            metric_production = weighted_production[key]
-            totals[f"{key}_intensity"] = weighted[key] / metric_production if metric_production > 0 else None
+        totals = aggregate_energy_rows(
+            dashboard_energy_rows, selected_factory, date_from, date_to,
+        )
         totals["production"] = actual_production_kg(
             actual_records, selected_factory, date_from, date_to,
         )
-        return totals
+        return totals  # type: ignore[return-value]
 
     current = dashboard_aggregate(factory, month_start, base)
     previous = dashboard_aggregate(factory, prev_start, prev_base)
@@ -1405,20 +1458,6 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
                 "upper": round(metric_upper, 2) if metric_upper is not None else None,
             })
 
-    yoy_clause, yoy_values = factory_clause(factory)
-    yoy_rows = fetch_all(
-        """
-        SELECT YEAR(date) y, MONTH(date) m,
-               SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN power_per_ton_kwh * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) power,
-               SUM(CASE WHEN power_per_ton_kwh > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) power_kg,
-               SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN fuel_per_ton_nm3 * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) fuel,
-               SUM(CASE WHEN fuel_per_ton_nm3 > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) fuel_kg,
-               SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN water_per_ton_ton * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END),0) water,
-               SUM(CASE WHEN water_per_ton_ton > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) water_kg
-        FROM energy_daily WHERE date BETWEEN %s AND %s
-        """ + yoy_clause + " GROUP BY y,m ORDER BY y,m",
-        (date(base.year - 1, 1, 1), base, *yoy_values),
-    )
     yoy_maps: dict[str, dict[tuple[int, int], float]] = {
         "power": {}, "fuel": {}, "water": {},
     }
@@ -1427,13 +1466,27 @@ def dashboard(factory: str = "전사", requested_date: date | None = Query(None,
     yoy_production_kg: dict[str, dict[tuple[int, int], float]] = {
         "power": {}, "fuel": {}, "water": {},
     }
-    for row in yoy_rows:
-        key = (int(row["y"]), int(row["m"]))
+    yoy_from = date(base.year - 1, 1, 1)
+    yoy_rows = _energy_rows_in_scope(dashboard_energy_rows, factory, yoy_from, base)
+    yoy_months = sorted({
+        (row_date.year, row_date.month)
+        for row in yoy_rows
+        if (row_date := normalize_date(row.get("date"))) is not None
+    })
+    for key in yoy_months:
+        year, month = key
+        month_from = date(year, month, 1)
+        month_to = min(date(year, month, calendar.monthrange(year, month)[1]), base)
+        aggregated = aggregate_energy_rows(
+            dashboard_energy_rows, factory, month_from, month_to,
+        )
         for metric_key in yoy_maps:
-            value = optional_scalar(row.get(metric_key))
+            value = optional_scalar(aggregated.get(f"{metric_key}_intensity"))
             if value is not None:
                 yoy_maps[metric_key][key] = value
-                yoy_production_kg[metric_key][key] = scalar(row.get(f"{metric_key}_kg"))
+                yoy_production_kg[metric_key][key] = scalar(
+                    aggregated.get(f"{metric_key}_unit_production")
+                )
     # 경산 등 일별 실적이 없는 달의 월별 전년비 폴백 — 그 달은 energy_daily에
     # 행이 아예 없어 위 SQL의 CASE WHEN이 전부 걸러내므로 yoy_maps에 조용히
     # 빠져 있다. energy_monthly/production_monthly 값을 기존 값에 "더한다"
@@ -1736,7 +1789,6 @@ def intensity_analysis(
     if spec is None:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 지표입니다: {metric}")
     usage_col = spec["column"]
-    unit_col = spec["unit_column"]
 
     max_row = fetch_one("SELECT MAX(date) max_date FROM energy_daily") or {}
     base = bounded_base_date(requested_date, max_row.get("max_date"))
@@ -1744,19 +1796,32 @@ def intensity_analysis(
         mode = "range"
     window_from, window_to = resolve_energy_period(mode, base, date_from, date_to)
     history_start = min(date(base.year - 1, 1, 1), window_from)
+    matrix_prev_from = previous_year_date(window_from)
+    matrix_prev_to = previous_year_date(window_to)
+    energy_from = min(history_start, matrix_prev_from)
+    actual_frame = fetch_actual_production_frame(energy_from, base)
+    actual_records = actual_production_records(actual_frame)
+    # 선택 공장뿐 아니라 공장 효율 매트릭스도 같은 보정 원본을 쓰므로 전 공장을
+    # 일·공장 행으로 한 번 읽는다. matrix 전년 구간까지 포함해야 이전값이 빠지지 않는다.
+    energy_rows = fetch_corrected_energy_rows(energy_from, base, actual_records)
 
-    clause, values = factory_clause(factory)
     # 연간 모드는 월별 추이로 읽는 화면이라 일별 행을 내려보내지 않는다.
-    daily_rows = [] if mode == "year" else fetch_all(
-        f"""
-        SELECT date,
-               SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN {unit_col} * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END), 0) unit_value,
-               SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) production_kg,
-               SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN {usage_col} ELSE 0 END) usage_value
-        FROM energy_daily WHERE date BETWEEN %s AND %s
-        """ + clause + " GROUP BY date ORDER BY date",
-        (window_from, window_to, *values),
-    )
+    daily_rows: list[dict[str, Any]] = []
+    if mode != "year":
+        scoped_daily = _energy_rows_in_scope(energy_rows, factory, window_from, window_to)
+        daily_dates = sorted({
+            row_date
+            for row in scoped_daily
+            if (row_date := normalize_date(row.get("date"))) is not None
+        })
+        for row_date in daily_dates:
+            aggregated = aggregate_energy_rows(energy_rows, factory, row_date, row_date)
+            daily_rows.append({
+                "date": row_date,
+                "unit_value": aggregated.get(f"{metric}_intensity"),
+                "production_kg": aggregated.get(f"{metric}_unit_production"),
+                "usage_value": aggregated.get(f"{metric}_unit_usage"),
+            })
     daily = []
     for row in daily_rows:
         row_date = normalize_date(row.get("date"))
@@ -1771,8 +1836,8 @@ def intensity_analysis(
         })
 
     # 주간 실적 집계 — 원단위는 비율이라 주 평균을 단순 산술평균으로 내면 안 된다.
-    # 일별 저장 원단위를 그 날 믹스생산량으로 가중 평균해야 주 전체를 한 덩어리로
-    # 집계한 값과 일치한다(월 누계·YTD 가 쓰는 규칙과 동일).
+    # 행별 유효 원단위를 그 날 유효 생산량(광주는 지정 재공품 포함)으로 가중
+    # 평균해야 주 전체를 한 덩어리로 집계한 값과 일치한다(월 누계·YTD와 동일).
     weekly: list[dict[str, Any]] = []
     weekly_excluded: list[str] = []
     if mode == "month":
@@ -1803,15 +1868,23 @@ def intensity_analysis(
                 "usage": round(cell["usage"], 1),
             })
 
-    monthly_rows = fetch_all(
-        f"""
-        SELECT YEAR(date) y, MONTH(date) m,
-               SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN {unit_col} * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END), 0) unit_value,
-               SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) production_kg
-        FROM energy_daily WHERE date BETWEEN %s AND %s
-        """ + clause + " GROUP BY y,m ORDER BY y,m",
-        (history_start, base, *values),
-    )
+    scoped_history = _energy_rows_in_scope(energy_rows, factory, history_start, base)
+    history_months = sorted({
+        (row_date.year, row_date.month)
+        for row in scoped_history
+        if (row_date := normalize_date(row.get("date"))) is not None
+    })
+    monthly_rows: list[dict[str, Any]] = []
+    for year, month in history_months:
+        month_from = date(year, month, 1)
+        month_to = min(date(year, month, calendar.monthrange(year, month)[1]), base)
+        aggregated = aggregate_energy_rows(energy_rows, factory, month_from, month_to)
+        monthly_rows.append({
+            "y": year,
+            "m": month,
+            "unit_value": aggregated.get(f"{metric}_intensity"),
+            "production_kg": aggregated.get(f"{metric}_unit_production"),
+        })
     monthly_production: dict[tuple[int, int], float] = {}
     monthly_weighted_values: dict[tuple[int, int], float] = {}
     monthly_map: dict[tuple[int, int], float] = {}
@@ -1863,21 +1936,14 @@ def intensity_analysis(
             "current": round(current, 2) if current is not None else None,
             "previous": round(previous, 2) if previous is not None else None,
             "target": round(target_value, 2) if target_value is not None else None,
-            # 누계 토글은 저장 원단위×엑셀 생산량의 가중 평균을 사용한다.
+            # 누계 토글은 행별 유효 원단위×유효 생산량(광주는 WIP 포함)을 사용한다.
             "currentTon": round(monthly_production.get((base.year, month), 0.0) / 1000, 3),
             "previousTon": round(monthly_production.get((base.year - 1, month), 0.0) / 1000, 3),
         })
 
     def period_intensity(f: str, date_from: date, date_to: date) -> float | None:
-        period_clause, period_values = factory_clause(f)
-        row = fetch_one(
-            f"""
-            SELECT SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN {unit_col} * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END), 0) value
-            FROM energy_daily WHERE date BETWEEN %s AND %s
-            """ + period_clause,
-            (date_from, date_to, *period_values),
-        ) or {}
-        return optional_scalar(row.get("value"))
+        aggregated = aggregate_energy_rows(energy_rows, f, date_from, date_to)
+        return optional_scalar(aggregated.get(f"{metric}_intensity"))
 
     prev_base = previous_year_date(base)
     summary = {}
@@ -1896,8 +1962,6 @@ def intensity_analysis(
     # 공장 효율 매트릭스는 조회 구간을 그대로 따른다 — 월간이면 당월 누계, 연간이면
     # 연 누계. 모드를 바꿔도 매트릭스만 MTD 로 남아 있으면 같은 화면의 다른 카드와
     # 기간이 어긋나 비교가 성립하지 않는다.
-    matrix_prev_from = previous_year_date(window_from)
-    matrix_prev_to = previous_year_date(window_to)
     matrix = []
     for display_factory in DISPLAY_FACTORIES:
         cur = period_intensity(display_factory, window_from, window_to)
@@ -1911,24 +1975,16 @@ def intensity_analysis(
             "change": rate_change(cur, prv) if prv else None,
         })
 
-    # 원단위 변동 원인분해도 RawDB 수식 원단위와 같은 mix_prod_kg를 기준으로 한다.
+    # 원단위 변동 원인분해도 화면의 일·월·요약과 같은 보정 생산량을 기준으로 한다.
     def build_bridge(start: date, prev_start: date) -> dict[str, Any] | None:
-        bridge_clause, bridge_values = factory_clause(factory)
-
         def totals(date_from: date, date_to: date) -> dict[str, float | None]:
-            row = fetch_one(
-                f"""
-                SELECT SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN {usage_col} ELSE 0 END) usage_value,
-                       SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END) production_kg,
-                       SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN {unit_col} * mix_prod_kg ELSE 0 END) / NULLIF(SUM(CASE WHEN {unit_col} > 0 AND mix_prod_kg > 0 THEN mix_prod_kg ELSE 0 END), 0) intensity
-                FROM energy_daily WHERE date BETWEEN %s AND %s
-                """ + bridge_clause,
-                (date_from, date_to, *bridge_values),
-            ) or {}
+            aggregated = aggregate_energy_rows(energy_rows, factory, date_from, date_to)
             return {
-                "usage": scalar(row.get("usage_value")),
-                "production_ton": scalar(row.get("production_kg")) / 1000,
-                "intensity": optional_scalar(row.get("intensity")),
+                "usage": scalar(aggregated.get(f"{metric}_unit_usage")),
+                "production_ton": scalar(
+                    aggregated.get(f"{metric}_unit_production")
+                ) / 1000,
+                "intensity": optional_scalar(aggregated.get(f"{metric}_intensity")),
             }
 
         current_totals = totals(start, base)

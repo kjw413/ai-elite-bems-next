@@ -28,7 +28,10 @@ from dotenv import load_dotenv
 
 from app.database.db_connection import get_connection, execute_query, execute_write
 from app.domain.factories import PRODUCTION_DAILY_FACTORY_MAP
-from app.services.production_actual_service import overlay_actual_production
+from app.services.production_actual_service import (
+    correct_gwangju_energy_frame,
+    overlay_actual_production,
+)
 from app.services.production_correction_service import finished_production_filter_sql
 from app.services.v5_common import (
     BAND_STATUS_LABELS_KO,
@@ -405,7 +408,7 @@ def _fetch_energy_raw(
     # 단일 공장 기준 (남양주1/2 도 그대로)
     rows = execute_query(
         """
-        SELECT date, mix_prod_kg, total_power_kwh, fuel_nm3, water_ton,
+        SELECT factory, date, mix_prod_kg, total_power_kwh, fuel_nm3, water_ton,
                power_per_ton_kwh, fuel_per_ton_nm3, water_per_ton_ton
         FROM energy_daily
         WHERE factory=%s AND date BETWEEN
@@ -417,7 +420,16 @@ def _fetch_energy_raw(
     if not rows:
         return {"raw": "energy_daily 데이터 없음"}
 
-    rows = overlay_actual_production(pd.DataFrame(rows)).to_dict("records")
+    energy = pd.DataFrame(rows)
+    if "factory" not in energy.columns:
+        energy["factory"] = factory
+    if factory == "광주":
+        energy = correct_gwangju_energy_frame(energy)
+    else:
+        # 예측 진단의 기존 모델 계약: 비광주도 운영 생산량으로만 교체하고
+        # DB_에너지의 저장 원단위는 수정하지 않는다.
+        energy = overlay_actual_production(energy)
+    rows = energy.to_dict("records")
 
     today = next((r for r in rows if str(r["date"]).split(" ")[0] == pred_date), None)
     yest = next((r for r in rows if str(r["date"]).split(" ")[0] != pred_date), None)

@@ -927,6 +927,93 @@ class ServerHelperTests(unittest.TestCase):
         self.assertAlmostEqual(entry["usage"]["power"]["current"], 100.0)        # kWh → MWh
         self.assertAlmostEqual(entry["production"]["current"], 50.0)             # kg → ton
 
+    def test_gwangju_energy_rows_use_wip_inclusive_production_denominator(self) -> None:
+        energy = [{
+            "date": date(2026, 8, 24), "factory": "광주", "mix_prod_kg": 1000.0,
+            "freezing_power_kwh": 40.0, "air_compressor_kwh": 20.0,
+            "total_power_kwh": 100.0, "fuel_nm3": 10.0, "water_ton": 4.0,
+            "wastewater_ton": 2.0,
+            "freezing_power_per_ton_kwh": 40.0,
+            "air_compressor_per_ton_kwh": 20.0,
+            "power_per_ton_kwh": 100.0,
+            "fuel_per_ton_nm3": 10.0,
+            "water_per_ton_ton": 4.0,
+        }]
+        # production_daily 완제품과 DB_재공품 행이 같은 날짜·공장으로 따로 들어온다.
+        actual = [
+            {"date": date(2026, 8, 24), "factory": "광주", "actual_prod_kg": 1200.0},
+            {"date": date(2026, 8, 24), "factory": "광주", "actual_prod_kg": 800.0},
+        ]
+
+        corrected = server.corrected_energy_rows(energy, actual)
+        aggregated = server.aggregate_energy_rows(
+            corrected, "광주", date(2026, 8, 24), date(2026, 8, 24),
+        )
+
+        self.assertEqual(corrected[0]["mix_prod_kg"], 2000.0)
+        self.assertAlmostEqual(corrected[0]["freezing_power_per_ton_kwh"], 20.0)
+        self.assertAlmostEqual(corrected[0]["air_compressor_per_ton_kwh"], 10.0)
+        self.assertAlmostEqual(corrected[0]["power_per_ton_kwh"], 50.0)
+        self.assertAlmostEqual(corrected[0]["fuel_per_ton_nm3"], 5.0)
+        self.assertAlmostEqual(corrected[0]["water_per_ton_ton"], 2.0)
+        self.assertEqual(aggregated["raw_production"], 2000.0)
+        self.assertAlmostEqual(aggregated["power_intensity"], 50.0)
+
+    def test_non_gwangju_energy_rows_keep_stored_production_and_rate(self) -> None:
+        energy = [{
+            "date": date(2026, 8, 24), "factory": "김해", "mix_prod_kg": 1000.0,
+            "total_power_kwh": 100.0, "fuel_nm3": 0.0, "water_ton": 0.0,
+            "wastewater_ton": 0.0, "power_per_ton_kwh": 321.0,
+            "fuel_per_ton_nm3": 0.0, "water_per_ton_ton": 0.0,
+        }]
+        unrelated_actual = [{
+            "date": date(2026, 8, 24), "factory": "김해", "actual_prod_kg": 2000.0,
+        }]
+
+        corrected = server.corrected_energy_rows(energy, unrelated_actual)
+        aggregated = server.aggregate_energy_rows(
+            corrected, "김해", date(2026, 8, 24), date(2026, 8, 24),
+        )
+
+        self.assertEqual(corrected[0]["mix_prod_kg"], 1000.0)
+        self.assertEqual(corrected[0]["power_per_ton_kwh"], 321.0)
+        self.assertEqual(aggregated["raw_production"], 1000.0)
+        self.assertEqual(aggregated["power_intensity"], 321.0)
+
+    def test_intensity_endpoint_returns_gwangju_corrected_daily_value(self) -> None:
+        energy = [{
+            "date": date(2026, 8, 24), "factory": "광주", "mix_prod_kg": 1000.0,
+            "total_power_kwh": 100.0, "fuel_nm3": 10.0, "water_ton": 4.0,
+            "wastewater_ton": 2.0, "power_per_ton_kwh": 100.0,
+            "fuel_per_ton_nm3": 10.0, "water_per_ton_ton": 4.0,
+        }]
+        actual = [
+            {"date": date(2026, 8, 24), "factory": "광주", "actual_prod_kg": 1200.0},
+            {"date": date(2026, 8, 24), "factory": "광주", "actual_prod_kg": 800.0},
+        ]
+        with (
+            patch.object(server, "fetch_one", side_effect=[
+                {"max_date": date(2026, 8, 24)},  # 기준일
+                None,                              # 절감 목표
+            ]),
+            patch.object(server, "fetch_all", return_value=energy),
+            patch.object(server, "fetch_actual_production_frame", return_value=actual),
+            patch.object(server, "_monthly_intensity_fallback_sources", return_value=None),
+            patch.object(server, "period_coverage", return_value={
+                "expectedDays": 24, "presentDays": 1, "missingDays": 23,
+            }),
+        ):
+            result = server.intensity_analysis(
+                factory="광주", metric="power", mode="month",
+                requested_date=date(2026, 8, 24), date_from=None, date_to=None,
+            )
+
+        self.assertEqual(result["daily"], [{
+            "date": "08.24", "value": 50.0, "productionTon": 2.0,
+        }])
+        gwangju_matrix = next(row for row in result["matrix"] if row["factory"] == "광주")
+        self.assertEqual(gwangju_matrix["current"], 50.0)
+
     def test_feature_importance_validates_factory_and_target(self) -> None:
         with patch.object(server, "import_core") as import_core:
             with self.assertRaises(server.HTTPException) as raised:

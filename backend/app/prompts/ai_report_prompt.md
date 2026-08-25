@@ -39,13 +39,13 @@
 
 ## 5. 분석 시 주의사항 (필수)
 
-### 원단위 = RawDB 수식값의 가중평균
-일별 원단위는 `power_per_ton_kwh`, `fuel_per_ton_nm3`, `water_per_ton_ton` 저장값을 그대로 사용한다. 사용량÷생산량으로 다시 계산하지 않는다.
-여러 일자·공장을 합칠 때만 `SUM(원단위 * mix_prod_kg) / SUM(mix_prod_kg)`로 가중 집계한다. 단순 `AVG`는 금지한다.
-생산 KPI는 `production_daily` 운영 실적을 별도로 사용하며, 원단위의 `mix_prod_kg` 기준과 혼합하지 않는다.
+### 원단위 = 공장별 유효 생산량의 가중평균
+`energy_daily`에는 `DB_에너지.xlsx`의 믹스생산량과 수식 원단위를 원본 그대로 저장한다.
+조회 결과는 광주에 한해 `production_actual_service`의 운영 생산량(완제품 + 지정 판매용 WIP)을 `mix_prod_kg`로 사용하고, 냉동·공압·전력·연료·용수 원단위를 `사용량 / (보정 생산량 kg / 1000)`으로 다시 계산한다. 다른 공장은 저장값을 그대로 사용한다.
+여러 일자·공장을 합칠 때는 `SUM(원단위 * 유효 mix_prod_kg) / SUM(유효 mix_prod_kg)`로 가중 집계한다. 단순 `AVG`는 금지한다.
 
 ### 생산 KPI와 광주 WIP
-생산 화면의 운영 생산량은 `production_actual_service`에서 `production_daily` 완제품에 광주 판매용 WIP 환산량을 더한다. 이 보정값은 생산 KPI와 예측 특성에만 쓰며, RawDB 수식 원단위를 다시 만드는
+생산 화면과 원단위 조회의 광주 운영 생산량은 `production_actual_service`에서 `production_daily` 완제품에 지정 판매용 WIP 환산량을 더한 동일 값을 사용한다. 원본 `energy_daily` 행은 변경하지 않는다.
 
 ### `production_daily` 활용 가이드
 - 제품유형 분석: `GROUP BY category2`. 보관유형: `GROUP BY category1`. 교차 분석 가능.

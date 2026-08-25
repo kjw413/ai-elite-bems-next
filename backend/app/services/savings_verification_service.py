@@ -141,13 +141,84 @@ def verify_theme(
     }
 
 
-def production_adjusted_expected_usage(periods: list[dict[str, float]]) -> float | None:
-    """같은 월·물리공장끼리 맞춘 BAU 사용량 합계를 만든다.
+def production_baseline_models(
+    baseline_periods: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """물리공장별 고정부하 + 생산 비례부하 기준선을 추정한다.
 
-    연간 합계 원단위를 한 번만 적용하면 계절별 원단위나 공장별 제품 믹스가 다른
-    경우 생산 비중 변화 자체를 절감으로 오인한다. 따라서 서버가 완전성이 확인된
-    월 × 물리공장 셀을 넘기고, 이 함수는 각 셀의 전년 원단위를 올해 같은 셀의
-    생산량에 적용해 합산한다.
+    단순히 ``전년 원단위 × 올해 생산량``을 쓰면 고정부하 때문에 생산량이 늘 때
+    자연히 낮아지는 원단위를 절감으로, 생산량이 줄 때 높아지는 원단위를 악화로
+    오인한다. 전년의 완결 월별 ``사용량 = 고정부하 + 한계원단위 × 생산량`` 관계를
+    최소제곱으로 추정하고, 한계원단위를 0과 관측 최저 원단위 사이로 제한한다.
+
+    월별 생산량 변동이 5% 미만이거나 관측이 3개월 미만이면 기울기를 안정적으로
+    식별할 수 없으므로 기존 원단위 방식으로만 폴백한다. 호출자는 method를 화면에
+    전달해 이 경우를 숨기지 않는다.
+    """
+    grouped: dict[str, list[tuple[float, float]]] = {}
+    for period in baseline_periods:
+        factory = str(period.get("factory") or "__all__")
+        production = float(period.get("productionTon") or 0.0)
+        usage = float(period.get("usage") or 0.0)
+        if production > 0 and usage > 0:
+            grouped.setdefault(factory, []).append((production, usage))
+
+    models: dict[str, dict[str, Any]] = {}
+    for factory, points in grouped.items():
+        production_sum = sum(production for production, _ in points)
+        usage_sum = sum(usage for _, usage in points)
+        if production_sum <= 0 or usage_sum <= 0:
+            continue
+
+        sample_months = len(points)
+        min_production = min(production for production, _ in points)
+        max_production = max(production for production, _ in points)
+        enough_variation = (
+            sample_months >= 3
+            and min_production > 0
+            and max_production / min_production >= 1.05
+        )
+        marginal_rate = usage_sum / production_sum
+        method = "intensity-fallback"
+
+        if enough_variation:
+            mean_production = production_sum / sample_months
+            mean_usage = usage_sum / sample_months
+            variance = sum(
+                (production - mean_production) ** 2 for production, _ in points
+            )
+            if variance > 0:
+                covariance = sum(
+                    (production - mean_production) * (usage - mean_usage)
+                    for production, usage in points
+                )
+                raw_slope = covariance / variance
+                # 모든 기준월에 음의 고정부하가 생기지 않게 관측 최저 원단위를
+                # 상한으로 둔다. 음의 기울기도 물리적으로 의미가 없어 0으로 막는다.
+                max_marginal_rate = min(usage / production for production, usage in points)
+                marginal_rate = min(max(raw_slope, 0.0), max_marginal_rate)
+                method = "fixed-load-regression"
+
+        mean_production = production_sum / sample_months
+        mean_usage = usage_sum / sample_months
+        models[factory] = {
+            "method": method,
+            "sampleMonths": sample_months,
+            "marginalRate": marginal_rate,
+            "fixedUsage": max(mean_usage - marginal_rate * mean_production, 0.0),
+        }
+    return models
+
+
+def production_adjusted_expected_usage(
+    periods: list[dict[str, Any]],
+    baseline_models: dict[str, dict[str, Any]] | None = None,
+) -> float | None:
+    """동월·물리공장별 계절 기준에 생산 규모효과를 반영한 BAU를 합산한다.
+
+    기준선이 있으면 전년 동월 사용량에서 생산 증감분에 *한계*원단위만 적용한다.
+    따라서 고정부하는 생산량과 함께 확대/축소되지 않는다. 기준선을 넘기지 않은
+    기존 호출은 하위 호환을 위해 종전의 전년 원단위 방식을 유지한다.
     """
     if not periods:
         return None
@@ -158,7 +229,20 @@ def production_adjusted_expected_usage(periods: list[dict[str, float]]) -> float
         current_production = period["currentProductionTon"]
         if previous_usage <= 0 or previous_production <= 0 or current_production <= 0:
             return None
-        expected += previous_usage / previous_production * current_production
+        if baseline_models is None:
+            period_expected = previous_usage / previous_production * current_production
+        else:
+            factory = str(period.get("factory") or "__all__")
+            model = baseline_models.get(factory)
+            if model is None:
+                return None
+            marginal_rate = float(model["marginalRate"])
+            period_expected = previous_usage + marginal_rate * (
+                current_production - previous_production
+            )
+        if period_expected <= 0:
+            return None
+        expected += period_expected
     return expected
 
 
