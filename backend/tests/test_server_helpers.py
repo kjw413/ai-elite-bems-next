@@ -168,6 +168,11 @@ class ServerHelperTests(unittest.TestCase):
         service = server.import_core("app.services.production_correction_service")
         recorded = service.PRODUCTION_RECORDED_WIP_MIX_CONVERSION["광주"]
         self.assertEqual(recorded, {"129998": 10.91954, "129999": 1.0})
+        self.assertEqual(
+            recorded["129998"],
+            service.WIP_MIX_CONVERSION["광주"]["260014"],
+        )
+        self.assertEqual(recorded["129998"], service.GWANGJU_SKIM_MILK_MIX_FACTOR)
 
         finished_filter, finished_params = service.finished_production_filter_sql()
         self.assertIn("NOT", finished_filter)

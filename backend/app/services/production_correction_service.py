@@ -72,6 +72,12 @@ _WIP_CACHE_CLEAR_MTIME: float | None = None
 WIP_TRUSTED_FACTORIES: set[str] = {"광주"}
 
 
+# 광주 탈지분유 계열 공통 믹스 환산계수.
+# DB_재공품의 260014와 production_daily에 완제품으로 기록되는 129998은
+# 같은 물성·기준이므로 반드시 동일한 계수를 사용한다.
+GWANGJU_SKIM_MILK_MIX_FACTOR = 10.91954
+
+
 # 광주(F30) 재공품 → 믹스 환산계수.
 # Why: 광주공장만 일부 재공품(예: 260014 탈지분유 = 분말 형태)이 자사 중간제품이 아니라
 #   외부로 그대로 판매되며, 수분을 제거한 후 무게로 실적이 기록된다. 따라서 그대로 합산하면
@@ -83,7 +89,7 @@ WIP_TRUSTED_FACTORIES: set[str] = {"광주"}
 #   그대로 신뢰하면 된다 (Job 단위 정보는 요약본에 없음).
 WIP_MIX_CONVERSION: dict[str, dict[str, float]] = {
     "광주": {
-        "260014": 10.91954,  # 탈지분유 (분말; 수분 제거 후 무게)
+        "260014": GWANGJU_SKIM_MILK_MIX_FACTOR,  # 탈지분유 (분말; 수분 제거 후 무게)
         "260016": 1.00000,   # 생크림(냉동)
         "260039": 1.00000,   # 살균유
         "260042": 4.00000,   # 유크림믹스 (농축; 수분 제거 후 무게)
@@ -99,7 +105,7 @@ WIP_MIX_CONVERSION: dict[str, dict[str, float]] = {
 # mix-equivalent kg를 계산해 재공품으로 다시 합산한다.
 PRODUCTION_RECORDED_WIP_MIX_CONVERSION: dict[str, dict[str, float]] = {
     "광주": {
-        "129998": 10.91954,  # 탈지분유(수) — 기존 재공품 탈지분유와 동일 환산
+        "129998": GWANGJU_SKIM_MILK_MIX_FACTOR,  # 탈지분유(수) — 260014와 동일 환산
         "129999": 1.00000,   # 생크림(35%)(수)
     },
 }
@@ -732,6 +738,7 @@ def build_breakdown_caption(b: ProductionBreakdown) -> str:
 
 __all__ = [
     "ProductionBreakdown",
+    "GWANGJU_SKIM_MILK_MIX_FACTOR",
     "WIP_TRUSTED_FACTORIES",
     "WIP_MIX_CONVERSION",
     "PRODUCTION_RECORDED_WIP_MIX_CONVERSION",
