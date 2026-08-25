@@ -2837,6 +2837,7 @@ def _production_adjusted_scope_totals(
             "current": current,
             "previous": previous,
             "periods": [],
+            "baselinePeriods": [],
             "measuredMonths": 0,
             "coverage": {
                 "status": "no-complete-month",
@@ -2847,9 +2848,13 @@ def _production_adjusted_scope_totals(
 
     current_from = date(year, 1, 1)
     previous_from = date(year - 1, 1, 1)
-    previous_to = previous_year_date(cutoff)
+    # 비교는 전년 동월까지만 하되, 고정부하·한계원단위 회귀에는 전년 12개월을
+    # 모두 사용한다. 계절 변동 속에서도 생산량에 따른 사용량 기울기를 식별하기
+    # 위해서다.
+    previous_to = date(year - 1, 12, 31)
     expected_months = list(range(1, cutoff.month + 1))
-    periods: list[dict[str, float]] = []
+    periods: list[dict[str, Any]] = []
+    baseline_periods: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
     failed_months: set[int] = set()
 
@@ -2860,6 +2865,17 @@ def _production_adjusted_scope_totals(
         previous_monthly = _theme_monthly_totals(
             physical_factory, energy_type, previous_from, previous_to, actual_records,
         )
+        baseline_periods.extend({
+            "factory": physical_factory,
+            "month": month,
+            "usage": float(cell["usage"]),
+            "productionTon": float(cell["productionTon"]),
+        } for (baseline_year, month), cell in previous_monthly.items()
+          if baseline_year == year - 1
+          and cell["usageComplete"]
+          and cell["usage"] is not None
+          and cell["usage"] > 0
+          and cell["productionTon"] > 0)
         for month in expected_months:
             current_cell = current_monthly[(year, month)]
             previous_cell = previous_monthly[(year - 1, month)]
@@ -2894,6 +2910,7 @@ def _production_adjusted_scope_totals(
                 continue
 
             period = {
+                "factory": physical_factory,
                 "currentUsage": float(current_cell["usage"]),
                 "currentProductionTon": float(current_cell["productionTon"]),
                 "previousUsage": float(previous_cell["usage"]),
@@ -2909,6 +2926,7 @@ def _production_adjusted_scope_totals(
         "current": current,
         "previous": previous,
         "periods": periods,
+        "baselinePeriods": baseline_periods,
         "measuredMonths": len(expected_months) - len(failed_months),
         "coverage": {
             "status": "incomplete" if missing else "complete",
@@ -3303,9 +3321,23 @@ def savings(
         previous = scope_totals["previous"]
         coverage = scope_totals["coverage"]
         comparable = coverage["status"] == "complete"
+        baseline_models = verify_service.production_baseline_models(
+            scope_totals["baselinePeriods"],
+        )
         expected_usage = (
-            verify_service.production_adjusted_expected_usage(scope_totals["periods"])
+            verify_service.production_adjusted_expected_usage(
+                scope_totals["periods"], baseline_models,
+            )
             if comparable else None
+        )
+        baseline_model_values = list(baseline_models.values())
+        baseline_method = (
+            "fixed-load-regression"
+            if baseline_model_values and all(
+                model["method"] == "fixed-load-regression"
+                for model in baseline_model_values
+            )
+            else "intensity-fallback"
         )
 
         scope_active_themes = [
@@ -3366,6 +3398,10 @@ def savings(
             ),
             "currentMeasuredMonths": scope_totals["measuredMonths"],
             "previousMeasuredMonths": scope_totals["measuredMonths"],
+            "productionBaselineMethod": baseline_method,
+            "productionBaselineSampleMonths": sum(
+                int(model["sampleMonths"]) for model in baseline_model_values
+            ),
             "coverageMatched": comparable,
             "coverage": coverage,
             "coverageNote": coverage_note,

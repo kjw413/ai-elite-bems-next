@@ -660,6 +660,11 @@ function Production({ data, factory, date, mode, onModeChange, rangeFrom, rangeT
   // 월별 계획 대비 실적으로 본다. 진행 중인 달은 부분 실적이라 별도로 알린다.
   const monthlyPlanLegend = useSeriesToggle();
   const monthlyPlanRows: AnyData[] = data.monthlyPlan ?? [];
+  const measuredProductionMonths = new Set(
+    monthlyPlanRows
+      .filter((row: AnyData) => row.actual != null)
+      .map((row: AnyData) => row.month),
+  );
   const monthlyPlanItems: LegendItem[] = [
     { key: "plan", label: "계획", color: palette.previous },
     { key: "actual", label: "실적", color: "var(--chart-production)" },
@@ -679,21 +684,51 @@ function Production({ data, factory, date, mode, onModeChange, rangeFrom, rangeT
   );
   // 상단 필터로 선택한 공장이 실제로 생산하지 않는 제품유형(예: 광주는 IC·MY 미생산)은
   // 범례·차트·데이터 표 어디에도 노출하지 않는다 — 전 기간 값이 전부 0/공백이면 제외.
-  const cat2ActiveKeys = (["IC", "MY", "FM", "SN", "ETC"] as const).filter(key => (data.daily ?? []).some((row: AnyData) => Number(row[key]) > 0));
+  const cat2ActiveKeys = (["IC", "MY", "FM", "SN", "ETC"] as const).filter(key =>
+    (data.daily ?? []).some((row: AnyData) =>
+      Number(row[key]) > 0 || (mode === "year" && Number(row[`prev${key}`]) > 0),
+    ),
+  );
   const productionLegend = useSeriesToggle();
   // 광주 전용 — 자사 완제품 실적만으로는 빠지는 판매용 반제품(탈지분유·생크림 등)까지
   // 합산한, 원단위 분모와 동일한 정의의 실질 생산량. 백엔드가 값을 채워줬을 때만 노출한다.
   const showUtilityProd = factory === "광주" && (data.daily ?? []).some((row: AnyData) => row.utilityProd != null);
+  const productionChartRows: AnyData[] = (data.daily ?? []).map((row: AnyData) => {
+    if (mode !== "year") return row;
+    const currentTotal = cat2ActiveKeys.reduce((sum, key) => sum + (Number(row[key]) || 0), 0);
+    const previousTotal = cat2ActiveKeys.reduce((sum, key) => sum + (Number(row[`prev${key}`]) || 0), 0);
+    return {
+      ...row,
+      yoyChange: measuredProductionMonths.has(row.date) && previousTotal > 0
+        ? Math.round((currentTotal / previousTotal - 1) * 1000) / 10
+        : null,
+    };
+  });
+  const productionYoyLabel = ({ x, y, value }: AnyData) => typeof value === "number"
+    ? <text
+        x={x}
+        y={y + (value >= 0 ? -9 : 16)}
+        textAnchor="middle"
+        fill={value >= 0 ? "var(--green)" : "var(--red)"}
+        fontSize={10}
+        fontWeight={700}
+      >{`${value > 0 ? "+" : ""}${fmt(value)}%`}</text>
+    : null;
   const productionLegendItems: LegendItem[] = [
     ...cat2ActiveKeys.map(key => ({ key, label: cat2Labels[key] ?? key, color: palette.cat2[key] })),
     ...(showUtilityProd ? [{ key: "utilityProd", label: "유틸리티 사용 총 생산량", color: "var(--chart-production)" }] : []),
+    ...(mode === "year" ? [{ key: "yoyChange", label: "총 생산량 증감률(%)", color: "var(--text)" }] : []),
   ];
-  const csvColumns = ["date", "IC", "MY", "FM", "SN", "ETC", ...(showUtilityProd ? ["utilityProd"] : [])];
-  const csvLabels = { date: mode === "year" ? "월" : "일자", IC: "IC(ton)", MY: "MY(ton)", FM: "FM(ton)", SN: "SN(ton)", ETC: "기타(ton)", ...(showUtilityProd ? { utilityProd: "유틸리티 사용 총 생산량(ton)" } : {}) };
+  const csvColumns = ["date", "IC", "MY", "FM", "SN", "ETC", ...(showUtilityProd ? ["utilityProd"] : []), ...(mode === "year" ? ["yoyChange"] : [])];
+  const csvLabels = { date: mode === "year" ? "월" : "일자", IC: "IC(ton)", MY: "MY(ton)", FM: "FM(ton)", SN: "SN(ton)", ETC: "기타(ton)", ...(showUtilityProd ? { utilityProd: "유틸리티 사용 총 생산량(ton)" } : {}), ...(mode === "year" ? { yoyChange: "총 생산량 증감률(%)" } : {}) };
   const productionPivotRows: PivotRow[] = [
     ...cat2ActiveKeys.flatMap<PivotRow>(key => {
       const numbersOf = (field: string): (number | null)[] =>
-        (data.daily ?? []).map((row: AnyData) => (typeof row[field] === "number" ? row[field] : null));
+        (data.daily ?? []).map((row: AnyData) =>
+          mode === "year" && !field.startsWith("prev") && !measuredProductionMonths.has(row.date)
+            ? null
+            : typeof row[field] === "number" ? row[field] : null,
+        );
       const sumOf = (values: (number | null)[]) => values.reduce<number>((acc, value) => acc + (value ?? 0), 0);
       const rowValues = numbersOf(key);
       const total = sumOf(rowValues);
@@ -787,13 +822,15 @@ function Production({ data, factory, date, mode, onModeChange, rangeFrom, rangeT
         </article>
         {itemRankingCard}
       </div>}
-      <article className="card chart-card span-all"><CardTitle title={trendTitle} meta={mode === "year" ? "ton · 전년 vs 금년" : "ton"}><CsvButton filename={`production_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={data.daily} columns={csvColumns} labels={csvLabels}/></CardTitle>
+      <article className="card chart-card span-all"><CardTitle title={trendTitle} meta={mode === "year" ? "ton · 전년 vs 금년 · 증감률(%)" : "ton"}><CsvButton filename={`production_${mode}_${(data.dateFrom ?? "").replaceAll("-", "")}`} rows={productionChartRows} columns={csvColumns} labels={csvLabels}/></CardTitle>
         <ToggleLegend items={productionLegendItems} hidden={productionLegend.hidden} onToggle={productionLegend.toggle}/>
-        {mode === "year" && <p className="quad-caption">막대 한 쌍은 왼쪽(옅은 색)이 전년, 오른쪽이 금년입니다. 유형별 합이 곧 총 생산량이라 별도 총량 차트 없이 유형별 전년비를 함께 읽을 수 있습니다.</p>}
-        <Chart><ComposedChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>
-          {mode === "year" && cat2ActiveKeys.filter(key => !productionLegend.isHidden(key)).map((key, index, visible) => <Bar key={`prev${key}`} dataKey={`prev${key}`} name={`${cat2Labels[key] ?? key} 전년`} stackId="p" fill={palette.cat2[key]} fillOpacity={0.42} stroke="var(--card)" strokeWidth={1} maxBarSize={22} radius={index === visible.length - 1 ? [4,4,0,0] : undefined}/>)}
-          {cat2ActiveKeys.filter(key => !productionLegend.isHidden(key)).map((key, index, visible) => <Bar key={key} dataKey={key} name={`${cat2Labels[key] ?? key} 금년`} stackId="a" fill={palette.cat2[key]} stroke="var(--card)" strokeWidth={1} maxBarSize={22} radius={index === visible.length - 1 ? [4,4,0,0] : undefined}/>)}
-          {showUtilityProd && !productionLegend.isHidden("utilityProd") && <Line type="linear" dataKey="utilityProd" name="유틸리티 사용 총 생산량" stroke="var(--chart-production)" strokeWidth={2} dot={seriesDot("var(--chart-production)")} activeDot={{ r: 5 }} connectNulls/>}
+        {mode === "year" && <p className="quad-caption">막대 한 쌍은 왼쪽(옅은 색)이 전년, 오른쪽이 금년이며, 선은 유형별 합계 생산량의 전년 동월 대비 증감률입니다.</p>}
+        <Chart><ComposedChart data={productionChartRows}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis yAxisId="ton"/>{mode === "year" && <YAxis yAxisId="pct" orientation="right" unit="%"/>}<Tooltip {...tooltipStyle} formatter={numberFormatter}/>
+          {mode === "year" && cat2ActiveKeys.filter(key => !productionLegend.isHidden(key)).map((key, index, visible) => <Bar yAxisId="ton" key={`prev${key}`} dataKey={`prev${key}`} name={`${cat2Labels[key] ?? key} 전년`} stackId="p" fill={palette.cat2[key]} fillOpacity={0.42} stroke="var(--card)" strokeWidth={1} maxBarSize={22} radius={index === visible.length - 1 ? [4,4,0,0] : undefined}/>)}
+          {cat2ActiveKeys.filter(key => !productionLegend.isHidden(key)).map((key, index, visible) => <Bar yAxisId="ton" key={key} dataKey={key} name={`${cat2Labels[key] ?? key} 금년`} stackId="a" fill={palette.cat2[key]} stroke="var(--card)" strokeWidth={1} maxBarSize={22} radius={index === visible.length - 1 ? [4,4,0,0] : undefined}/>)}
+          {showUtilityProd && !productionLegend.isHidden("utilityProd") && <Line yAxisId="ton" type="linear" dataKey="utilityProd" name="유틸리티 사용 총 생산량" stroke="var(--chart-production)" strokeWidth={2} dot={seriesDot("var(--chart-production)")} activeDot={{ r: 5 }} connectNulls/>}
+          {mode === "year" && !productionLegend.isHidden("yoyChange") && <Line yAxisId="pct" type="linear" dataKey="yoyChange" name="총 생산량 증감률(%)" stroke="var(--text)" strokeWidth={2} dot={seriesDot("var(--text)")} activeDot={{ r: 5 }} connectNulls={false} label={productionYoyLabel}/>}
+          {mode === "year" && <ReferenceLine yAxisId="pct" y={0} stroke="var(--muted)" strokeDasharray="4 4"/>}
           {eventMarkers(productionEvents)}</ComposedChart></Chart><EventMarkerHint count={productionEvents.size}/>
         <DataToggle><PivotTable periods={(data.daily ?? []).map((row: AnyData) => row.date)} rows={productionPivotRows} totalLabel="누계(ton)"/></DataToggle></article>
       {mode !== "year" && itemRankingCard}

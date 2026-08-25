@@ -1600,6 +1600,72 @@ class ServerHelperTests(unittest.TestCase):
         self.assertAlmostEqual(result["explainPct"], 100.0)
         self.assertEqual(result["verdict"], "정합")
 
+    def test_fixed_load_baseline_removes_natural_intensity_scale_effect(self) -> None:
+        """고정부하가 있으면 증산 시 원단위 개선·감산 시 악화를 절감으로 세지 않는다."""
+        verify_service = server.import_core("app.services.savings_verification_service")
+        # 사용량 = 고정부하 200 + 생산 비례부하 5 × 생산량
+        baseline_periods = [
+            {"factory": "A", "productionTon": 80.0, "usage": 600.0},
+            {"factory": "A", "productionTon": 100.0, "usage": 700.0},
+            {"factory": "A", "productionTon": 120.0, "usage": 800.0},
+            {"factory": "A", "productionTon": 140.0, "usage": 900.0},
+        ]
+        models = verify_service.production_baseline_models(baseline_periods)
+
+        self.assertEqual(models["A"]["method"], "fixed-load-regression")
+        self.assertAlmostEqual(models["A"]["marginalRate"], 5.0)
+        self.assertAlmostEqual(models["A"]["fixedUsage"], 200.0)
+
+        increased = [{
+            "factory": "A",
+            "previousUsage": 700.0,
+            "previousProductionTon": 100.0,
+            "currentUsage": 800.0,
+            "currentProductionTon": 120.0,
+        }]
+        decreased = [{
+            "factory": "A",
+            "previousUsage": 700.0,
+            "previousProductionTon": 100.0,
+            "currentUsage": 600.0,
+            "currentProductionTon": 80.0,
+        }]
+
+        self.assertAlmostEqual(
+            verify_service.production_adjusted_expected_usage(increased, models),
+            800.0,
+        )
+        self.assertAlmostEqual(
+            verify_service.production_adjusted_expected_usage(decreased, models),
+            600.0,
+        )
+
+    def test_fixed_load_baseline_still_detects_real_saving_after_scale_adjustment(self) -> None:
+        verify_service = server.import_core("app.services.savings_verification_service")
+        models = verify_service.production_baseline_models([
+            {"factory": "A", "productionTon": 80.0, "usage": 600.0},
+            {"factory": "A", "productionTon": 100.0, "usage": 700.0},
+            {"factory": "A", "productionTon": 120.0, "usage": 800.0},
+        ])
+        periods = [{
+            "factory": "A",
+            "previousUsage": 700.0,
+            "previousProductionTon": 100.0,
+            "currentUsage": 750.0,
+            "currentProductionTon": 120.0,
+        }]
+        expected = verify_service.production_adjusted_expected_usage(periods, models)
+        result = verify_service.reconcile_factory_energy_type(
+            self._window(750.0, 120.0),
+            self._window(700.0, 100.0),
+            registered_qty=50.0,
+            expected_usage=expected,
+        )
+
+        self.assertAlmostEqual(expected, 800.0)
+        self.assertAlmostEqual(result["avoidedUsage"], 50.0)
+        self.assertEqual(result["verdict"], "정합")
+
     def test_reconcile_rejects_registration_larger_than_baseline(self) -> None:
         verify_service = server.import_core("app.services.savings_verification_service")
         result = verify_service.reconcile_factory_energy_type(

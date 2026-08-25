@@ -257,9 +257,9 @@ def reconcile_factory_energy_type(
 ) -> dict[str, Any]:
     """생산량을 보정한 공장·에너지원 단위 절감 효과 추정.
 
-    expected_usage에는 같은 월·물리공장별로 계산한
-    Σ(전년 사용량/생산량 × 올해 생산량)을 받는다. 호출자가 생략한 경우에만
-    단일 공장·단일 구간 테스트와의 호환을 위해 합계 원단위 방식으로 계산한다.
+    expected_usage에는 같은 월·물리공장별 전년 사용량에 생산 증감분의 한계원단위만
+    반영한 합계를 받는다. 호출자가 생략한 경우에만 단일 공장·단일 구간 테스트와의
+    호환을 위해 합계 원단위 방식으로 계산한다.
 
         estimated_avoided = expected_usage - current_usage
         expected_after_registered = max(expected_usage - registered_qty, 0)

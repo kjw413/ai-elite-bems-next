@@ -47,6 +47,8 @@ type ReconciliationRow = {
   previousProductionTon: NullableNumber;
   currentMeasuredMonths: number;
   previousMeasuredMonths: number;
+  productionBaselineMethod: "fixed-load-regression" | "intensity-fallback";
+  productionBaselineSampleMonths: number;
   coverageMatched: boolean;
   coverage: {
     status: "complete" | "incomplete" | "no-complete-month";
@@ -612,14 +614,14 @@ export function EnergySavings({ factory, requestedDate }: { factory: string; req
         <header className="card-title savings-section-title">
           <div>
             <h3>생산량을 고려한 실제 절감 확인</h3>
-            <p>전년 동월 생산 원단위로 예상 사용량을 계산합니다.</p>
+            <p>전년 동월 사용량에 생산량 규모효과를 보정해 예상 사용량을 계산합니다.</p>
           </div>
           <span>{reconciliationPeriodLabel}</span>
         </header>
         <details className="savings-method-note">
           <summary>계산 기준 보기</summary>
-          <p>전년 동월의 공장별 원단위(사용량 ÷ 생산량)에 올해 생산량을 곱한 예상 사용량과 실제 사용량을 비교합니다.</p>
-          <small>직전 완료월까지만 계산하는 근사치입니다. 품목 구성·날씨·가동 조건은 별도로 제거하지 않으며, 완료월 실적이 비어 있으면 판정을 보류합니다.</small>
+          <p>전년 12개월의 공장별 사용량·생산량 관계에서 고정부하와 생산 비례부하(한계원단위)를 추정합니다. 전년 동월 사용량에는 올해 생산 증감분의 한계원단위만 더해 예상 사용량을 계산합니다.</p>
+          <small>생산량 증가 때 원단위가 자연히 개선되고 감소 때 악화되는 규모효과를 절감 성과에서 제외합니다. 회귀에 필요한 월 또는 생산 변동이 부족하면 기존 전년 원단위 방식으로 표시하며, 품목 구성·날씨·가동 조건은 별도로 제거하지 않습니다.</small>
         </details>
         {data.reconciliation.length > 0 ? <div className="table-wrap">
           <table className="savings-impact-table">
@@ -628,7 +630,7 @@ export function EnergySavings({ factory, requestedDate }: { factory: string; req
               <th>공장·에너지원</th>
               <th>생산량 (전년 → 올해)</th>
               <th>실제 사용량</th>
-              <th>생산량 보정 예상</th>
+              <th>생산 규모효과 보정 예상</th>
               <th>예상 대비 실제</th>
               <th>완료월 실적 누계 (YTD)</th>
               <th>해석</th>
@@ -663,7 +665,13 @@ export function EnergySavings({ factory, requestedDate }: { factory: string; req
               return <tr key={row.factory + "-" + row.energyType}>
                 <td>
                   <strong>{factoryLabel(row.factory)}</strong>
-                  <small>{row.energyLabel} · {canEstimate ? row.currentMeasuredMonths + "개월 비교" : "비교자료 부족"}</small>
+                  <small>{row.energyLabel} · {canEstimate
+                    ? row.currentMeasuredMonths + "개월 비교 · " + (
+                      row.productionBaselineMethod === "fixed-load-regression"
+                        ? "전년 " + row.productionBaselineSampleMonths + "개월 회귀"
+                        : "전년 원단위 폴백"
+                    )
+                    : "비교자료 부족"}</small>
                 </td>
                 <td>
                   <strong>{canEstimate ? fmt(row.previousProductionTon) + " → " + fmt(row.currentProductionTon) + " ton" : "-"}</strong>
@@ -681,7 +689,7 @@ export function EnergySavings({ factory, requestedDate }: { factory: string; req
                 </td>
                 <td className={estimatedSaving != null && estimatedSaving > 0 ? "good" : excessUsage != null ? "bad" : undefined}>
                   <strong>{estimateText}</strong>
-                  <small>{canEstimate ? <>동월·공장 보정 기준 <TrendPct value={row.intensityChangePct} lowerIsBetter/></> : "동일 기간 자료 필요"}</small>
+                  <small>{canEstimate ? <>고정부하·생산규모 보정 기준 <TrendPct value={row.intensityChangePct} lowerIsBetter/></> : "동일 기간 자료 필요"}</small>
                 </td>
                 <td className={registrationClass}>
                   <strong>{row.registeredQty == null ? "미입력" : fmt(row.registeredQty) + " " + row.unit}</strong>
