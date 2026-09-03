@@ -9,7 +9,8 @@ Weekly / Monthly Energy Report Builder
              섹션2에서 최근 4주 개별(누계 아님) 원단위 추이를 사업장별(남양주1~경산)
              차트로 제공한다. 생산량은 각 원단위 차트에 보조축 꺾은선으로 병기.
              templates/weekly_energy_report.html 사용.
-  · 월간 — 당월 실적(전년 동월비, YTD 병기)과 공장별 월별 MTD 원단위 추이 차트를 제공한다.
+  · 월간 — 지표를 행, 사업장별 당월 실적·YTD를 열로 배치한 전치 표와
+             공장별 월별 MTD 원단위 추이 차트를 제공한다.
              templates/monthly_energy_report.html 사용.
 
 신설 공장(예: 경산 2026-04~)은 전년 데이터가 없는 기간에 전년비가 '-'로 표시된다.
@@ -50,6 +51,21 @@ log = get_logger("period_report")
 # INTENSITY_CHART_METRICS 와 동일 정의를 재사용해 필터링 로직 중복을 피한다.
 MONTHLY_CHART_METRICS = INTENSITY_CHART_METRICS
 WEEKLY_TREND_WEEK_COUNT = 4
+
+# 월간 메일의 전사 값은 등록 사업장 중 경산을 제외한 합산이다. 경산 데이터는
+# 전사 값에 섞지 않고 개별 열과 차트에서 계속 보여 준다.
+MONTHLY_FACTORY_DISPLAY_ORDER: List[Tuple[str, List[str]]] = [
+    (
+        "전사(경산제외)",
+        [
+            code
+            for label, codes in DAILY_FACTORY_DISPLAY_ORDER
+            if label != "경산"
+            for code in (codes or [])
+        ],
+    ),
+    *[(label, codes or []) for label, codes in DAILY_FACTORY_DISPLAY_ORDER],
+]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -125,56 +141,77 @@ def _build_weekly_snapshot_table(curr_rows: List[dict], prev_rows: List[dict]) -
     }
 
 
-def _build_monthly_factory_rows(
+def _build_monthly_snapshot_table(
     rows_mtd: List[dict],
     rows_mtd_prev: List[dict],
     rows_ytd: List[dict],
     rows_ytd_prev: List[dict],
-) -> List[dict]:
-    """월간 전용: 사업장별 × 지표별로 MTD/YTD 실적을 나란히(컬럼) 생성.
+) -> dict:
+    """월간 전용: 지표별 행 × 사업장별 MTD/YTD 열의 전치 표를 생성.
 
-    각 지표마다 {mtd: {value, delta, color}, ytd: {value, delta, color}} 쌍을 만들어
-    한 행(사업장)에서 당월(MTD)과 연누계(YTD) 실적·전년비를 한 번에 볼 수 있게 한다.
+    첫 사업장 열은 경산을 제외한 전사 가중 집계이며, 경산은 개별 사업장 열에서
+    계속 제공한다. 각 셀 쌍은 당월(MTD)과 연누계(YTD) 실적·전년비를 담는다.
     """
-    rows = []
-    for label, codes in FACTORY_DISPLAY_ORDER:
-        m_cur = _aggregate_weighted(_filter_rows_by_factory(rows_mtd, codes))
-        m_prev = _aggregate_weighted(_filter_rows_by_factory(rows_mtd_prev, codes))
-        y_cur = _aggregate_weighted(_filter_rows_by_factory(rows_ytd, codes))
-        y_prev = _aggregate_weighted(_filter_rows_by_factory(rows_ytd_prev, codes))
+    agg_by_factory = {
+        label: (
+            _aggregate_weighted(_filter_rows_by_factory(rows_mtd, codes)),
+            _aggregate_weighted(_filter_rows_by_factory(rows_mtd_prev, codes)),
+            _aggregate_weighted(_filter_rows_by_factory(rows_ytd, codes)),
+            _aggregate_weighted(_filter_rows_by_factory(rows_ytd_prev, codes)),
+        )
+        for label, codes in MONTHLY_FACTORY_DISPLAY_ORDER
+    }
 
-        metric_cells = []
-        for metric in FACTORY_TABLE_METRICS:
+    metric_rows = []
+    for metric in FACTORY_TABLE_METRICS:
+        cells = []
+        for label, _codes in MONTHLY_FACTORY_DISPLAY_ORDER:
+            m_cur, m_prev, y_cur, y_prev = agg_by_factory[label]
             col = metric["unit_col"]
             invert = metric.get("invert", False)
             decimals = metric.get("decimals", 2)
 
+            m_cur_v = _metric_value(m_cur, col)
+            m_prev_v = _metric_value(m_prev, col)
+            y_cur_v = _metric_value(y_cur, col)
+            y_prev_v = _metric_value(y_prev, col)
+
             m_delta, m_color, _ = _pct_delta(
-                m_cur.get(col) if m_cur else None,
-                m_prev.get(col) if m_prev else None,
+                m_cur_v,
+                m_prev_v,
                 invert=invert,
             )
             y_delta, y_color, _ = _pct_delta(
-                y_cur.get(col) if y_cur else None,
-                y_prev.get(col) if y_prev else None,
+                y_cur_v,
+                y_prev_v,
                 invert=invert,
             )
-            metric_cells.append({
+            cells.append({
                 "mtd": {
-                    "value": _fmt(m_cur.get(col) if m_cur else None, decimals),
+                    "value": _fmt(m_cur_v, decimals),
                     "delta": m_delta, "color": m_color,
                 },
                 "ytd": {
-                    "value": _fmt(y_cur.get(col) if y_cur else None, decimals),
+                    "value": _fmt(y_cur_v, decimals),
                     "delta": y_delta, "color": y_color,
                 },
             })
-        rows.append({
-            "factory": label,
-            "is_total": codes is None,
-            "metric_cells": metric_cells,
+        metric_rows.append({
+            "label": metric["label"],
+            "unit": metric["unit"],
+            "color": metric["color"],
+            "header_bg": metric["header_bg"],
+            "cell_bg": metric["cell_bg"],
+            "cells": cells,
         })
-    return rows
+
+    return {
+        "factories": [
+            {"factory": label, "is_total": idx == 0}
+            for idx, (label, _codes) in enumerate(MONTHLY_FACTORY_DISPLAY_ORDER)
+        ],
+        "metric_rows": metric_rows,
+    }
 
 
 def _build_monthly_mtd_charts(
@@ -206,7 +243,7 @@ def _build_monthly_mtd_charts(
 
     images: List[InlineImage] = []
     blocks: List[dict] = []
-    for idx, (label, codes) in enumerate(FACTORY_DISPLAY_ORDER):
+    for idx, (label, codes) in enumerate(MONTHLY_FACTORY_DISPLAY_ORDER):
         series_by_col = {m["unit_col"]: series(rows_cur, codes, m["unit_col"], year) for m in MONTHLY_CHART_METRICS}
         prev_by_col = {m["unit_col"]: series(rows_prev, codes, m["unit_col"], year - 1) for m in MONTHLY_CHART_METRICS}
         png = _render_metric_grid_chart(
@@ -358,8 +395,11 @@ def build_monthly_report(
     rows_ytd = _fetch_rows_range(ytd_from, ytd_to)
     rows_ytd_y = _fetch_rows_range(ytd_y_from, ytd_y_to)
 
-    # 섹션 1: 사업장 × 지표별 MTD(당월)·YTD(연누계) 실적+전년비를 나란히(컬럼) 표시
-    factory_rows = _build_monthly_factory_rows(rows_m, rows_yoy, rows_ytd, rows_ytd_y)
+    # 섹션 1: 지표 행 × 사업장별 MTD(당월)·YTD(연누계) 열의 전치 표.
+    # 첫 열 그룹은 경산을 제외한 전사 가중 집계다.
+    monthly_snapshot_table = _build_monthly_snapshot_table(
+        rows_m, rows_yoy, rows_ytd, rows_ytd_y
+    )
     # 섹션 2: 공장별 월별 MTD 원단위 추이 꺾은선 (당해 vs 전년)
     mtd_images, mtd_charts = _build_monthly_mtd_charts(year, month, rows_ytd, rows_ytd_y)
 
@@ -374,8 +414,7 @@ def build_monthly_report(
         "period_from": m_from.strftime("%Y-%m-%d"),
         "period_to": m_to.strftime("%Y-%m-%d"),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "factory_table_metrics": FACTORY_TABLE_METRICS,
-        "factory_rows": factory_rows,
+        "monthly_snapshot_table": monthly_snapshot_table,
         "mtd_current_label": f"{month}월",
         "mtd_previous_label": f"{year - 1}.{month:02d}",
         "ytd_current_label": f"{month}월",
@@ -384,7 +423,8 @@ def build_monthly_report(
     }, template_name="monthly_energy_report.html")
 
     log.info(
-        f"월간 리포트 생성 완료 — 표 {len(factory_rows)}행, MTD 추이 차트 {len(mtd_charts)}개"
+        "월간 리포트 생성 완료 — "
+        f"표 {len(monthly_snapshot_table['metric_rows'])}행, MTD 추이 차트 {len(mtd_charts)}개"
     )
     return BuiltReport(
         subject=subject,

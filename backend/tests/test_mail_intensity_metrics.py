@@ -176,6 +176,57 @@ class MailIntensityMetricTests(unittest.TestCase):
         self.assertIn("freezing_power_per_ton_kwh", cursor.sql)
         self.assertIn("air_compressor_per_ton_kwh", cursor.sql)
 
+    def test_monthly_table_is_transposed_and_total_excludes_gyeongsan(self) -> None:
+        current_rows = [
+            {"factory": "김해", "mix_prod_kg": 1_000.0},
+            {"factory": "경산", "mix_prod_kg": 9_000.0},
+        ]
+
+        table = period._build_monthly_snapshot_table(
+            current_rows,
+            current_rows,
+            current_rows,
+            current_rows,
+        )
+
+        self.assertEqual(
+            [factory["factory"] for factory in table["factories"]],
+            ["전사(경산제외)", "남양주1", "남양주2", "김해", "광주", "논산", "경산"],
+        )
+        self.assertEqual(
+            [row["label"] for row in table["metric_rows"]],
+            [metric["label"] for metric in daily.FACTORY_TABLE_METRICS],
+        )
+
+        production_row = table["metric_rows"][0]
+        self.assertEqual(production_row["cells"][0]["mtd"]["value"], "1")
+        self.assertEqual(production_row["cells"][3]["mtd"]["value"], "1")
+        self.assertEqual(production_row["cells"][-1]["mtd"]["value"], "9")
+
+        html = period._render(
+            {
+                "subject": "월간 메일 테스트",
+                "year": 2026,
+                "previous_year": 2025,
+                "month": 8,
+                "period_from": "2026-08-01",
+                "period_to": "2026-08-31",
+                "generated_at": "2026-09-01 00:00:00",
+                "monthly_snapshot_table": table,
+                "mtd_current_label": "8월",
+                "mtd_previous_label": "2025.08",
+                "ytd_current_label": "8월",
+                "ytd_previous_label": "2025.01~08",
+                "mtd_charts": [],
+            },
+            template_name="monthly_energy_report.html",
+        )
+        self.assertEqual(html.count("8월 실적"), len(table["factories"]))
+        self.assertEqual(html.count("8월 누계"), len(table["factories"]))
+        self.assertLess(html.index("전사(경산제외)"), html.index("남양주1"))
+        self.assertLess(html.index("남양주1"), html.index("남양주2"))
+        self.assertLess(html.index(">생산량</div>"), html.index(">전력 원단위</div>"))
+
 
 if __name__ == "__main__":
     unittest.main()

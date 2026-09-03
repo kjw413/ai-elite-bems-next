@@ -21,7 +21,7 @@
           </td>
         </tr>
 
-        <!-- 섹션 1: 당월 실적 — 지표별 MTD/YTD 나란히 비교 -->
+        <!-- 섹션 1: 지표 행 × 사업장별 MTD/YTD 열의 전치 표 -->
         <tr>
           <td style="padding:20px 30px 6px 30px;">
             <div style="font-size:16px; font-weight:700; color:#0f172a; margin-bottom:5px;">
@@ -34,36 +34,37 @@
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:10px; table-layout:auto;">
               <thead>
                 <tr style="background:#f8fafc; color:#475569;">
-                  <th rowspan="2" align="center" style="width:56px; padding:9px 3px; border:1px solid #e2e8f0; border-top:3px solid #2563eb;">사업장</th>
-                  {% for m in factory_table_metrics %}
-                  <th colspan="2" align="center" style="padding:7px 3px 4px; border:1px solid #e2e8f0; background:{{ m.header_bg }}; border-top:3px solid {{ m.color }};">
-                    <div style="font-weight:700; color:#1e293b; font-size:11px;">{{ m.label }}</div>
-                    <div style="font-size:9px; font-weight:400; color:#64748b; margin-top:1px;">{{ m.unit }}</div>
+                  <th rowspan="2" align="center" style="width:76px; padding:9px 3px; border:1px solid #e2e8f0; border-top:3px solid #2563eb;">사업장</th>
+                  {% for factory in monthly_snapshot_table.factories %}
+                  <th colspan="2" align="center" style="padding:7px 3px; border:1px solid #e2e8f0; border-top:3px solid {% if factory.is_total %}#2563eb{% else %}#94a3b8{% endif %}; {% if factory.is_total %}background:#eff6ff; color:#1d4ed8;{% else %}background:#f8fafc; color:#334155;{% endif %} font-size:10.5px; font-weight:700; white-space:nowrap; word-break:keep-all;">
+                    {{ factory.factory }}
                   </th>
                   {% endfor %}
                 </tr>
                 <tr>
-                  {% for m in factory_table_metrics %}
-                  <th align="center" style="padding:4px 2px; border:1px solid #e2e8f0; background:{{ m.cell_bg }}; font-size:8.5px; font-weight:700; color:#475569;">
+                  {% for factory in monthly_snapshot_table.factories %}
+                  <th align="center" style="padding:4px 2px; border:1px solid #e2e8f0; {% if factory.is_total %}background:#eff6ff;{% else %}background:#f8fafc;{% endif %} font-size:8.5px; font-weight:700; color:#475569; white-space:nowrap; word-break:keep-all;">
                     {{ mtd_current_label }} 실적<div style="font-size:7.5px; font-weight:400; color:#94a3b8; margin-top:1px;">전년비</div>
                   </th>
-                  <th align="center" style="padding:4px 2px; border:1px solid #e2e8f0; background:{{ m.cell_bg }}; font-size:8.5px; font-weight:700; color:#475569;">
+                  <th align="center" style="padding:4px 2px; border:1px solid #e2e8f0; {% if factory.is_total %}background:#eff6ff;{% else %}background:#f8fafc;{% endif %} font-size:8.5px; font-weight:700; color:#475569; white-space:nowrap; word-break:keep-all;">
                     {{ ytd_current_label }} 누계<div style="font-size:7.5px; font-weight:400; color:#94a3b8; margin-top:1px;">전년비</div>
                   </th>
                   {% endfor %}
                 </tr>
               </thead>
               <tbody>
-                {% for row in factory_rows %}
-                <tr {% if row.is_total %}style="background:#f8fafc;"{% endif %}>
-                  <td align="center" style="padding:9px 3px; border:1px solid #e2e8f0; font-weight:700; font-size:10.5px; {% if row.is_total %}color:#1d4ed8;{% else %}color:#334155;{% endif %}">{{ row.factory }}</td>
-                  {% for pair in row.metric_cells %}
-                  {% set m = factory_table_metrics[loop.index0] %}
-                  <td align="right" nowrap="nowrap" style="padding:6px 2px; border:1px solid #e2e8f0; background:{{ m.cell_bg }}; font-variant-numeric:tabular-nums; white-space:nowrap; word-break:keep-all; overflow-wrap:normal;">
+                {% for metric in monthly_snapshot_table.metric_rows %}
+                <tr>
+                  <td align="left" style="padding:7px 4px; border:1px solid #e2e8f0; border-left:3px solid {{ metric.color }}; background:{{ metric.header_bg }}; color:#334155;">
+                    <div style="font-size:10px; font-weight:700; white-space:nowrap; word-break:keep-all;">{{ metric.label }}</div>
+                    <div style="font-size:8px; color:#64748b; margin-top:1px; white-space:nowrap; word-break:keep-all;">{{ metric.unit }}</div>
+                  </td>
+                  {% for pair in metric.cells %}
+                  <td align="right" nowrap="nowrap" style="padding:6px 2px; border:1px solid #e2e8f0; background:{{ metric.cell_bg }}; font-variant-numeric:tabular-nums; white-space:nowrap; word-break:keep-all; overflow-wrap:normal;">
                     <div style="display:inline-block; white-space:nowrap; word-break:keep-all; font-size:11px; color:#0f172a; font-weight:700;">{{ pair.mtd.value }}</div>
                     <div style="white-space:nowrap; word-break:keep-all; font-size:9px; color:{{ pair.mtd.color }}; font-weight:700; margin-top:2px;">{{ pair.mtd.delta }}</div>
                   </td>
-                  <td align="right" nowrap="nowrap" style="padding:6px 2px; border:1px solid #e2e8f0; background:{{ m.cell_bg }}; font-variant-numeric:tabular-nums; white-space:nowrap; word-break:keep-all; overflow-wrap:normal;">
+                  <td align="right" nowrap="nowrap" style="padding:6px 2px; border:1px solid #e2e8f0; background:{{ metric.cell_bg }}; font-variant-numeric:tabular-nums; white-space:nowrap; word-break:keep-all; overflow-wrap:normal;">
                     <div style="display:inline-block; white-space:nowrap; word-break:keep-all; font-size:11px; color:#0f172a; font-weight:700;">{{ pair.ytd.value }}</div>
                     <div style="white-space:nowrap; word-break:keep-all; font-size:9px; color:{{ pair.ytd.color }}; font-weight:700; margin-top:2px;">{{ pair.ytd.delta }}</div>
                   </td>
