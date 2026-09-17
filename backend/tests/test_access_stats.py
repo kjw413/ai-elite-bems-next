@@ -4,6 +4,7 @@ import sys
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -28,37 +29,105 @@ class WorkdayTests(unittest.TestCase):
         self.assertEqual(backfill.workdays(date(2026, 9, 19), date(2026, 9, 20), set()), [])
 
 
-class BuildRowTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.days = backfill.workdays(date(2026, 7, 17), date(2026, 9, 16), set())
+class ClientNameTests(unittest.TestCase):
+    def test_names_use_the_requested_prefix_and_count(self) -> None:
+        names = backfill.build_client_names(15, "BPN", seed=1)
+        self.assertEqual(len(names), 15)
+        for name in names:
+            self.assertRegex(name, r"^BPN\d{6}$")
 
-    def test_user_counts_stay_within_requested_range(self) -> None:
-        rows = backfill.build_rows(self.days, 5, 15, seed=1)
-        self.assertTrue(rows)
-        for row in rows:
-            self.assertGreaterEqual(row["uniqueUsers"], 5)
-            self.assertLessEqual(row["uniqueUsers"], 15)
+    def test_names_are_unique_and_sorted(self) -> None:
+        names = backfill.build_client_names(15, "BPN", seed=2)
+        self.assertEqual(len(set(names)), 15)
+        self.assertEqual(names, sorted(names))
 
-    def test_visit_count_is_never_below_user_count(self) -> None:
-        rows = backfill.build_rows(self.days, 5, 15, seed=7)
-        for row in rows:
-            self.assertGreaterEqual(row["visitCount"], row["uniqueUsers"])
-
-    def test_same_seed_reproduces_same_values(self) -> None:
+    def test_same_seed_reproduces_the_same_names(self) -> None:
         self.assertEqual(
-            backfill.build_rows(self.days, 5, 15, seed=42),
-            backfill.build_rows(self.days, 5, 15, seed=42),
+            backfill.build_client_names(15, "BPN", seed=99),
+            backfill.build_client_names(15, "BPN", seed=99),
         )
 
-    def test_zero_user_day_reports_zero_visits(self) -> None:
-        # 접속자 0명인데 접속 횟수가 잡히면 두 값이 서로 모순이다.
-        rows = backfill.build_rows(self.days, 0, 0, seed=11)
-        for row in rows:
-            self.assertEqual((row["uniqueUsers"], row["visitCount"]), (0, 0))
 
-    def test_row_dates_match_the_requested_days(self) -> None:
-        rows = backfill.build_rows(self.days, 5, 15, seed=3)
-        self.assertEqual([row["date"] for row in rows], self.days)
+class BuildRowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.days = backfill.workdays(date(2026, 5, 1), date(2026, 9, 16), set())
+        self.names = backfill.build_client_names(15, "BPN", seed=5)
+
+    def _per_day(self, rows: list[dict]) -> dict[date, list[str]]:
+        grouped: dict[date, list[str]] = {}
+        for row in rows:
+            grouped.setdefault(row["date"], []).append(row["clientName"])
+        return grouped
+
+    def test_daily_user_counts_stay_within_requested_range(self) -> None:
+        grouped = self._per_day(backfill.build_rows(self.days, self.names, 5, 15, seed=1))
+        self.assertEqual(set(grouped), set(self.days))
+        for day, clients in grouped.items():
+            self.assertGreaterEqual(len(clients), 5, day)
+            self.assertLessEqual(len(clients), 15, day)
+
+    def test_a_pc_is_never_counted_twice_on_one_day(self) -> None:
+        # (일자, PC) 가 중복되면 그 날 접속자 수가 실제보다 많아진다.
+        for day, clients in self._per_day(backfill.build_rows(self.days, self.names, 5, 15, seed=3)).items():
+            self.assertEqual(len(clients), len(set(clients)), day)
+
+    def test_every_row_uses_a_generated_name(self) -> None:
+        rows = backfill.build_rows(self.days, self.names, 5, 15, seed=4)
+        self.assertTrue(set(row["clientName"] for row in rows) <= set(self.names))
+
+    def test_visit_count_is_at_least_one(self) -> None:
+        for row in backfill.build_rows(self.days, self.names, 5, 15, seed=6):
+            self.assertGreaterEqual(row["visitCount"], 1)
+
+    def test_same_seed_reproduces_same_rows(self) -> None:
+        self.assertEqual(
+            backfill.build_rows(self.days, self.names, 5, 15, seed=42),
+            backfill.build_rows(self.days, self.names, 5, 15, seed=42),
+        )
+
+    def test_no_names_produces_no_rows(self) -> None:
+        self.assertEqual(backfill.build_rows(self.days, [], 5, 15, seed=1), [])
+
+    def test_daily_count_is_capped_by_available_pcs(self) -> None:
+        names = backfill.build_client_names(6, "BPN", seed=8)
+        grouped = self._per_day(backfill.build_rows(self.days, names, 5, 15, seed=9))
+        for day, clients in grouped.items():
+            self.assertLessEqual(len(clients), 6, day)
+
+
+class HostNameTests(unittest.TestCase):
+    def setUp(self) -> None:
+        stats._NAME_CACHE.clear()
+
+    tearDown = setUp
+
+    def test_fqdn_keeps_only_the_first_label(self) -> None:
+        # BPN123456 과 BPN123456.corp.local 이 서로 다른 PC 로 세어지면 안 된다.
+        self.assertEqual(stats.normalize_client_name("bpn123456.corp.local"), "BPN123456")
+
+    def test_unsafe_characters_are_stripped(self) -> None:
+        self.assertEqual(stats.normalize_client_name("BPN123456'; DROP--"), "BPN123456DROP--")
+
+    def test_resolved_hostname_becomes_the_identifier(self) -> None:
+        with patch.object(stats.socket, "gethostbyaddr", return_value=("BPN123456.corp.local", [], [])):
+            self.assertEqual(stats.resolve_client_name("192.168.0.21"), "BPN123456")
+
+    def test_ip_is_kept_when_lookup_fails(self) -> None:
+        with patch.object(stats.socket, "gethostbyaddr", side_effect=OSError("no PTR")):
+            self.assertEqual(stats.resolve_client_name("192.168.0.22"), "192.168.0.22")
+
+    def test_loopback_name_is_not_used_as_a_pc_name(self) -> None:
+        with patch.object(stats.socket, "gethostbyaddr", return_value=("localhost", [], [])):
+            self.assertEqual(stats.resolve_client_name("127.0.0.1"), "127.0.0.1")
+
+    def test_lookup_runs_once_per_ip(self) -> None:
+        with patch.object(stats.socket, "gethostbyaddr", return_value=("BPN1", [], [])) as lookup:
+            stats.resolve_client_name("192.168.0.23")
+            stats.resolve_client_name("192.168.0.23")
+            self.assertEqual(lookup.call_count, 1)
+
+    def test_empty_ip_resolves_to_nothing(self) -> None:
+        self.assertEqual(stats.resolve_client_name(""), "")
 
 
 class SummaryTests(unittest.TestCase):
@@ -94,11 +163,12 @@ class SummaryTests(unittest.TestCase):
 
 class UpsertGuardTests(unittest.TestCase):
     def test_unknown_source_is_rejected(self) -> None:
+        row = [{"date": date(2026, 9, 1), "clientName": "BPN1", "visitCount": 1}]
         with self.assertRaises(ValueError):
-            stats.upsert_daily([{"date": date(2026, 9, 1), "uniqueUsers": 5}], source="guess")
+            stats.upsert_visits(row, source="guess")
 
     def test_empty_rows_do_not_touch_the_database(self) -> None:
-        self.assertEqual(stats.upsert_daily([]), {"inserted": 0, "updated": 0, "skipped": 0})
+        self.assertEqual(stats.upsert_visits([]), {"inserted": 0, "days": 0, "skippedDays": 0})
 
 
 class WindowTests(unittest.TestCase):
@@ -107,14 +177,25 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(end, date(2026, 9, 17))
         self.assertEqual((end - start).days + 1, 90)
 
+    def test_backfill_starts_from_may_of_the_current_year(self) -> None:
+        self.assertEqual(backfill.default_start(date(2026, 9, 17)), date(2026, 5, 1))
+
 
 class ArgumentTests(unittest.TestCase):
-    def test_range_defaults_to_five_through_fifteen(self) -> None:
-        args = backfill.parse_args(["--from", "2026-07-17"])
+    def test_defaults_match_the_documented_values(self) -> None:
+        args = backfill.parse_args([])
         self.assertEqual((args.low, args.high), (5, 15))
-        self.assertEqual(args.date_from, date(2026, 7, 17))
+        self.assertEqual((args.count, args.prefix), (15, "BPN"))
+        self.assertIsNone(args.date_from)
         self.assertIsNone(args.date_to)
         self.assertFalse(args.overwrite)
+
+    def test_pc_count_below_the_daily_cap_is_rejected(self) -> None:
+        # PC 가 상한보다 적으면 그 날 접속자 수를 채울 수 없다.
+        self.assertEqual(backfill.main(["--count", "4", "--max", "15", "--dry-run"]), 1)
+
+    def test_reversed_date_range_is_rejected(self) -> None:
+        self.assertEqual(backfill.main(["--from", "2026-09-16", "--to", "2026-05-01", "--dry-run"]), 1)
 
 
 if __name__ == "__main__":

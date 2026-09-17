@@ -324,30 +324,39 @@ CREATE TABLE IF NOT EXISTS savings_record (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
--- 15. 접속 상세 — (일자, 클라이언트 IP) 단위. 사내망에서는 IP가 사실상 PC 1대,
---     즉 사용자 1명에 대응하므로 권한 판정(server.client_is_admin)과 같은
---     식별자를 재사용한다. 같은 IP가 하루에 여러 번 들어오면 행이 늘지 않고
---     hit_count 만 올라간다 — 접속자 수와 접속 횟수를 분리해 세기 위함이다.
+-- 15. 접속 상세 — (일자, 클라이언트 PC) 단위. 같은 PC가 하루에 여러 번 들어오면
+--     행이 늘지 않고 hit_count 만 올라간다 — 접속자 수와 접속 횟수를 분리해 세기
+--     위함이다.
+--     식별자가 IP가 아니라 PC 이름인 이유: 배포 주소부터 IP 대신 호스트명을 쓰고
+--     있어, 운영자가 "누가 쓰는지" 확인할 때 보는 값과 집계에 남는 값이 같아야
+--     읽힌다. 서버는 요청에서 IP만 볼 수 있으므로 역방향 조회로 이름을 얻고
+--     (access_stats_service.resolve_client_name), 실패하면 IP 문자열을 그대로
+--     식별자로 쓴다. 원본 IP는 client_ip에 따로 남겨 대조할 수 있게 한다.
+--     client_ip가 NULL인 행은 실측 요청에서 온 값이 아니다(아래 source 참고).
 CREATE TABLE IF NOT EXISTS access_visit (
     id            INT AUTO_INCREMENT PRIMARY KEY,
     visit_date    DATE         NOT NULL,
-    client_ip     VARCHAR(45)  NOT NULL,       -- IPv6 최대 표기 길이 45
+    client_name   VARCHAR(100) NOT NULL,       -- 사내 PC 이름 (예: BPN123456)
+    client_ip     VARCHAR(45)  DEFAULT NULL,   -- IPv6 최대 표기 길이 45
     hit_count     INT          NOT NULL DEFAULT 1,
+    source        VARCHAR(20)  NOT NULL DEFAULT 'live',
     first_seen_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    UNIQUE KEY uq_access_visit (visit_date, client_ip),
-    INDEX idx_access_visit_date (visit_date)
+    UNIQUE KEY uq_access_visit (visit_date, client_name),
+    INDEX idx_access_visit_date (visit_date),
+    INDEX idx_access_visit_name (client_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 16. 일별 접속 집계 — 화면·CSV가 읽는 단일 출처.
 --     access_visit 에서 매 기록 시 재계산해 넣으므로 두 표가 어긋나지 않는다.
 --     롤업을 따로 두는 이유: (1) 조회마다 COUNT(DISTINCT)를 돌리지 않아도 되고,
 --     (2) 상세 행이 없는 구간(로깅 도입 이전)도 같은 표에서 함께 표현할 수 있다.
---     source 가 그 날 숫자의 출처를 남긴다.
+--     source 가 그 날 숫자의 출처를 남긴다(access_visit.source 와 같은 값).
 --       · live     — 실제 요청을 받아 적재한 값
 --       · backfill — 로깅 도입 이전 구간을 backend/tools/backfill_access_daily.py 로
 --                    채운 값. 실측이 아니므로 API 응답과 화면까지 구분해서 올린다.
+--                    적재 경로가 서로를 덮어쓰지 않게 하는 안전장치이기도 하다.
 CREATE TABLE IF NOT EXISTS access_daily (
     id           INT AUTO_INCREMENT PRIMARY KEY,
     visit_date   DATE        NOT NULL,

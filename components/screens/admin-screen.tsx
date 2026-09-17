@@ -1407,7 +1407,8 @@ type AccessSummary = {
   liveDays: number;
   backfilledDays: number;
 };
-type AccessStats = { from: string; to: string; days: AccessDay[]; summary: AccessSummary };
+type AccessClient = { clientName: string; activeDays: number; visitCount: number; lastDate: string | null };
+type AccessStats = { from: string; to: string; days: AccessDay[]; clients: AccessClient[]; summary: AccessSummary };
 
 const accessTooltipStyle = {
   contentStyle: { borderRadius: 10, border: "1px solid var(--line)", background: "var(--card)", boxShadow: "0 6px 18px #12201814", fontSize: 12 },
@@ -1458,6 +1459,7 @@ function AccessStatsPanel() {
   }, [load]);
 
   const days = stats?.days ?? [];
+  const clients = stats?.clients ?? [];
   const summary = stats?.summary;
   // 축 라벨은 MM-DD 로 줄인다 — 90일 구간에서 연도까지 넣으면 라벨이 겹친다.
   const chartRows = useMemo(() => days.map(row => ({ ...row, label: String(row.date).slice(5) })), [days]);
@@ -1467,8 +1469,8 @@ function AccessStatsPanel() {
     <article className="card admin-form">
       <header><div><span className="eyebrow">ACCESS LOG</span><h3>일별 접속자 수</h3></div><Users size={22}/></header>
       <p className="panel-copy">
-        화면을 연 사내망 클라이언트를 일자별로 집계합니다. 같은 IP가 하루에 여러 번 열어도 접속자 수는 1명이며,
-        접속 횟수만 늘어납니다.
+        화면을 연 사내망 PC를 일자별로 집계합니다. 식별자는 클라이언트 IP를 역방향 조회해 얻은 PC 이름이며,
+        이름을 얻지 못하면 IP를 그대로 씁니다. 같은 PC가 하루에 여러 번 열어도 접속자 수는 1대이고 접속 횟수만 늘어납니다.
       </p>
       <div className="form-grid">
         <label className="field"><span>시작일</span><input type="date" value={dateFrom} max={dateTo} onChange={event => setDateFrom(event.target.value)}/></label>
@@ -1490,7 +1492,7 @@ function AccessStatsPanel() {
       <section className="kpi-grid compact">
         <article className="kpi card"><div className="kpi-icon"><Users size={20}/></div><div><p>일 평균 접속자</p><strong>{summary?.avgUniqueUsers ?? 0} <small>명</small></strong><span className="kpi-note">기록이 있는 {summary?.activeDays ?? 0}일 기준</span></div></article>
         <article className="kpi card"><div className="kpi-icon"><History size={20}/></div><div><p>최다 접속일</p><strong>{summary?.peakUniqueUsers ?? 0} <small>명</small></strong><span className="kpi-note">{summary?.peakDate ?? "기록 없음"}</span></div></article>
-        <article className="kpi card"><div className="kpi-icon"><Database size={20}/></div><div><p>총 접속 횟수</p><strong>{(summary?.totalVisits ?? 0).toLocaleString("ko-KR")} <small>회</small></strong><span className="kpi-note">{summary?.firstDate ?? "-"} ~ {summary?.lastDate ?? "-"}</span></div></article>
+        <article className="kpi card"><div className="kpi-icon"><Database size={20}/></div><div><p>총 접속 횟수</p><strong>{(summary?.totalVisits ?? 0).toLocaleString("ko-KR")} <small>회</small></strong><span className="kpi-note">PC {clients.length}대 · {summary?.firstDate ?? "-"} ~ {summary?.lastDate ?? "-"}</span></div></article>
       </section>
 
       {hasBackfill && <div className="form-message info">
@@ -1524,6 +1526,30 @@ function AccessStatsPanel() {
             {hasBackfill && <span className="legend-chip"><i style={{ background: accessSourceColor.backfill }}/>{accessSourceLabel.backfill}</span>}
           </div>
         </> : <div className="empty-row">이 구간에 기록된 접속이 없습니다.</div>}
+      </article>
+
+      <article className="card admin-list">
+        <header className="panel-header">
+          <div><span className="eyebrow">BY CLIENT</span><h3>PC별 접속</h3></div>
+          <button type="button" className="secondary-button" disabled={clients.length === 0} onClick={() => downloadCsv(
+            `접속통계_PC별_${dateFrom}_${dateTo}`,
+            clients,
+            ["clientName", "activeDays", "visitCount", "lastDate"],
+            { clientName: "PC 이름", activeDays: "접속일 수", visitCount: "접속 횟수", lastDate: "마지막 접속일" },
+          )}><Download size={15}/>CSV</button>
+        </header>
+        <div className="table-wrap"><table>
+          <thead><tr><th>PC 이름</th><th>접속일 수</th><th>접속 횟수</th><th>마지막 접속일</th></tr></thead>
+          <tbody>{clients.length === 0
+            ? <tr><td colSpan={4}>기록이 없습니다.</td></tr>
+            : clients.map(row => <tr key={row.clientName}>
+                <td>{row.clientName}</td>
+                <td>{row.activeDays}</td>
+                <td>{row.visitCount}</td>
+                <td>{row.lastDate ?? "-"}</td>
+              </tr>)}
+          </tbody>
+        </table></div>
       </article>
 
       <article className="card admin-list">

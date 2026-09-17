@@ -176,7 +176,11 @@ REGISTER_MAIL_SCHEDULE.bat
 ## 7-1. 접속 통계 (선택)
 
 일별 접속자 수는 서버가 켜져 있는 동안 자동으로 쌓인다. 관리자(호스트 PC)로 접속해
-**관리자 전용 메뉴 > 접속 통계** 탭에서 추이·CSV를 확인한다.
+**관리자 전용 메뉴 > 접속 통계** 탭에서 추이·PC별 집계·CSV를 확인한다.
+
+식별자는 PC 이름이다. 서버가 클라이언트 IP를 역방향 조회해 `BPN123456` 같은 사내 PC
+이름을 얻고, 얻지 못하면 IP를 그대로 쓴다. 사내 DNS나 WINS에 PC 이름이 등록돼 있지
+않으면 표에 IP가 섞여 보이는데, 집계 자체는 정상이다.
 
 기존 DB에는 집계 테이블(`access_visit`, `access_daily`)이 없으므로 한 번 생성해야 한다.
 `schema.sql`의 CREATE 문만으로는 운영 DB에 반영되지 않는다.
@@ -186,22 +190,43 @@ REGISTER_MAIL_SCHEDULE.bat
 .venv\Scripts\python.exe backend\tools\apply_migrations.py
 ```
 
+`CREATE TABLE IF NOT EXISTS`라 **이미 만들어진 테이블의 구조는 바꾸지 않는다.** 이전
+버전(식별자가 PC 이름이 아니라 IP였던 시점)에서 이미 생성했다면, 적재가
+`Unknown column 'client_name'`으로 실패한다. 그 경우 한 번 지우고 다시 만든다 —
+아직 쌓인 기록이 있으면 함께 지워지므로 필요하면 먼저 백업한다.
+
+```sql
+DROP TABLE IF EXISTS access_visit, access_daily;
+```
+
 접속 로깅 도입(2026-09) 이전 구간은 서버가 세지 않았으므로 기록이 없다. 그 구간의
-일자별 집계를 채우려면 백필 스크립트를 쓴다. 채운 행은 `source='backfill'`로 표시되어
+접속 기록을 채우려면 백필 스크립트를 쓴다. 채운 행은 `source='backfill'`로 표시되어
 실측 집계(`live`)와 화면·CSV에서 구분된다.
 
 ```bat
-.venv\Scripts\python.exe backend\tools\backfill_access_daily.py --from 2026-07-17 --dry-run
-.venv\Scripts\python.exe backend\tools\backfill_access_daily.py --from 2026-07-17
+.venv\Scripts\python.exe backend\tools\backfill_access_daily.py --dry-run
+.venv\Scripts\python.exe backend\tools\backfill_access_daily.py
 ```
 
-`--from`은 화면을 사내에 공유하기 시작한 날을 넣는다. `--dry-run`으로 대상 일자와 값을
-먼저 확인한 뒤 적용한다 — 이미 집계가 있는 일자는 건너뛴다. `--to`를 생략하면 어제까지
-채운다(오늘은 실측이 쌓이는 중이라 제외).
+기본값은 **올해 5월 1일부터 어제까지**(오늘은 실측이 쌓이는 중이라 제외), 근무일마다
+접속자 5~15대, PC 이름 15개(`BPN` + 6자리)다. 바꾸려면:
+
+| 옵션 | 기본값 | 설명 |
+|---|---|---|
+| `--from` / `--to` | 5/1 / 어제 | 대상 구간 |
+| `--min` / `--max` | 5 / 15 | 일 접속자 수 범위 |
+| `--count` | 15 | 생성할 PC 이름 개수 (`--max` 이상이어야 한다) |
+| `--prefix` | `BPN` | PC 이름 접두어 |
+| `--seed` | 20260917 | 고정하면 실행할 때마다 같은 결과 |
+
+`--dry-run`으로 대상 일자·PC 이름·PC별 접속일 수를 먼저 확인한 뒤 적용한다. 이미
+기록이 있는 일자는 통째로 건너뛰므로, 실측으로 쌓인 값이 지워질 걱정은 없다.
+`--overwrite`를 주면 그 일자의 상세를 지우고 다시 쓴다.
 
 되돌리려면 적재한 행만 골라 지운다. 실측 행은 영향받지 않는다.
 
 ```sql
+DELETE FROM access_visit WHERE source = 'backfill';
 DELETE FROM access_daily WHERE source = 'backfill';
 ```
 

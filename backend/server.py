@@ -1218,7 +1218,8 @@ def session(request: Request) -> dict[str, str]:
     이용 현황 집계도 여기서 함께 남긴다 — 모든 요청에 미들웨어를 거는 방식은
     화면 조작 한 번이 만드는 다수의 데이터 요청까지 접속으로 세어버린다.
     이 엔드포인트는 BemsApp 마운트 시 한 번만 호출되므로 "사람이 화면을 열었다"에
-    가장 가깝다. 기록 실패가 권한 판정을 막지 않도록 서비스 쪽에서 예외를 삼킨다.
+    가장 가깝다. 집계는 IP 를 PC 이름으로 역방향 조회해 기록하며(조회 결과는
+    캐시된다), 기록 실패가 권한 판정을 막지 않도록 서비스 쪽에서 예외를 삼킨다.
     """
     client_ip = request.client.host if request.client else "unknown"
     try:
@@ -1251,6 +1252,7 @@ def access_stats(
         "from": start,
         "to": end,
         "days": days,
+        "clients": service.get_client_totals(start, end),
         "summary": service.summarize(days),
     })
 

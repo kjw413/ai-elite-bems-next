@@ -364,12 +364,15 @@ _PENDING_TABLE_CREATES: list[tuple[str, str]] = [
         CREATE TABLE IF NOT EXISTS access_visit (
             id            INT AUTO_INCREMENT PRIMARY KEY,
             visit_date    DATE         NOT NULL,
-            client_ip     VARCHAR(45)  NOT NULL,
+            client_name   VARCHAR(100) NOT NULL,
+            client_ip     VARCHAR(45)  DEFAULT NULL,
             hit_count     INT          NOT NULL DEFAULT 1,
+            source        VARCHAR(20)  NOT NULL DEFAULT 'live',
             first_seen_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             last_seen_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_access_visit (visit_date, client_ip),
-            INDEX idx_access_visit_date (visit_date)
+            UNIQUE KEY uq_access_visit (visit_date, client_name),
+            INDEX idx_access_visit_date (visit_date),
+            INDEX idx_access_visit_name (client_name)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """),
     ("access_daily", """
