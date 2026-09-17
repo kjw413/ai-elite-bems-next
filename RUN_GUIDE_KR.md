@@ -173,6 +173,38 @@ REGISTER_MAIL_SCHEDULE.bat
 
 해제는 같은 폴더의 `UNREGISTER_MAIL_SCHEDULE.bat`를 실행한다.
 
+## 7-1. 접속 통계 (선택)
+
+일별 접속자 수는 서버가 켜져 있는 동안 자동으로 쌓인다. 관리자(호스트 PC)로 접속해
+**관리자 전용 메뉴 > 접속 통계** 탭에서 추이·CSV를 확인한다.
+
+기존 DB에는 집계 테이블(`access_visit`, `access_daily`)이 없으므로 한 번 생성해야 한다.
+`schema.sql`의 CREATE 문만으로는 운영 DB에 반영되지 않는다.
+
+```bat
+.venv\Scripts\python.exe backend\tools\apply_migrations.py --dry-run
+.venv\Scripts\python.exe backend\tools\apply_migrations.py
+```
+
+접속 로깅 도입(2026-09) 이전 구간은 서버가 세지 않았으므로 기록이 없다. 그 구간의
+일자별 집계를 채우려면 백필 스크립트를 쓴다. 채운 행은 `source='backfill'`로 표시되어
+실측 집계(`live`)와 화면·CSV에서 구분된다.
+
+```bat
+.venv\Scripts\python.exe backend\tools\backfill_access_daily.py --from 2026-07-17 --dry-run
+.venv\Scripts\python.exe backend\tools\backfill_access_daily.py --from 2026-07-17
+```
+
+`--from`은 화면을 사내에 공유하기 시작한 날을 넣는다. `--dry-run`으로 대상 일자와 값을
+먼저 확인한 뒤 적용한다 — 이미 집계가 있는 일자는 건너뛴다. `--to`를 생략하면 어제까지
+채운다(오늘은 실측이 쌓이는 중이라 제외).
+
+되돌리려면 적재한 행만 골라 지운다. 실측 행은 영향받지 않는다.
+
+```sql
+DELETE FROM access_daily WHERE source = 'backfill';
+```
+
 ## 8. 자주 발생하는 문제
 
 | 증상 | 확인·조치 |

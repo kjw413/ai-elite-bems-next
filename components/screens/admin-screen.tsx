@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, ClipboardPaste, CloudSun, Database, Download, Eye, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload } from "lucide-react";
+import { BrainCircuit, ClipboardPaste, CloudSun, Database, Download, Eye, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload, Users } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiRequest, apiUrl, isAbortError, query } from "@/lib/bems-api";
+import { downloadCsv } from "@/lib/bems-csv";
 import { factories } from "@/lib/bems-data";
 import { PAGE_DEFS } from "@/lib/bems-pages";
 
 type AnyRow = Record<string, unknown>;
-type AdminTab = "events" | "targets" | "savings" | "monthly" | "data" | "predictions" | "mail" | "visibility";
+type AdminTab = "events" | "targets" | "savings" | "monthly" | "data" | "predictions" | "mail" | "visibility" | "access";
 
 function messageOf(error: unknown) {
   return error instanceof Error ? error.message : "요청을 처리하지 못했습니다.";
@@ -1393,11 +1395,161 @@ function PageVisibilityPanel() {
   </div>;
 }
 
+type AccessDay = { date: string; uniqueUsers: number; visitCount: number; source: string };
+type AccessSummary = {
+  activeDays: number;
+  totalVisits: number;
+  avgUniqueUsers: number;
+  peakUniqueUsers: number;
+  peakDate: string | null;
+  firstDate: string | null;
+  lastDate: string | null;
+  liveDays: number;
+  backfilledDays: number;
+};
+type AccessStats = { from: string; to: string; days: AccessDay[]; summary: AccessSummary };
+
+const accessTooltipStyle = {
+  contentStyle: { borderRadius: 10, border: "1px solid var(--line)", background: "var(--card)", boxShadow: "0 6px 18px #12201814", fontSize: 12 },
+  labelStyle: { color: "var(--text)" },
+};
+
+// 롤업 출처별 색. 실측과 백필을 같은 색으로 칠하면 한 덩어리로 읽히므로 분리한다.
+const accessSourceColor: Record<string, string> = { live: "var(--chart-actual)", backfill: "var(--chart-previous)" };
+const accessSourceLabel: Record<string, string> = { live: "실측 집계", backfill: "로깅 도입 이전 적재분" };
+
+// toISOString()은 UTC 기준이라 KST 오전에는 하루 전 날짜를 내놓는다 — 로컬 날짜로 만든다.
+function isoDaysAgo(days: number) {
+  const value = new Date();
+  value.setDate(value.getDate() - days);
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  return `${value.getFullYear()}-${month}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function AccessStatsPanel() {
+  const [dateFrom, setDateFrom] = useState(() => isoDaysAgo(89));
+  const [dateTo, setDateTo] = useState(() => isoDaysAgo(0));
+  const [stats, setStats] = useState<AccessStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const loadController = useRef<AbortController | null>(null);
+
+  const load = useCallback(async (from: string, to: string) => {
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    setLoading(true);
+    setError("");
+    try {
+      setStats(await apiRequest<AccessStats>(`/stats/access?${query({ from, to })}`, { signal: controller.signal }));
+    } catch (requestError) {
+      if (isAbortError(requestError)) return;
+      setError(messageOf(requestError));
+    } finally {
+      if (loadController.current === controller) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load(dateFrom, dateTo);
+    return () => loadController.current?.abort();
+    // 최초 1회만 — 이후 조회는 "조회" 버튼이 트리거한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load]);
+
+  const days = stats?.days ?? [];
+  const summary = stats?.summary;
+  // 축 라벨은 MM-DD 로 줄인다 — 90일 구간에서 연도까지 넣으면 라벨이 겹친다.
+  const chartRows = useMemo(() => days.map(row => ({ ...row, label: String(row.date).slice(5) })), [days]);
+  const hasBackfill = (summary?.backfilledDays ?? 0) > 0;
+
+  return <div className="screen-stack">
+    <article className="card admin-form">
+      <header><div><span className="eyebrow">ACCESS LOG</span><h3>일별 접속자 수</h3></div><Users size={22}/></header>
+      <p className="panel-copy">
+        화면을 연 사내망 클라이언트를 일자별로 집계합니다. 같은 IP가 하루에 여러 번 열어도 접속자 수는 1명이며,
+        접속 횟수만 늘어납니다.
+      </p>
+      <div className="form-grid">
+        <label className="field"><span>시작일</span><input type="date" value={dateFrom} max={dateTo} onChange={event => setDateFrom(event.target.value)}/></label>
+        <label className="field"><span>종료일</span><input type="date" value={dateTo} min={dateFrom} onChange={event => setDateTo(event.target.value)}/></label>
+      </div>
+      <div className="action-row">
+        <button type="button" className="primary-button" disabled={loading} onClick={() => void load(dateFrom, dateTo)}><RefreshCw size={16}/>{loading ? "조회 중..." : "조회"}</button>
+        <button type="button" className="secondary-button" disabled={days.length === 0} onClick={() => downloadCsv(
+          `접속통계_${dateFrom}_${dateTo}`,
+          days,
+          ["date", "uniqueUsers", "visitCount", "source"],
+          { date: "일자", uniqueUsers: "접속자 수", visitCount: "접속 횟수", source: "출처" },
+        )}><Download size={15}/>CSV</button>
+      </div>
+      {error && <div className="form-message error">{error}</div>}
+    </article>
+
+    {loading ? <div className="loading inline-loading"><RefreshCw className="spin"/>불러오는 중입니다.</div> : <>
+      <section className="kpi-grid compact">
+        <article className="kpi card"><div className="kpi-icon"><Users size={20}/></div><div><p>일 평균 접속자</p><strong>{summary?.avgUniqueUsers ?? 0} <small>명</small></strong><span className="kpi-note">기록이 있는 {summary?.activeDays ?? 0}일 기준</span></div></article>
+        <article className="kpi card"><div className="kpi-icon"><History size={20}/></div><div><p>최다 접속일</p><strong>{summary?.peakUniqueUsers ?? 0} <small>명</small></strong><span className="kpi-note">{summary?.peakDate ?? "기록 없음"}</span></div></article>
+        <article className="kpi card"><div className="kpi-icon"><Database size={20}/></div><div><p>총 접속 횟수</p><strong>{(summary?.totalVisits ?? 0).toLocaleString("ko-KR")} <small>회</small></strong><span className="kpi-note">{summary?.firstDate ?? "-"} ~ {summary?.lastDate ?? "-"}</span></div></article>
+      </section>
+
+      {hasBackfill && <div className="form-message info">
+        이 구간의 {summary?.backfilledDays}일은 접속 로깅 도입 이전 적재분(source=backfill)이고, {summary?.liveDays}일이 실측 집계입니다.
+        차트에서는 회색 막대로 구분되며 CSV의 &quot;출처&quot; 열에도 같은 값이 들어갑니다.
+      </div>}
+
+      <article className="card chart-card">
+        <header className="card-title"><div><h3>접속자 추이</h3></div><span>막대: 일 접속자 수</span></header>
+        {chartRows.length > 0 ? <>
+          <div className="chart"><ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartRows}>
+              <CartesianGrid vertical={false}/>
+              <XAxis dataKey="label" interval="preserveStartEnd" minTickGap={18}/>
+              <YAxis allowDecimals={false}/>
+              <Tooltip
+                {...accessTooltipStyle}
+                labelFormatter={(_label, payload) => String(payload?.[0]?.payload?.date ?? "")}
+                formatter={(value: unknown, _name: unknown, item: unknown) => {
+                  const row = (item as { payload?: AccessDay })?.payload;
+                  return [`${value}명 · ${row?.visitCount ?? 0}회`, accessSourceLabel[row?.source ?? "live"] ?? "접속자"];
+                }}
+              />
+              <Bar dataKey="uniqueUsers" name="접속자 수" radius={[3, 3, 0, 0]} maxBarSize={22}>
+                {chartRows.map(row => <Cell key={row.date} fill={accessSourceColor[row.source] ?? "var(--chart-actual)"}/>)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer></div>
+          <div className="chart-legend">
+            <span className="legend-chip"><i style={{ background: accessSourceColor.live }}/>{accessSourceLabel.live}</span>
+            {hasBackfill && <span className="legend-chip"><i style={{ background: accessSourceColor.backfill }}/>{accessSourceLabel.backfill}</span>}
+          </div>
+        </> : <div className="empty-row">이 구간에 기록된 접속이 없습니다.</div>}
+      </article>
+
+      <article className="card admin-list">
+        <header className="panel-header"><div><span className="eyebrow">DAILY DETAIL</span><h3>일자별 상세</h3></div><History size={20}/></header>
+        <div className="table-wrap"><table>
+          <thead><tr><th>일자</th><th>접속자 수</th><th>접속 횟수</th><th>출처</th></tr></thead>
+          <tbody>{days.length === 0
+            ? <tr><td colSpan={4}>기록이 없습니다.</td></tr>
+            : [...days].reverse().map(row => <tr key={row.date}>
+                <td>{row.date}</td>
+                <td>{row.uniqueUsers}</td>
+                <td>{row.visitCount}</td>
+                <td>{accessSourceLabel[row.source] ?? row.source}</td>
+              </tr>)}
+          </tbody>
+        </table></div>
+      </article>
+    </>}
+  </div>;
+}
+
 export function AdminScreen({ factory, date, isAdmin }: { factory: string; date: string; isAdmin: boolean }) {
-  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "savings", "monthly", "data", "predictions", "mail", "visibility"] : ["events", "targets"], [isAdmin]);
+  const allowedTabs = useMemo<AdminTab[]>(() => isAdmin ? ["events", "targets", "savings", "monthly", "data", "predictions", "mail", "access", "visibility"] : ["events", "targets"], [isAdmin]);
   const [tab, setTab] = useState<AdminTab>("events");
   useEffect(() => { if (!allowedTabs.includes(tab)) setTab("events"); }, [allowedTabs, tab]);
-  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", savings: "절감 테마", monthly: "월별 실적 백필", data: "데이터·동기화", predictions: "예측·모델 운영", mail: "메일 리포트", visibility: "페이지 노출 설정" };
+  const labels: Record<AdminTab, string> = { events: "이벤트 메모", targets: "절감 목표", savings: "절감 테마", monthly: "월별 실적 백필", data: "데이터·동기화", predictions: "예측·모델 운영", mail: "메일 리포트", access: "접속 통계", visibility: "페이지 노출 설정" };
 
   return <section className="screen-stack">
     {!isAdmin && <div className="permission-banner"><ShieldAlert size={21}/><div><strong>조회 사용자 모드</strong><p>이벤트와 절감 목표는 열람만 가능하며 모든 변경 작업은 서버에서 차단됩니다.</p></div></div>}
@@ -1409,6 +1561,7 @@ export function AdminScreen({ factory, date, isAdmin }: { factory: string; date:
     {tab === "data" && isAdmin && <DataPanel/>}
     {tab === "predictions" && isAdmin && <PredictionOpsPanel factory={factory} date={date}/>}
     {tab === "mail" && isAdmin && <MailPanel date={date}/>}
+    {tab === "access" && isAdmin && <AccessStatsPanel/>}
     {tab === "visibility" && isAdmin && <PageVisibilityPanel/>}
   </section>;
 }

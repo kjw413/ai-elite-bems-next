@@ -360,6 +360,31 @@ _PENDING_TABLE_CREATES: list[tuple[str, str]] = [
             FOREIGN KEY (theme_id) REFERENCES savings_theme(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """),
+    ("access_visit", """
+        CREATE TABLE IF NOT EXISTS access_visit (
+            id            INT AUTO_INCREMENT PRIMARY KEY,
+            visit_date    DATE         NOT NULL,
+            client_ip     VARCHAR(45)  NOT NULL,
+            hit_count     INT          NOT NULL DEFAULT 1,
+            first_seen_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_access_visit (visit_date, client_ip),
+            INDEX idx_access_visit_date (visit_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """),
+    ("access_daily", """
+        CREATE TABLE IF NOT EXISTS access_daily (
+            id           INT AUTO_INCREMENT PRIMARY KEY,
+            visit_date   DATE        NOT NULL,
+            unique_users INT         NOT NULL DEFAULT 0,
+            visit_count  INT         NOT NULL DEFAULT 0,
+            source       VARCHAR(20) NOT NULL DEFAULT 'live',
+            created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            changed_by   TEXT,
+            UNIQUE KEY uq_access_daily (visit_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """),
 ]
 
 # 폐기된 컬럼의 멱등 DROP. 컬럼이 존재할 때만 ALTER DROP 을 1회 수행한다.

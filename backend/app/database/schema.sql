@@ -323,3 +323,41 @@ CREATE TABLE IF NOT EXISTS savings_record (
     FOREIGN KEY (theme_id) REFERENCES savings_theme(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+
+-- 15. 접속 상세 — (일자, 클라이언트 IP) 단위. 사내망에서는 IP가 사실상 PC 1대,
+--     즉 사용자 1명에 대응하므로 권한 판정(server.client_is_admin)과 같은
+--     식별자를 재사용한다. 같은 IP가 하루에 여러 번 들어오면 행이 늘지 않고
+--     hit_count 만 올라간다 — 접속자 수와 접속 횟수를 분리해 세기 위함이다.
+CREATE TABLE IF NOT EXISTS access_visit (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    visit_date    DATE         NOT NULL,
+    client_ip     VARCHAR(45)  NOT NULL,       -- IPv6 최대 표기 길이 45
+    hit_count     INT          NOT NULL DEFAULT 1,
+    first_seen_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_access_visit (visit_date, client_ip),
+    INDEX idx_access_visit_date (visit_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 16. 일별 접속 집계 — 화면·CSV가 읽는 단일 출처.
+--     access_visit 에서 매 기록 시 재계산해 넣으므로 두 표가 어긋나지 않는다.
+--     롤업을 따로 두는 이유: (1) 조회마다 COUNT(DISTINCT)를 돌리지 않아도 되고,
+--     (2) 상세 행이 없는 구간(로깅 도입 이전)도 같은 표에서 함께 표현할 수 있다.
+--     source 가 그 날 숫자의 출처를 남긴다.
+--       · live     — 실제 요청을 받아 적재한 값
+--       · backfill — 로깅 도입 이전 구간을 backend/tools/backfill_access_daily.py 로
+--                    채운 값. 실측이 아니므로 API 응답과 화면까지 구분해서 올린다.
+CREATE TABLE IF NOT EXISTS access_daily (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    visit_date   DATE        NOT NULL,
+    unique_users INT         NOT NULL DEFAULT 0,   -- 그 날 접속한 서로 다른 IP 수
+    visit_count  INT         NOT NULL DEFAULT 0,   -- 그 날 총 접속 횟수
+
+    source       VARCHAR(20) NOT NULL DEFAULT 'live',
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    changed_by   TEXT,
+
+    UNIQUE KEY uq_access_daily (visit_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
