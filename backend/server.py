@@ -1213,12 +1213,46 @@ def data_status() -> dict[str, Any]:
 
 @app.get("/api/v1/session")
 def session(request: Request) -> dict[str, str]:
+    """권한·서버 정보 조회. 프런트가 화면 진입 시 1회 호출한다.
+
+    이용 현황 집계도 여기서 함께 남긴다 — 모든 요청에 미들웨어를 거는 방식은
+    화면 조작 한 번이 만드는 다수의 데이터 요청까지 접속으로 세어버린다.
+    이 엔드포인트는 BemsApp 마운트 시 한 번만 호출되므로 "사람이 화면을 열었다"에
+    가장 가깝다. 기록 실패가 권한 판정을 막지 않도록 서비스 쪽에서 예외를 삼킨다.
+    """
     client_ip = request.client.host if request.client else "unknown"
+    try:
+        import_core("app.services.access_stats_service").record_visit(client_ip)
+    except Exception:
+        # import_core 는 코어 모듈을 못 찾으면 503 을 올린다. 집계는 부가 기능이라
+        # 그 이유로 권한 응답까지 실패시키지 않는다.
+        logger.warning("access visit recording skipped for %s", client_ip, exc_info=True)
     return {
         "role": "admin" if client_is_admin(request) else "viewer",
         "clientIp": client_ip,
         "serverName": socket.gethostname(),
     }
+
+
+@app.get("/api/v1/stats/access")
+def access_stats(
+    request: Request,
+    date_from: date | None = Query(None, alias="from"),
+    date_to: date | None = Query(None, alias="to"),
+) -> dict[str, Any]:
+    """일별 접속자 수 (관리자 전용) — 기본 구간은 오늘 포함 최근 90일."""
+    require_admin(request)
+    service = import_core("app.services.access_stats_service")
+    default_from, default_to = service.default_window()
+    start = date_from or default_from
+    end = date_to or default_to
+    days = service.get_daily_counts(start, end)
+    return json_safe({
+        "from": start,
+        "to": end,
+        "days": days,
+        "summary": service.summarize(days),
+    })
 
 
 @app.get("/api/v1/settings/page-visibility")
