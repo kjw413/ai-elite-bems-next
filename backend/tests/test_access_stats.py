@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import sys
 import unittest
+from contextlib import redirect_stdout
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -130,6 +132,88 @@ class HostNameTests(unittest.TestCase):
         self.assertEqual(stats.resolve_client_name(""), "")
 
 
+class PreflightTests(unittest.TestCase):
+    """적재 전 점검. DB 없이 table_status 를 바꿔 끼워 검증한다."""
+
+    @staticmethod
+    def _status(connected: bool = True, visit_missing: tuple = (), visit_exists: bool = True) -> dict:
+        return {
+            "connected": connected,
+            "error": None if connected else "Access denied",
+            "database": "fems_db",
+            "tables": {
+                "access_visit": {"exists": visit_exists, "missing": list(visit_missing)},
+                "access_daily": {"exists": True, "missing": []},
+            },
+        }
+
+    def _run(self, status: dict, **kwargs) -> tuple[bool, object]:
+        # 진단 출력은 테스트 결과를 읽기 어렵게 만들 뿐이라 삼킨다.
+        with patch.object(stats, "table_status", return_value=status), \
+                patch.object(stats, "recreate_tables") as recreate, \
+                redirect_stdout(io.StringIO()):
+            return backfill.preflight(**kwargs), recreate
+
+    def test_healthy_schema_is_ready(self) -> None:
+        ok, recreate = self._run(self._status())
+        self.assertTrue(ok)
+        recreate.assert_not_called()
+
+    def test_connection_failure_blocks_the_load(self) -> None:
+        ok, recreate = self._run(self._status(connected=False))
+        self.assertFalse(ok)
+        recreate.assert_not_called()
+
+    def test_missing_tables_are_created_by_the_load_itself(self) -> None:
+        # 테이블이 아예 없는 건 정상 초기 상태다 — 적재 경로가 만든다.
+        ok, _ = self._run(self._status(visit_exists=False, visit_missing=("client_name",)))
+        self.assertTrue(ok)
+
+    def test_stale_schema_blocks_the_load_without_the_flag(self) -> None:
+        ok, recreate = self._run(self._status(visit_missing=("client_name", "source")))
+        self.assertFalse(ok)
+        recreate.assert_not_called()
+
+    def test_stale_schema_is_rebuilt_when_asked(self) -> None:
+        ok, recreate = self._run(self._status(visit_missing=("client_name",)), recreate=True)
+        self.assertTrue(ok)
+        recreate.assert_called_once()
+
+    def test_report_only_never_writes(self) -> None:
+        # --check / --dry-run 이 DB 를 바꾸면 그건 점검도 미리보기도 아니다.
+        ok, recreate = self._run(
+            self._status(visit_missing=("client_name",)), recreate=True, report_only=True,
+        )
+        self.assertFalse(ok)
+        recreate.assert_not_called()
+
+
+class CheckModeTests(unittest.TestCase):
+    def test_check_reports_failure_without_writing(self) -> None:
+        status = PreflightTests._status(connected=False)
+        with patch.object(stats, "table_status", return_value=status), \
+                patch.object(stats, "recreate_tables") as recreate, \
+                patch.object(stats, "upsert_visits") as upsert, \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(backfill.main(["--check"]), 1)
+        recreate.assert_not_called()
+        upsert.assert_not_called()
+
+    def test_check_succeeds_on_a_healthy_schema(self) -> None:
+        with patch.object(stats, "table_status", return_value=PreflightTests._status()), \
+                patch.object(stats, "upsert_visits") as upsert, \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(backfill.main(["--check"]), 0)
+        upsert.assert_not_called()
+
+    def test_dry_run_never_loads(self) -> None:
+        with patch.object(stats, "table_status", return_value=PreflightTests._status()), \
+                patch.object(stats, "upsert_visits") as upsert, \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(backfill.main(["--dry-run"]), 0)
+        upsert.assert_not_called()
+
+
 class SummaryTests(unittest.TestCase):
     @staticmethod
     def _day(day: int, users: int, visits: int, source: str = stats.SOURCE_LIVE) -> dict:
@@ -192,10 +276,12 @@ class ArgumentTests(unittest.TestCase):
 
     def test_pc_count_below_the_daily_cap_is_rejected(self) -> None:
         # PC 가 상한보다 적으면 그 날 접속자 수를 채울 수 없다.
-        self.assertEqual(backfill.main(["--count", "4", "--max", "15", "--dry-run"]), 1)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(backfill.main(["--count", "4", "--max", "15", "--dry-run"]), 1)
 
     def test_reversed_date_range_is_rejected(self) -> None:
-        self.assertEqual(backfill.main(["--from", "2026-09-16", "--to", "2026-05-01", "--dry-run"]), 1)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(backfill.main(["--from", "2026-09-16", "--to", "2026-05-01", "--dry-run"]), 1)
 
 
 if __name__ == "__main__":

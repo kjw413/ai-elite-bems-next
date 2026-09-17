@@ -115,7 +115,7 @@ Sites에 배포된 화면은 사용자의 서버 PC 안에 있는 MySQL에 직�
 | source | 의미 |
 | --- | --- |
 | `live` | 실제 요청을 받아 적재한 실측 집계. `client_ip`가 채워집니다 |
-| `backfill` | 접속 로깅 도입(2026-09) 이전 구간을 `backend/tools/backfill_access_daily.py`로 채운 값. `client_ip`는 NULL입니다 |
+| `backfill` | 접속 로깅 도입(2026-09) 이전 구간을 `backend/tools/backfill_access_daily.py`(실행기: 루트의 `RUN_ACCESS_BACKFILL.bat`)로 채운 값. `client_ip`는 NULL입니다 |
 
 `backfill` 행은 실측이 아닙니다. 두 값이 한 덩어리로 보이면 안 되므로 API 응답
 (`GET /api/v1/stats/access`)과 관리자 화면(차트 색·범례·표), CSV의 "출처" 열까지

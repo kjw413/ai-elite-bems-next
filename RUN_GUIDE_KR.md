@@ -182,34 +182,28 @@ REGISTER_MAIL_SCHEDULE.bat
 이름을 얻고, 얻지 못하면 IP를 그대로 쓴다. 사내 DNS나 WINS에 PC 이름이 등록돼 있지
 않으면 표에 IP가 섞여 보이는데, 집계 자체는 정상이다.
 
-기존 DB에는 집계 테이블(`access_visit`, `access_daily`)이 없으므로 한 번 생성해야 한다.
-`schema.sql`의 CREATE 문만으로는 운영 DB에 반영되지 않는다.
+### 로깅 이전 구간 적재
+
+접속 로깅 도입(2026-09) 이전 구간은 서버가 세지 않았으므로 기록이 없다. 그 구간을
+채우려면 **MySQL이 있는 서버 PC에서** `RUN_ACCESS_BACKFILL.bat`를 실행한다. DB에 직접
+붙으므로 FastAPI 서버가 떠 있지 않아도 된다.
 
 ```bat
-.venv\Scripts\python.exe backend\tools\apply_migrations.py --dry-run
-.venv\Scripts\python.exe backend\tools\apply_migrations.py
+cd /d E:\AI-Elite-BEMS\new
+git pull
+RUN_ACCESS_BACKFILL.bat
 ```
 
-`CREATE TABLE IF NOT EXISTS`라 **이미 만들어진 테이블의 구조는 바꾸지 않는다.** 이전
-버전(식별자가 PC 이름이 아니라 IP였던 시점)에서 이미 생성했다면, 적재가
-`Unknown column 'client_name'`으로 실패한다. 그 경우 한 번 지우고 다시 만든다 —
-아직 쌓인 기록이 있으면 함께 지워지므로 필요하면 먼저 백업한다.
-
-```sql
-DROP TABLE IF EXISTS access_visit, access_daily;
-```
-
-접속 로깅 도입(2026-09) 이전 구간은 서버가 세지 않았으므로 기록이 없다. 그 구간의
-접속 기록을 채우려면 백필 스크립트를 쓴다. 채운 행은 `source='backfill'`로 표시되어
-실측 집계(`live`)와 화면·CSV에서 구분된다.
+실행하면 1단계로 **미리보기**(DB 미반영)를 보여주고, `Y`를 입력해야 2단계에서 적재한다.
+집계 테이블이 없으면 적재 시 자동으로 만들어지므로 `apply_migrations.py`를 따로 돌릴
+필요는 없다. 적재 전 연결·테이블만 확인하려면:
 
 ```bat
-.venv\Scripts\python.exe backend\tools\backfill_access_daily.py --dry-run
-.venv\Scripts\python.exe backend\tools\backfill_access_daily.py
+RUN_ACCESS_BACKFILL.bat --check
 ```
 
 기본값은 **올해 5월 1일부터 어제까지**(오늘은 실측이 쌓이는 중이라 제외), 근무일마다
-접속자 5~15대, PC 이름 15개(`BPN` + 6자리)다. 바꾸려면:
+접속자 5~15대, PC 이름 15개(`BPN` + 6자리)다. 옵션은 그대로 넘길 수 있다.
 
 | 옵션 | 기본값 | 설명 |
 |---|---|---|
@@ -218,16 +212,41 @@ DROP TABLE IF EXISTS access_visit, access_daily;
 | `--count` | 15 | 생성할 PC 이름 개수 (`--max` 이상이어야 한다) |
 | `--prefix` | `BPN` | PC 이름 접두어 |
 | `--seed` | 20260917 | 고정하면 실행할 때마다 같은 결과 |
+| `--overwrite` | 꺼짐 | 이미 기록이 있는 일자도 다시 쓴다 |
+| `--recreate-tables` | 꺼짐 | 예전 구성의 집계 테이블을 지우고 다시 만든다 |
 
-`--dry-run`으로 대상 일자·PC 이름·PC별 접속일 수를 먼저 확인한 뒤 적용한다. 이미
-기록이 있는 일자는 통째로 건너뛰므로, 실측으로 쌓인 값이 지워질 걱정은 없다.
-`--overwrite`를 주면 그 일자의 상세를 지우고 다시 쓴다.
+```bat
+RUN_ACCESS_BACKFILL.bat --from 2026-03-02 --max 20
+```
 
-되돌리려면 적재한 행만 골라 지운다. 실측 행은 영향받지 않는다.
+적재한 행은 `source='backfill'`로 표시되어 실측 집계(`live`)와 화면·CSV에서 구분된다.
+이미 기록이 있는 일자는 통째로 건너뛰므로, 실측으로 쌓인 값이 지워질 걱정은 없다.
+
+`.bat` 없이 직접 실행해도 된다(동작은 같고 확인 절차만 없다):
+
+```bat
+.venv\Scripts\python.exe backend\tools\backfill_access_daily.py --dry-run
+.venv\Scripts\python.exe backend\tools\backfill_access_daily.py
+```
+
+### 되돌리기
+
+적재한 행만 골라 지운다. 실측 행은 영향받지 않는다.
 
 ```sql
 DELETE FROM access_visit WHERE source = 'backfill';
 DELETE FROM access_daily WHERE source = 'backfill';
+```
+
+### 테이블 구성이 다르다는 오류
+
+`CREATE TABLE IF NOT EXISTS`라 **이미 만들어진 테이블의 구조는 바꾸지 않는다.** 이전
+버전(식별자가 PC 이름이 아니라 IP였던 시점)에서 이미 생성했다면 적재가 멈추고 없는
+컬럼을 알려준다. `--recreate-tables`를 주면 지우고 다시 만든다 — 그때까지 쌓인 접속
+기록도 함께 사라지므로, 남길 값이 있으면 먼저 백업한다.
+
+```bat
+RUN_ACCESS_BACKFILL.bat --recreate-tables
 ```
 
 ## 8. 자주 발생하는 문제
@@ -242,6 +261,8 @@ DELETE FROM access_daily WHERE source = 'backfill';
 | 다른 PC에서 접속 불가 | 서버 PC 이름/IP, 같은 사내망 여부, Windows 방화벽 Domain/Private 규칙, 3000 포트를 확인한다. |
 | 브라우저 CORS 오류 | 접속 주소와 `BEMS_ALLOWED_ORIGINS`를 `http://호스트:3000`의 정확한 값으로 맞춘다. |
 | 원격 PC가 관리자여야 함 | 해당 PC의 고정 또는 예약 IP를 `BEMS_ADMIN_IPS`에 추가하고 FastAPI를 재시작한다. |
+| 접속 통계에 PC 이름 대신 IP가 보임 | 사내 DNS·WINS에 그 PC 이름이 없어 역방향 조회가 실패한 것이다. 집계 자체는 정상이며 그대로 둬도 된다. |
+| 접속 기록 적재 시 테이블 구성 오류 | `RUN_ACCESS_BACKFILL.bat --recreate-tables` (7-1 참고). 쌓인 접속 기록은 함께 사라진다. |
 
 ## 9. 운영 종료·재시작
 

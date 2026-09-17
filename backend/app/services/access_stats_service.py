@@ -31,7 +31,7 @@ import socket
 import threading
 from datetime import date, timedelta
 
-from app.database.db_connection import managed_cursor
+from app.database.db_connection import DB_NAME, managed_cursor
 from app.services.audit_service import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -81,6 +81,13 @@ CREATE TABLE IF NOT EXISTS access_daily (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+# 적재 경로가 실제로 쓰는 컬럼. 테이블이 있어도 구성이 다르면 INSERT 가
+# "Unknown column" 으로 죽으므로, 적재 전에 이 목록으로 먼저 확인한다.
+REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
+    "access_visit": ("visit_date", "client_name", "client_ip", "hit_count", "source"),
+    "access_daily": ("visit_date", "unique_users", "visit_count", "source"),
+}
+
 _TABLES_READY = False
 
 
@@ -96,6 +103,57 @@ def _ensure_tables() -> None:
             conn.commit()
     except Exception as exc:
         logger.warning("access_stats _ensure_tables skipped: %s", exc)
+    _TABLES_READY = True
+
+
+def table_status() -> dict:
+    """집계 테이블의 존재·컬럼 구성 점검 결과.
+
+    Returns
+    -------
+    dict
+        ``{"connected": bool, "error": str | None, "database": str,
+           "tables": {이름: {"exists": bool, "missing": [컬럼...]}}}``
+
+    ``missing`` 이 비어 있지 않으면 예전 구성의 테이블이 남아 있다는 뜻이다 —
+    ``CREATE TABLE IF NOT EXISTS`` 는 이미 있는 테이블의 구조를 바꾸지 않으므로
+    그대로 두면 적재가 실패한다.
+    """
+    result: dict = {"connected": False, "error": None, "database": DB_NAME, "tables": {}}
+    try:
+        with managed_cursor(admin=True) as (_conn, cursor):
+            for table, required in REQUIRED_COLUMNS.items():
+                cursor.execute(
+                    """
+                    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+                    """,
+                    (DB_NAME, table),
+                )
+                columns = {str(row[0]) for row in cursor.fetchall()}
+                result["tables"][table] = {
+                    "exists": bool(columns),
+                    "missing": [name for name in required if name not in columns] if columns else list(required),
+                }
+        result["connected"] = True
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
+
+def recreate_tables() -> None:
+    """집계 테이블을 지우고 현재 구성으로 다시 만든다.
+
+    쌓인 기록도 함께 사라진다. 예전 구성의 테이블이 남아 적재가 막힐 때의
+    탈출구이며, 호출부가 사용자 확인을 받은 뒤에만 부른다.
+    """
+    global _TABLES_READY
+    with managed_cursor(admin=True) as (conn, cursor):
+        cursor.execute("DROP TABLE IF EXISTS access_visit")
+        cursor.execute("DROP TABLE IF EXISTS access_daily")
+        cursor.execute(_VISIT_DDL)
+        cursor.execute(_DAILY_DDL)
+        conn.commit()
     _TABLES_READY = True
 
 

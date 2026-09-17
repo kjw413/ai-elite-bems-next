@@ -162,6 +162,53 @@ def default_start(today: date | None = None) -> date:
     return date((today or date.today()).year, 5, 1)
 
 
+def preflight(recreate: bool = False, report_only: bool = False) -> bool:
+    """DB 연결과 집계 테이블 구성을 확인한다.
+
+    여기서 걸러내지 않으면 예전 구성의 테이블이 남은 환경에서 적재가
+    ``Unknown column 'client_name'`` 으로 죽는데, 원인이 바로 드러나지 않는다.
+
+    ``report_only`` 면 무엇도 쓰지 않고 진단만 한다 — ``--check`` 와 ``--dry-run``
+    이 DB 를 바꾸면 그건 이미 점검도 미리보기도 아니다.
+
+    Returns
+    -------
+    bool
+        적재를 진행할 수 있는 상태면 True. ``report_only`` 일 때는 "지금 이대로
+        적재할 수 있는가" 를 뜻하므로, 고쳐야 할 것이 있으면 False 다.
+    """
+    status = access_stats_service.table_status()
+    # 바로 고칠 수 있는 상황(재생성 지시)은 실패가 아니다.
+    tone = "경고" if (report_only or recreate) else "실패"
+
+    if not status["connected"]:
+        print(f"{tone}: DB 에 연결할 수 없습니다 — {status['error']}")
+        print("      backend/.env 의 DB_HOST / DB_NAME / DB_ADMIN_USER / DB_ADMIN_PASSWORD 를 확인하세요.")
+        print("      MySQL 서비스가 실행 중인지도 함께 확인하세요.")
+        return False
+
+    print(f"DB 연결 OK — 스키마 {status['database']}")
+    stale = {name: info for name, info in status["tables"].items() if info["exists"] and info["missing"]}
+    missing = [name for name, info in status["tables"].items() if not info["exists"]]
+
+    if stale:
+        for name, info in stale.items():
+            print(f"{tone}: {name} 테이블 구성이 현재 버전과 다릅니다 — 없는 컬럼: {', '.join(info['missing'])}")
+        print("      CREATE TABLE IF NOT EXISTS 는 이미 있는 테이블 구조를 바꾸지 않습니다.")
+        if report_only or not recreate:
+            print("      --recreate-tables 를 주면 지우고 다시 만듭니다(쌓인 기록도 함께 사라집니다).")
+            return False
+        print(f"집계 테이블을 다시 만듭니다 — {', '.join(stale)}")
+        access_stats_service.recreate_tables()
+        print("  완료")
+        return True
+
+    if missing:
+        print(f"집계 테이블이 없습니다 — 적재 시 만들어집니다: {', '.join(missing)}" if report_only
+              else f"집계 테이블을 만듭니다 — {', '.join(missing)}")
+    return True
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="접속 로깅 이전 구간의 접속 기록 적재")
     parser.add_argument(
@@ -181,6 +228,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--overwrite", action="store_true",
         help="이미 기록이 있는 일자도 다시 쓴다. 실측(live) 집계까지 지워지므로 기본은 건너뛰기",
+    )
+    parser.add_argument(
+        "--check", action="store_true",
+        help="DB 연결과 집계 테이블 구성만 확인하고 끝낸다",
+    )
+    parser.add_argument(
+        "--recreate-tables", action="store_true",
+        help="예전 구성의 집계 테이블을 지우고 다시 만든다. 쌓인 기록도 함께 사라진다",
     )
     return parser.parse_args(argv)
 
@@ -202,6 +257,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if not args.prefix.strip():
         print("실패: --prefix 가 비어 있습니다.")
+        return 1
+
+    if args.check:
+        ready = preflight(report_only=True)
+        print()
+        print("--check: 적재 준비가 끝났습니다. DB 는 바꾸지 않았습니다." if ready
+              else "--check: 위 문제를 먼저 해결해야 적재할 수 있습니다. DB 는 바꾸지 않았습니다.")
+        return 0 if ready else 1
+
+    # 미리보기는 DB 를 바꾸지 않는다. 문제가 있어도 값 확인은 계속할 수 있게 진행한다.
+    if not preflight(recreate=args.recreate_tables, report_only=args.dry_run) and not args.dry_run:
         return 1
 
     holidays, holidays_loaded = load_holiday_set()
