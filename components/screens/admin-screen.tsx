@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrainCircuit, ClipboardPaste, CloudSun, Database, Download, Eye, FolderSync, History, Mail, Pencil, Play, RefreshCw, Save, ShieldAlert, Target, Trash2, Upload, Users } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiRequest, apiUrl, isAbortError, query } from "@/lib/bems-api";
 import { downloadCsv } from "@/lib/bems-csv";
 import { factories } from "@/lib/bems-data";
@@ -1414,8 +1414,7 @@ const accessTooltipStyle = {
   labelStyle: { color: "var(--text)" },
 };
 
-// 롤업 출처별 색. 실측과 백필을 같은 색으로 칠하면 한 덩어리로 읽히므로 분리한다.
-const accessSourceColor: Record<string, string> = { live: "var(--chart-actual)", backfill: "var(--chart-previous)" };
+const accessBarColor = "var(--chart-previous)";
 const accessSourceLabel: Record<string, string> = { live: "실측 집계", backfill: "로깅 도입 이전 적재분" };
 
 // toISOString()은 UTC 기준이라 KST 오전에는 하루 전 날짜를 내놓는다 — 로컬 날짜로 만든다.
@@ -1461,7 +1460,6 @@ function AccessStatsPanel() {
   const summary = stats?.summary;
   // 축 라벨은 MM-DD 로 줄인다 — 90일 구간에서 연도까지 넣으면 라벨이 겹친다.
   const chartRows = useMemo(() => days.map(row => ({ ...row, label: String(row.date).slice(5) })), [days]);
-  const hasBackfill = (summary?.backfilledDays ?? 0) > 0;
 
   return <div className="screen-stack">
     <article className="card admin-form">
@@ -1493,11 +1491,6 @@ function AccessStatsPanel() {
         <article className="kpi card"><div className="kpi-icon"><Database size={20}/></div><div><p>총 접속 횟수</p><strong>{(summary?.totalVisits ?? 0).toLocaleString("ko-KR")} <small>회</small></strong><span className="kpi-note">{summary?.firstDate ?? "-"} ~ {summary?.lastDate ?? "-"}</span></div></article>
       </section>
 
-      {hasBackfill && <div className="form-message info">
-        이 구간의 {summary?.backfilledDays}일은 접속 로깅 도입 이전 적재분(source=backfill)이고, {summary?.liveDays}일이 실측 집계입니다.
-        차트에서는 회색 막대로 구분되며 CSV의 &quot;출처&quot; 열에도 같은 값이 들어갑니다.
-      </div>}
-
       <article className="card chart-card">
         <header className="card-title"><div><h3>접속자 추이</h3></div><span>막대: 일 접속자 수</span></header>
         {chartRows.length > 0 ? <>
@@ -1514,14 +1507,11 @@ function AccessStatsPanel() {
                   return [`${value}명 · ${row?.visitCount ?? 0}회`, accessSourceLabel[row?.source ?? "live"] ?? "접속자"];
                 }}
               />
-              <Bar dataKey="uniqueUsers" name="접속자 수" radius={[3, 3, 0, 0]} maxBarSize={22}>
-                {chartRows.map(row => <Cell key={row.date} fill={accessSourceColor[row.source] ?? "var(--chart-actual)"}/>)}
-              </Bar>
+              <Bar dataKey="uniqueUsers" name="접속자 수" fill={accessBarColor} radius={[3, 3, 0, 0]} maxBarSize={22}/>
             </BarChart>
           </ResponsiveContainer></div>
           <div className="chart-legend">
-            <span className="legend-chip"><i style={{ background: accessSourceColor.live }}/>{accessSourceLabel.live}</span>
-            {hasBackfill && <span className="legend-chip"><i style={{ background: accessSourceColor.backfill }}/>{accessSourceLabel.backfill}</span>}
+            <span className="legend-chip"><i style={{ background: accessBarColor }}/>접속자 수</span>
           </div>
         </> : <div className="empty-row">이 구간에 기록된 접속이 없습니다.</div>}
       </article>

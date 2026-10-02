@@ -340,7 +340,39 @@ nav button.unsupported:hover{background:transparent;color:#a9b6c9}
 .cost-toolbar .segmented{margin-bottom:0}
 .cost-toolbar .period-chip{margin-left:auto}
 .cost-scope-note{margin-bottom:0}
-.cost-monthly-chart{height:330px}
+.cost-toolbar-label{font-size:12px;color:var(--muted)}
+.cost-energy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start}
+.cost-energy-panel{--cost-color:var(--chart-power);min-width:0;padding:18px;border:1px solid var(--line);border-top:3px solid var(--cost-color);border-radius:14px;background:var(--panel,#edf1f4)}
+.cost-energy-fuel{--cost-color:var(--chart-fuel)}
+.cost-energy-header{display:flex;align-items:center;gap:11px;margin-bottom:18px}
+.cost-energy-icon{width:42px;height:42px;display:grid;place-items:center;flex:none;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--cost-color)}
+.cost-energy-header h2{margin:0;font-size:19px;letter-spacing:-.4px}
+.cost-energy-header p{margin:4px 0 0;font-size:11px;color:var(--muted)}
+.cost-energy-header>span{margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}
+.cost-panel-content,.cost-panel-details{display:grid;gap:16px;min-width:0}
+.cost-panel-details>.card{min-width:0}
+.cost-energy-panel .card-title{gap:8px;flex-wrap:wrap}
+.cost-energy-panel .card-title h3::before{background:var(--cost-color)}
+.cost-energy-panel .card-title-side{min-width:0}
+.cost-energy-panel .card-title-side span{line-height:1.5}
+.cost-energy-panel .data-warning{margin:0}
+.cost-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:0}
+.cost-kpis .kpi{min-width:0;min-height:112px;padding:14px;gap:10px;align-items:flex-start}
+.cost-kpis .kpi-icon{width:32px;height:32px;border-radius:9px;flex:none}
+.cost-kpis .kpi>div:last-child{min-width:0}
+.cost-kpis .kpi p{font-size:11px;margin:0 0 8px}
+.cost-kpis .kpi strong{font-size:22px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.cost-kpis .kpi small{display:inline-block;white-space:nowrap}
+.cost-period-chart{height:280px}
+.cost-energy-panel .cost-bridge{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.cost-energy-panel .bridge-steps{grid-column:1/-1;grid-row:2}
+.cost-energy-panel .bridge-end{min-width:0}
+.cost-energy-panel .bridge-step{grid-template-columns:76px minmax(0,1fr) 74px}
+.cost-energy-panel .cost-matrix{font-size:11px}
+.cost-energy-panel .cost-matrix th,.cost-energy-panel .cost-matrix td{padding:10px 9px}
+@media(max-width:1200px) and (min-width:961px){.cost-energy-panel{padding:12px}.cost-kpis .kpi-icon{display:none}.cost-kpis .kpi strong{font-size:20px}.cost-energy-panel .chart-card,.cost-energy-panel .table-card{padding:12px}}
+@media(max-width:960px){.cost-energy-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:520px){.cost-energy-panel{padding:12px}.cost-kpis .kpi{padding:12px}.cost-kpis .kpi-icon{display:none}.cost-kpis .kpi strong{font-size:20px}.cost-energy-panel .chart-card,.cost-energy-panel .table-card{padding:12px}.cost-toolbar-label{display:none}}
 .cost-bridge{margin-top:8px}
 .cost-bridge-basis{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .cost-bridge-basis span{border:1px solid var(--line);border-radius:20px;background:var(--soft,#f7f9fc);color:var(--muted);font-size:10.5px;padding:5px 9px}
@@ -358,7 +390,7 @@ nav button.unsupported:hover{background:transparent;color:#a9b6c9}
 .cost-composition>div>small{display:block;margin-top:6px;font-size:10.5px}
 .cost-matrix th,.cost-matrix td{text-align:right;white-space:nowrap}
 .cost-matrix th:first-child,.cost-matrix td:first-child{text-align:left;font-weight:700}
-@media(max-width:760px){.cost-toolbar .period-chip{width:100%;margin-left:0}.cost-monthly-chart{height:280px}.cost-bridge-basis{display:grid}.energy-view-switch{display:flex}.energy-view-switch button{flex:1}}
+@media(max-width:760px){.cost-toolbar .period-chip{width:100%;margin-left:0}.cost-period-chart{height:250px}.cost-bridge-basis{display:grid}.energy-view-switch{display:flex}.energy-view-switch button{flex:1}}
 /* 월별 실적 백필(경산 등 일단위 실적 없는 구간) — 엑셀형 입력 그리드 */
 .admin-grid.single{grid-template-columns:1fr}
 .monthly-backfill{padding:20px;min-width:0}
