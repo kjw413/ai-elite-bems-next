@@ -27,7 +27,6 @@ from app.services.v5_common import (
     STATION_MAP,
     TARGET_SPECS,
     WEATHER_COLS,
-    calendar_flags,
     classify_band,
     compute_bottling_aggregate,
     fill_weather_gaps,
@@ -49,6 +48,11 @@ from app.services.v5_common import (
     validate_model_artifact,
 )
 from app.services.v5_band_calibration import apply_band_calibration
+from app.services.v5_post_correction import (
+    DEFAULT_BIAS_CONFIG,
+    apply_nonwork_correction,
+    compute_bias_factor,
+)
 
 # 날씨 동기화 서비스 (API 미설정 등으로 실패해도 예측 진행)
 try:
@@ -100,74 +104,19 @@ DRIFT_CORRECTIONS: dict[tuple[str, str], tuple[str, float, pd.Timestamp, pd.Time
     # 용수는 효과 없음(Δ=0)으로 제외
 }
 
-# === 휴일 인접일 사후 보정 ===
-# 캘린더 피처를 포함해 재학습하기 전까지 적용하는 임시 가드.
-# 관측 근거(남양주2 2026-04~05 prediction_log):
-#   · 휴일 당일 저생산 (예: 5/1 근로자의 날, 생산 48k vs 평일 200k+)
-#       → 모델이 보일러/CIP 베이스 로드를 평상시처럼 잡아 연료 +216%, 용수 +93% 과예측
-#   · 장기연휴 직후 첫 가동일 (예: 5/4 월)
-#       → CIP·재가동으로 실제 용수가 평소 대비 2~3배 → 과소예측 (음의 오차)
-#       → 동일 라인 연료는 product mix 부족 → 과예측
-# 형식: {target: {flag: multiplier}} — flag 우선순위 is_holiday > is_post_long_weekend.
-# 전력은 안정적이라 보정 대상 외.
-HOLIDAY_ADJ_CORRECTIONS: dict[str, dict[str, float]] = {
-    "연료": {
-        "is_holiday":           0.55,  # 휴일 당일은 베이스 로드만 → 약 반토막
-        "is_post_long_weekend": 0.85,  # 연휴 직후 첫 가동일은 일관되게 과예측
-    },
-    "용수": {
-        "is_holiday":           0.60,
-        "is_post_long_weekend": 1.30,  # CIP·재가동 복귀로 실제 사용량 ↑
-    },
-    # "전력": 보정 없음 (예측 안정)
-}
-
-
-# 휴일 인접일 사후 보정 적용 (드리프트 보정과 별도, 캘린더 피처 재학습 전 임시 가드).
-def _apply_holiday_adjacent_correction(
-    base_pred: float,
-    target_name: str,
-    pred_date: date,
-    holiday_set: set,
-) -> tuple[float, dict[str, Any] | None]:
-    """
-    Returns: (corrected_pred, info_dict_or_None)
-
-    우선순위: is_holiday > is_post_long_weekend. 둘 다 해당이 안 되면 무보정.
-    """
-    spec = HOLIDAY_ADJ_CORRECTIONS.get(target_name)
-    if not spec:
-        return base_pred, None
-
-    flags = calendar_flags(pred_date, holiday_set)
-
-    factor: float | None = None
-    rule: str | None = None
-    if flags.get("is_holiday") and "is_holiday" in spec:
-        factor = float(spec["is_holiday"])
-        rule = "is_holiday"
-    elif flags.get("is_post_long_weekend") and "is_post_long_weekend" in spec:
-        factor = float(spec["is_post_long_weekend"])
-        rule = "is_post_long_weekend"
-
-    if factor is None or abs(factor - 1.0) < 1e-9:
-        return base_pred, None
-
-    corrected = float(base_pred) * factor
-    return corrected, {
-        "rule": rule,
-        "factor": factor,
-        "adjustment": corrected - float(base_pred),
-        "consecutive_nonwork_before": int(flags.get("consecutive_nonwork_before", 0)),
-    }
+# === 비근무일·근무일 편향 사후 보정 ===
+# 배수 표와 계산 로직은 v5_post_correction 에 있다(DB 없이 테스트·재추정 가능).
+#   · 비근무일: 공장·대상·생산유무별 배수. 학습이 근무일만 쓰므로 재학습 모델에도 필요하다.
+#   · 근무일: 직전 20개 일반 근무일의 실측합/보정 전 예측합으로 수준 편향을 맞춘다.
+# 이전의 연휴 직후 배수(연료 0.85, 용수 1.30)는 검증에서 오차를 키워 삭제했다.
 
 
 # 활성 모델의 사후 보정 정책(post_processing)을 읽습니다.
 #
-# 전체 재학습(full_quantile) 모델은 캘린더 피처를 최신 데이터로 직접 학습하므로
-# 휴일 인접일 임시 가드(HOLIDAY_ADJ_CORRECTIONS)를 비활성화한다. 반면 223579 드리프트
-# 보정은 아직 학습 피처가 아니므로 유지한다. 이 메타데이터는 artifact(우선) 또는 레지스트리
-# 최상위에 기록된다. 메타데이터가 없는 과거 모델은 두 보정 모두 적용(하위 호환).
+# 223579 드리프트 보정은 아직 학습 피처가 아니므로 재학습 후에도 유지한다. 비근무일 배수도
+# 재학습이 근무일만 학습하는 한 필요하다. 이 메타데이터는 artifact(우선) 또는 레지스트리
+# 최상위에 기록된다. 메타데이터가 없는 과거 모델은 모든 보정을 적용(하위 호환).
+# 과거 artifact 의 holiday_adjacent_correction 키는 더 이상 읽지 않는다.
 def _active_post_processing() -> dict[str, Any]:
     try:
         registry = load_model_registry(auto_create=True)
@@ -180,9 +129,14 @@ def _active_post_processing() -> dict[str, Any]:
     return pp if isinstance(pp, dict) else {}
 
 
-# 휴일 인접일 사후 보정 활성 여부(기본 True — 과거 모델 하위 호환).
-def _holiday_correction_enabled() -> bool:
-    return bool(_active_post_processing().get("holiday_adjacent_correction", True))
+# 비근무일 배수 보정 활성 여부(기본 True).
+def _nonwork_correction_enabled() -> bool:
+    return bool(_active_post_processing().get("nonwork_correction", True))
+
+
+# 근무일 롤링 편향 보정 활성 여부(기본 True).
+def _bias_correction_enabled() -> bool:
+    return bool(_active_post_processing().get("bias_correction", True))
 
 
 # 드리프트(223579) 사후 보정 활성 여부(기본 True — 아직 학습 피처 아님).
@@ -242,6 +196,216 @@ def _apply_drift_correction(
         "alpha_per_unit": alpha,
         "adjustment": adjustment,
     }
+
+
+# 드리프트 → 비근무일 배수 → 근무일 편향 순서로 사후 보정을 적용합니다.
+# predict_v5 / predict_v5_batch 공용. result 를 제자리에서 고치고 반환합니다.
+# result["pred_before_bias"] 는 편향 보정 직전 값으로, prediction_log 에 저장돼
+# 다음 날짜의 편향 계산 기준(pred_ref)이 된다(보정값끼리 비교하는 되먹임 방지).
+def _apply_post_corrections(
+    result: dict[str, Any],
+    *,
+    factory: str,
+    target_name: str,
+    pred_date: date,
+    holiday_set: set,
+    mix_prod_kg: float,
+    wip_inputs: dict[str, float] | None,
+    drift_on: bool,
+    nonwork_on: bool,
+    bias_on: bool,
+    bias_history: pd.DataFrame | None,
+) -> dict[str, Any]:
+    # 신설 라인 사후 보정 (학습 데이터에 없는 신설 부하)
+    base_pred = float(result["pred"])
+    if drift_on:
+        corrected_pred, drift_info = _apply_drift_correction(
+            base_pred=base_pred,
+            factory=factory,
+            target_name=target_name,
+            pred_date=pred_date,
+            wip_inputs=wip_inputs,
+        )
+        if drift_info is not None:
+            result["pred_before_drift"] = base_pred
+            result["pred"] = corrected_pred
+            result["drift_correction"] = drift_info
+            _shift_band_inplace(result, corrected_pred - base_pred)
+
+    # 비근무일 배수 보정 (근무일만 학습한 모델의 외삽 보정)
+    if nonwork_on:
+        pre_nonwork_pred = float(result["pred"])
+        nonwork_pred, nonwork_info = apply_nonwork_correction(
+            base_pred=pre_nonwork_pred,
+            factory=factory,
+            target_name=target_name,
+            pred_date=pred_date,
+            holiday_set=holiday_set,
+            mix_prod_kg=mix_prod_kg,
+        )
+        if nonwork_info is not None:
+            result["pred_before_nonwork_adj"] = pre_nonwork_pred
+            result["pred"] = nonwork_pred
+            result["nonwork_correction"] = nonwork_info
+            _scale_band_inplace(result, float(nonwork_info["factor"]))
+
+    # 근무일 롤링 편향 보정
+    pre_bias_pred = float(result["pred"])
+    result["pred_before_bias"] = pre_bias_pred
+    if bias_on and is_workday(pd.Timestamp(pred_date), holiday_set):
+        factor, bias_info = compute_bias_factor(bias_history, pred_date, DEFAULT_BIAS_CONFIG)
+        if bias_info is not None:
+            result["pred"] = pre_bias_pred * factor
+            result["bias_correction"] = bias_info
+            _scale_band_inplace(result, factor)
+
+    # 보정 후 band_status 재계산 (v5.2 결과만)
+    if result.get("model_kind") == "quantile":
+        new_status, new_pos = classify_band(
+            result.get("actual"),
+            result.get("pred_p05"),
+            result.get("pred_p50"),
+            result.get("pred_p95"),
+        )
+        result["band_status"] = new_status
+        result["band_position"] = new_pos
+    return result
+
+
+# prediction_log 에 pred_before_bias 컬럼이 있는지 확인합니다(프로세스당 1회).
+# 컬럼이 없으면 보정 전 예측을 저장할 수 없어, 보정값을 다시 기준으로 쓰는 되먹임을
+# 막기 위해 편향 보정을 끈다. backend/tools/apply_migrations.py 로 컬럼을 추가한다.
+_BIAS_COLUMN_STATE: dict[str, bool | None] = {"exists": None}
+
+
+def _prediction_log_has_bias_column() -> bool:
+    cached = _BIAS_COLUMN_STATE["exists"]
+    if cached is not None:
+        return cached
+    exists = False
+    try:
+        conn = get_connection()
+        cur = None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'prediction_log'
+                  AND COLUMN_NAME = 'pred_before_bias'
+                """
+            )
+            row = cur.fetchone()
+            exists = bool(row and row[0])
+        finally:
+            if cur is not None:
+                cur.close()
+            conn.close()
+    except Exception:
+        return False
+    if not exists:
+        import logging
+        logging.getLogger(__name__).warning(
+            "[predict_v5] prediction_log.pred_before_bias 컬럼이 없어 근무일 편향 보정을 끕니다. "
+            "backend/tools/apply_migrations.py 를 실행하세요."
+        )
+    _BIAS_COLUMN_STATE["exists"] = exists
+    return exists
+
+
+# 편향 보정용 근무일 이력(예측 기준값·실측·생산량)을 대상별로 조회합니다.
+# 실측은 energy_daily 를 우선 쓰고, 없으면 prediction_log.actual_value 를 쓴다.
+def _fetch_bias_history(
+    factory: str,
+    date_from: date,
+    date_to: date,
+    targets: list[str],
+    holiday_set: set,
+) -> dict[str, pd.DataFrame]:
+    target_list = [t for t in targets if t in TARGET_SPECS]
+    if not target_list:
+        return {}
+    actual_cases = " ".join(
+        f"WHEN %s THEN e.{TARGET_SPECS[t]['db_col']}" for t in target_list
+    )
+    placeholders = ", ".join(["%s"] * len(target_list))
+    query = f"""
+        SELECT
+            p.pred_date,
+            p.target,
+            COALESCE(p.pred_before_bias, p.pred_value) AS pred_ref,
+            COALESCE(CASE p.target {actual_cases} END, p.actual_value) AS actual,
+            p.mix_prod_kg
+        FROM prediction_log p
+        LEFT JOIN energy_daily e
+          ON e.factory = p.factory AND e.date = p.pred_date
+        WHERE p.factory = %s
+          AND p.pred_date >= %s AND p.pred_date <= %s
+          AND p.target IN ({placeholders})
+        ORDER BY p.pred_date
+    """
+    params: list[Any] = list(target_list)
+    params += [factory, date_from.strftime("%Y-%m-%d"), date_to.strftime("%Y-%m-%d")]
+    params += target_list
+    conn = get_connection()
+    try:
+        df = pd.read_sql_query(query, conn, params=params)
+    finally:
+        conn.close()
+
+    out: dict[str, pd.DataFrame] = {}
+    if df.empty:
+        return out
+    df["pred_date"] = pd.to_datetime(df["pred_date"], errors="coerce")
+    df = df.dropna(subset=["pred_date"])
+    df = df[df["pred_date"].apply(lambda ts: is_workday(ts, holiday_set))]
+    for tgt, g in df.groupby("target"):
+        out[str(tgt)] = g[["pred_date", "pred_ref", "actual", "mix_prod_kg"]].reset_index(drop=True)
+    return out
+
+
+# 편향 보정 활성 시 이력을 불러옵니다. 비활성·조회 실패면 빈 dict(보정 없음).
+def _load_bias_history_or_empty(
+    factory: str,
+    date_from: date,
+    date_to: date,
+    targets: list[str],
+    holiday_set: set,
+) -> dict[str, pd.DataFrame]:
+    try:
+        return _fetch_bias_history(factory, date_from, date_to, targets, holiday_set)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"[predict_v5] 편향 보정 이력 조회 실패 (보정 생략): {e}")
+        return {}
+
+
+# 방금 예측한 근무일을 편향 이력에 반영합니다(같은 날짜의 기존 행은 교체).
+# 배치·누락이력 생성처럼 여러 날짜를 이어서 예측할 때 앞 날짜 결과를 다음 날짜가 쓰게 한다.
+def _upsert_bias_history(
+    bias_history: dict[str, pd.DataFrame],
+    target_name: str,
+    pred_date: date,
+    pred_ref: float,
+    actual: float | None,
+    mix_prod_kg: float,
+) -> None:
+    pred_ts = pd.Timestamp(pred_date)
+    row = pd.DataFrame([{
+        "pred_date": pred_ts,
+        "pred_ref": float(pred_ref),
+        "actual": float(actual) if actual is not None else np.nan,
+        "mix_prod_kg": float(mix_prod_kg),
+    }])
+    prev = bias_history.get(target_name)
+    if prev is None or prev.empty:
+        bias_history[target_name] = row
+        return
+    kept = prev[prev["pred_date"] != pred_ts]
+    bias_history[target_name] = (
+        pd.concat([kept, row], ignore_index=True).sort_values("pred_date").reset_index(drop=True)
+    )
 
 
 # 집계 공장 여부를 확인합니다.
@@ -1056,6 +1220,7 @@ def predict_v5(
     weather_override: dict[str, Any] | None = None,
     wip_override: dict[str, Any] | None = None,
     targets: list[str] | None = None,
+    bias_history: dict[str, pd.DataFrame] | None = None,
 ) -> dict[str, Any]:
     """
     v5 ensemble inference.
@@ -1072,6 +1237,9 @@ def predict_v5(
       keys in WEATHER_COLS
     targets : list[str] | None
       subset of ["전력","연료","용수"]
+    bias_history : dict[str, DataFrame] | None
+      대상별 편향 보정 이력. 여러 날짜를 이어 예측하는 호출자가 넘긴다.
+      None 이면 prediction_log 에서 조회한다.
     """
     if targets is None:
         targets = list(TARGET_SPECS.keys())
@@ -1112,60 +1280,36 @@ def predict_v5(
         "results": {},
     }
 
-    # 휴일 보정에 쓸 holiday_set은 루프 외부에서 한 번만 로드
+    # 보정에 쓸 holiday_set은 루프 외부에서 한 번만 로드
     holiday_set_for_adj = _cached_holidays()
-    # 활성 모델의 사후 보정 정책(재학습 모델은 휴일 보정 비활성화).
+    # 활성 모델의 사후 보정 정책.
     drift_on = _drift_correction_enabled()
-    holiday_on = _holiday_correction_enabled()
+    nonwork_on = _nonwork_correction_enabled()
+    bias_on = _bias_correction_enabled() and _prediction_log_has_bias_column()
+    if bias_on and bias_history is None:
+        bias_history = _load_bias_history_or_empty(
+            factory,
+            pred_date - timedelta(days=DEFAULT_BIAS_CONFIG.lookback_days),
+            pred_date - timedelta(days=1),
+            targets,
+            holiday_set_for_adj,
+        )
 
     for tgt in targets:
         result = _infer_target(model_dict, factory, tgt, pred_date, df_source)
-        # 신설 라인 사후 보정 (학습 데이터에 없는 신설 부하)
-        base_pred = float(result["pred"])
-        drift_info = None
-        if drift_on:
-            corrected_pred, drift_info = _apply_drift_correction(
-                base_pred=base_pred,
-                factory=factory,
-                target_name=tgt,
-                pred_date=pred_date,
-                wip_inputs=resolved_wip_inputs,
-            )
-        if drift_info is not None:
-            result["pred_before_drift"] = base_pred
-            result["pred"] = corrected_pred
-            result["drift_correction"] = drift_info
-            _shift_band_inplace(result, corrected_pred - base_pred)
-
-        # 휴일/장기연휴 인접일 사후 보정 (캘린더 피처 재학습 전 임시 가드)
-        pre_hol_pred = float(result["pred"])
-        hol_info = None
-        if holiday_on:
-            hol_adj_pred, hol_info = _apply_holiday_adjacent_correction(
-                base_pred=pre_hol_pred,
-                target_name=tgt,
-                pred_date=pred_date,
-                holiday_set=holiday_set_for_adj,
-            )
-        if hol_info is not None:
-            result["pred_before_holiday_adj"] = pre_hol_pred
-            result["pred"] = hol_adj_pred
-            result["holiday_correction"] = hol_info
-            # 휴일 보정은 곱셈(factor) — 밴드도 동일 비율 스케일링
-            _scale_band_inplace(result, float(hol_info.get("factor", 1.0)))
-
-        # 보정 후 band_status 재계산 (v5.2 결과만)
-        if result.get("model_kind") == "quantile":
-            actual_after = result.get("actual")
-            new_status, new_pos = classify_band(
-                actual_after,
-                result.get("pred_p05"),
-                result.get("pred_p50"),
-                result.get("pred_p95"),
-            )
-            result["band_status"] = new_status
-            result["band_position"] = new_pos
-
+        _apply_post_corrections(
+            result,
+            factory=factory,
+            target_name=tgt,
+            pred_date=pred_date,
+            holiday_set=holiday_set_for_adj,
+            mix_prod_kg=float(mix_prod_kg),
+            wip_inputs=resolved_wip_inputs,
+            drift_on=drift_on,
+            nonwork_on=nonwork_on,
+            bias_on=bias_on,
+            bias_history=(bias_history or {}).get(tgt),
+        )
         out["results"][tgt] = result
 
     return out
@@ -1224,21 +1368,26 @@ def _save_prediction_log(rows: list[dict]) -> int:
         return 0
     if not is_admin():
         raise PermissionError("prediction_log 저장은 관리자 권한이 필요합니다.")
-    query = """
+    # pred_before_bias 는 마이그레이션 전 DB 에도 저장이 깨지지 않도록 컬럼이 있을 때만 쓴다.
+    with_bias_col = _prediction_log_has_bias_column()
+    bias_col = "pred_before_bias, " if with_bias_col else ""
+    bias_val = "%s, " if with_bias_col else ""
+    bias_upd = "pred_before_bias = VALUES(pred_before_bias),\n            " if with_bias_col else ""
+    query = f"""
         INSERT INTO prediction_log
             (factory, pred_date, target,
-             pred_value, pred_p05, pred_p95,
+             pred_value, {bias_col}pred_p05, pred_p95,
              actual_value, mape,
              band_status, band_position,
              mix_prod_kg, model_path)
         VALUES (%s, %s, %s,
-                %s, %s, %s,
+                %s, {bias_val}%s, %s,
                 %s, %s,
                 %s, %s,
                 %s, %s)
         ON DUPLICATE KEY UPDATE
             pred_value    = VALUES(pred_value),
-            pred_p05      = VALUES(pred_p05),
+            {bias_upd}pred_p05      = VALUES(pred_p05),
             pred_p95      = VALUES(pred_p95),
             actual_value  = VALUES(actual_value),
             mape          = VALUES(mape),
@@ -1266,11 +1415,16 @@ def _save_prediction_log(rows: list[dict]) -> int:
         if band_status is None and p05 is not None and p95 is not None:
             band_status, band_position = classify_band(actual, p05, pred, p95)
 
+        bias_params: tuple[Any, ...] = ()
+        if with_bias_col:
+            pred_before_bias = r.get("pred_before_bias")
+            bias_params = (float(pred_before_bias) if pred_before_bias is not None else None,)
         params_list.append((
             r["factory"],
             r["pred_date"],
             r["target"],
             pred,
+            *bias_params,
             p05,
             p95,
             actual,
@@ -1384,9 +1538,11 @@ def _build_history_rows_from_prediction(prediction: dict[str, Any]) -> tuple[lis
             "band_position": (float(band_position) if band_position is not None else None),
             "mix_prod_kg": float(prediction.get("mix_prod_kg", 0.0) or 0.0),
         }
+        pred_before_bias = result.get("pred_before_bias")
         log_rows.append(
             {
                 **base_row,
+                "pred_before_bias": (float(pred_before_bias) if pred_before_bias is not None else None),
                 "model_path": prediction.get("model_path"),
             }
         )
@@ -1437,6 +1593,17 @@ def _ensure_prediction_history_rows(
                 continue
             existing_keys.add((pred_ts.date(), str(existing_df.at[idx, "target"])))
 
+    # 편향 보정 이력 — 누락분을 앞 날짜부터 채우면서 방금 만든 예측을 다음 날짜에 반영한다.
+    bias_history: dict[str, pd.DataFrame] | None = None
+    if _bias_correction_enabled() and _prediction_log_has_bias_column():
+        bias_history = _load_bias_history_or_empty(
+            factory,
+            workdays[0] - timedelta(days=DEFAULT_BIAS_CONFIG.lookback_days),
+            workdays[-1] - timedelta(days=1),
+            target_list,
+            holiday_set,
+        )
+
     prediction_rows: list[dict[str, Any]] = []
     history_rows: list[dict[str, Any]] = []
     for pred_d in workdays:
@@ -1451,7 +1618,14 @@ def _ensure_prediction_history_rows(
             pred_date=pred_d,
             mix_prod_kg=mix_prod_kg,
             targets=missing_targets,
+            bias_history=bias_history,
         )
+        if bias_history is not None:
+            for tgt, res in (prediction.get("results") or {}).items():
+                if isinstance(res, dict) and res.get("pred_before_bias") is not None:
+                    _upsert_bias_history(
+                        bias_history, tgt, pred_d, res["pred_before_bias"], res.get("actual"), mix_prod_kg
+                    )
         log_rows, display_rows = _build_history_rows_from_prediction(prediction)
         prediction_rows.extend(log_rows)
         history_rows.extend(display_rows)
@@ -1807,9 +1981,10 @@ def predict_v5_batch(
     holiday_set = _cached_holidays()
     model_dict = get_active_model()
     model_path_str = str(get_active_model_path())
-    # 활성 모델의 사후 보정 정책(재학습 모델은 휴일 보정 비활성화).
+    # 활성 모델의 사후 보정 정책.
     drift_on = _drift_correction_enabled()
-    holiday_on = _holiday_correction_enabled()
+    nonwork_on = _nonwork_correction_enabled()
+    bias_on = _bias_correction_enabled() and _prediction_log_has_bias_column()
     required_wip_item_codes = _collect_required_wip_item_codes(model_dict, factory, targets)
     required_wip_feature_cols = [_build_wip_feature_col(code) for code in required_wip_item_codes]
 
@@ -1862,6 +2037,17 @@ def predict_v5_batch(
 
     results: list[dict[str, Any]] = []
     log_rows: list[dict] = []
+
+    # 편향 보정 이력 — 배치 안에서 앞 날짜 예측 결과를 이어서 반영한다.
+    bias_history: dict[str, pd.DataFrame] = {}
+    if bias_on:
+        bias_history = _load_bias_history_or_empty(
+            factory,
+            workdays[0] - timedelta(days=DEFAULT_BIAS_CONFIG.lookback_days),
+            workdays[-1] - timedelta(days=1),
+            targets,
+            holiday_set,
+        )
 
     # 재귀 lag 용 working history — 실측(df_hist)으로 시작, 미래 날짜는 예측치를 되먹인다.
     # 재귀가 올바르려면 날짜 오름차순으로 순회해야 한다.
@@ -1934,49 +2120,23 @@ def predict_v5_batch(
         for tgt in targets:
             try:
                 r = _infer_target(model_dict, factory, tgt, pred_d, df_source)
-                # 신설 라인 사후 보정
-                base_pred = float(r["pred"])
-                drift_info = None
-                if drift_on:
-                    corrected_pred, drift_info = _apply_drift_correction(
-                        base_pred=base_pred,
-                        factory=factory,
-                        target_name=tgt,
-                        pred_date=pred_d,
-                        wip_inputs=wip_inputs,
+                _apply_post_corrections(
+                    r,
+                    factory=factory,
+                    target_name=tgt,
+                    pred_date=pred_d,
+                    holiday_set=holiday_set,
+                    mix_prod_kg=mix_prod_kg,
+                    wip_inputs=wip_inputs,
+                    drift_on=drift_on,
+                    nonwork_on=nonwork_on,
+                    bias_on=bias_on,
+                    bias_history=bias_history.get(tgt),
+                )
+                if bias_on and is_workday(pd.Timestamp(pred_d), holiday_set):
+                    _upsert_bias_history(
+                        bias_history, tgt, pred_d, r["pred_before_bias"], r.get("actual"), mix_prod_kg
                     )
-                if drift_info is not None:
-                    r["pred_before_drift"] = base_pred
-                    r["pred"] = corrected_pred
-                    r["drift_correction"] = drift_info
-                    _shift_band_inplace(r, corrected_pred - base_pred)
-
-                # 휴일/장기연휴 인접일 사후 보정
-                pre_hol_pred = float(r["pred"])
-                hol_info = None
-                if holiday_on:
-                    hol_adj_pred, hol_info = _apply_holiday_adjacent_correction(
-                        base_pred=pre_hol_pred,
-                        target_name=tgt,
-                        pred_date=pred_d,
-                        holiday_set=holiday_set,
-                    )
-                if hol_info is not None:
-                    r["pred_before_holiday_adj"] = pre_hol_pred
-                    r["pred"] = hol_adj_pred
-                    r["holiday_correction"] = hol_info
-                    _scale_band_inplace(r, float(hol_info.get("factor", 1.0)))
-
-                # 보정 후 band_status 재계산
-                if r.get("model_kind") == "quantile":
-                    new_status, new_pos = classify_band(
-                        r.get("actual"),
-                        r.get("pred_p05"),
-                        r.get("pred_p50"),
-                        r.get("pred_p95"),
-                    )
-                    r["band_status"] = new_status
-                    r["band_position"] = new_pos
 
                 day_result["results"][tgt] = r
                 log_rows.append({
@@ -1984,6 +2144,7 @@ def predict_v5_batch(
                     "pred_date": pred_d.strftime("%Y-%m-%d"),
                     "target": tgt,
                     "pred_value": r["pred"],
+                    "pred_before_bias": r.get("pred_before_bias"),
                     "pred_p05": r.get("pred_p05"),
                     "pred_p95": r.get("pred_p95"),
                     "band_status": r.get("band_status"),
