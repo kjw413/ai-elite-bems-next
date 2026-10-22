@@ -1071,15 +1071,18 @@ def summarize_metric_frame(df: pd.DataFrame, metric_cols: list[str]) -> dict[str
 
 
 # 재학습 모델의 사후 보정 정책 기본값.
-#   - holiday_adjacent_correction: 휴일 인접일 곱셈 보정(HOLIDAY_ADJ_CORRECTIONS).
-#       전체 재학습 모델은 캘린더 피처(is_holiday/is_post_long_weekend 등)를 최신 데이터로
-#       직접 학습하므로 임시 가드인 휴일 사후 보정을 비활성화한다.
+#   - nonwork_correction: 비근무일 공장·대상·생산유무별 배수(v5_post_correction).
+#       재학습도 근무일만 학습하므로(_filter_workdays) 비근무일은 여전히 외삽이다.
+#       배수는 v5.3 출력으로 추정했으므로 재학습 후 tools/fit_v5_post_correction.py 로
+#       다시 추정해 반영한다.
+#   - bias_correction: 근무일 롤링 편향 보정(v5_post_correction).
 #   - drift_correction: 223579 같은 신설 라인 단위부하 가산 보정(DRIFT_CORRECTIONS).
 #       아직 학습 피처가 아니므로 재학습 후에도 유지한다.
 # 예측 측은 활성 artifact 의 post_processing 을 읽어 보정 적용 여부를 결정한다.
-# 이 메타데이터가 없는 과거 모델은 두 보정 모두 적용(하위 호환)한다.
+# 이 메타데이터가 없는 과거 모델은 모든 보정을 적용(하위 호환)한다.
 RETRAIN_POST_PROCESSING_DEFAULTS: dict[str, bool] = {
-    "holiday_adjacent_correction": False,
+    "nonwork_correction": True,
+    "bias_correction": True,
     "drift_correction": True,
 }
 

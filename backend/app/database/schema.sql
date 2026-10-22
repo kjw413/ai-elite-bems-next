@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS prediction_log (
     pred_date       DATE         NOT NULL,
     target          VARCHAR(20)  NOT NULL,
     pred_value      DOUBLE       NOT NULL,
+    pred_before_bias DOUBLE      DEFAULT NULL,  -- 근무일 편향 보정 직전 예측
     pred_p05        DOUBLE       DEFAULT NULL,
     pred_p95        DOUBLE       DEFAULT NULL,
     actual_value    DOUBLE       DEFAULT NULL,

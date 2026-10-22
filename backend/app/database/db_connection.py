@@ -246,6 +246,8 @@ _PENDING_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
     ("prediction_log",   "pred_p95",      "ADD COLUMN pred_p95 DOUBLE DEFAULT NULL AFTER pred_p05"),
     ("prediction_log",   "band_status",   "ADD COLUMN band_status VARCHAR(16) DEFAULT NULL AFTER mape"),
     ("prediction_log",   "band_position", "ADD COLUMN band_position DOUBLE DEFAULT NULL AFTER band_status"),
+    # 근무일 편향 보정의 기준값(보정 직전 예측). 없으면 예측 서비스가 편향 보정을 끈다.
+    ("prediction_log",   "pred_before_bias", "ADD COLUMN pred_before_bias DOUBLE DEFAULT NULL AFTER pred_value"),
     ("anomaly_analysis", "pred_p05",      "ADD COLUMN pred_p05 DOUBLE DEFAULT NULL AFTER pred_value"),
     ("anomaly_analysis", "pred_p95",      "ADD COLUMN pred_p95 DOUBLE DEFAULT NULL AFTER pred_p05"),
     ("anomaly_analysis", "band_status",   "ADD COLUMN band_status VARCHAR(16) DEFAULT NULL AFTER mape"),
