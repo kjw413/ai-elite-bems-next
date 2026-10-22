@@ -32,7 +32,7 @@ NONWORK_PRODUCTION_THRESHOLD_KG = 1000.0
 # 값 = 비근무일 실측 / 보정 전 예측의 중앙값(2025-09-17~2026-10-16, 공장·대상·생산유무별
 # 32~98일). backend/tools/fit_v5_post_correction.py 로 재추정한다.
 # 시간 분할 검증(2026-03까지로 추정 → 2026-04~ 평가) WAPE:
-#   전력 38.3→12.1%, 용수 56.9→30.9%, 연료 48.5→38.2%.
+#   전력 38.3→12.1%, 용수 56.9→30.9%, 연료 48.5→38.4%.
 NONWORK_MULTIPLIERS: dict[str, dict[str, dict[str, float]]] = {
     "광주": {
         "전력": {"production": 0.57, "no_production": 0.58},
