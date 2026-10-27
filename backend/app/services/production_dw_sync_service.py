@@ -1,8 +1,8 @@
 # 이 파일은 통합된 일별 생산실적 데이터셋(DB_생산실적.xlsx 의 'daily' 시트)을
-# production_daily 테이블에 UPSERT 하는 동기화 서비스입니다.
+# production_daily 테이블에 반영하고 공장 재분류 잔존 행을 정리하는 동기화 서비스입니다.
 #
 # 트리거: app.main 의 매 Streamlit rerun (auto_sync_production_once) — mtime 변경 시에만 실제 UPSERT
-# Skip 조건: 마지막 동기화 이후 소스 파일 mtime 변화 없음 (변경 없으면 stat+JSON 1회로 즉시 return)
+# Skip 조건: 소스 파일 mtime과 동기화 정책 버전이 모두 동일
 #
 # 설계 의도:
 #   - daily_energy_sync_service 와 동일한 패턴 (state JSON / 매 rerun mtime 비교 / admin 자격증명)
@@ -21,6 +21,7 @@ from typing import Any
 import pandas as pd
 
 from app.database.db_connection import get_connection
+from app.domain.factories import NAMYANGJU_F10A_CODE, NAMYANGJU_F10B_CODE
 from app.services.production_dw_service import DEFAULT_OUTPUT_PATH
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,10 @@ _last_sync_result: dict[str, Any] | None = None
 
 # 배치 단위 (executemany 한 번에 보낼 행 수)
 _BATCH_SIZE = 5000
+
+# 정책 변경 후에는 파일 mtime이 같아도 한 번 다시 대조한다.
+SYNC_POLICY_VERSION = 2
+BACKUP_DIR = SYNC_STATE_PATH.parent / "production_sync_backups"
 
 _INSERT_SQL = """
 INSERT INTO production_daily
@@ -79,6 +84,8 @@ def _load_daily_sheet(src_path: Path) -> pd.DataFrame:
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"'daily' 시트에 필수 컬럼 누락: {missing}")
+    if df.empty:
+        raise ValueError("'daily' 시트가 비어 있어 동기화를 중단합니다.")
 
     # 타입 정규화
     df["date"] = pd.to_datetime(df["date"]).dt.date
@@ -90,6 +97,20 @@ def _load_daily_sheet(src_path: Path) -> pd.DataFrame:
     df["category2"] = df["category2"].where(df["category2"].notna(), None)
     df["planned_qty"] = pd.to_numeric(df["planned_qty"], errors="coerce").fillna(0.0)
     df["actual_qty"] = pd.to_numeric(df["actual_qty"], errors="coerce").fillna(0.0)
+    if df["date"].isna().any() or df.duplicated(["date", "factory", "item_code"]).any():
+        raise ValueError("'daily' 시트에 날짜 누락 또는 날짜·공장·품목 중복이 있습니다.")
+    # 남양주1은 냉장 MY, 남양주2는 그 외다. RPA가 냉동 조회에 냉장
+    # 품목을 함께 담은 경우 통합 과정에서 두 공장에 같은 품목이 생길 수 있다.
+    cold_my = df["category1"].eq("냉장") & df["category2"].eq("MY")
+    invalid_factory = (
+        (df["factory"].eq(NAMYANGJU_F10A_CODE) & ~cold_my)
+        | (df["factory"].eq(NAMYANGJU_F10B_CODE) & cold_my)
+    )
+    if invalid_factory.any():
+        raise ValueError(
+            f"남양주 공장 분류 오류 {int(invalid_factory.sum()):,}행: "
+            "냉장 MY는 남양주1이어야 합니다. 원본 수집 결과를 확인하세요."
+        )
 
     return df
 
@@ -167,18 +188,88 @@ def _changed_records(records: list[tuple], snapshot: dict[tuple, tuple]) -> list
     return changed
 
 
-# 배치 단위로 UPSERT 실행 후 (영향 행수, 배치 수) 반환.
-def _bulk_upsert(records: list[tuple]) -> tuple[int, int]:
-    if not records:
-        return 0, 0
+def _stale_factory_keys(records: list[tuple], snapshot: dict[tuple, tuple]) -> list[tuple]:
+    """원본에는 없고 같은 날짜·품목이 다른 공장으로 남은 DB 키만 찾는다.
+
+    원본에 해당 날짜·공장 자체가 없는 과거 이력이나, 모든 공장에서 사라진
+    품목은 자동 삭제하지 않는다. 원본에 존재하는 키는 항상 보존한다.
+    """
+    source_keys = {(r[0], r[3], r[1]) for r in records}
+    source_items = {(r[0], r[1]) for r in records}
+    source_groups = {(r[0], r[3]) for r in records}
+    return sorted(
+        key for key in snapshot
+        if key not in source_keys
+        and (key[0], key[2]) in source_items
+        and (key[0], key[1]) in source_groups
+    )
+
+
+def _backup_stale_rows(rows: list[dict], source_path: Path) -> Path:
+    """삭제 전 전체 행(id·생성/수정 시각 포함)을 복구 가능한 JSON으로 보존한다."""
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    now = datetime.now().astimezone()
+    backup = BACKUP_DIR / f"production_daily_{now:%Y%m%d_%H%M%S_%f}.json"
+    with backup.open("x", encoding="utf-8") as handle:
+        json.dump(
+            {"table": "production_daily", "created_at": now.isoformat(),
+             "source": str(source_path), "rows": rows},
+            handle, ensure_ascii=False, indent=2, default=str,
+        )
+        handle.flush()
+        os.fsync(handle.fileno())
+    return backup
+
+
+def _apply_sync_changes(
+    records: list[tuple],
+    stale_keys: list[tuple],
+    snapshot: dict[tuple, tuple],
+    source_path: Path,
+) -> tuple[int, int, int, str | None]:
+    """백업·잔존 행 삭제·UPSERT를 수행한다. DB 변경은 하나의 트랜잭션이다."""
+    if not records and not stale_keys:
+        return 0, 0, 0, None
 
     # admin 자격증명 — viewer 세션에서도 startup sync가 동작하도록.
     conn = get_connection(admin=True)
     affected_total = 0
     batches = 0
+    deleted = 0
+    backup_path = None
     try:
-        cur = conn.cursor()
+        conn.start_transaction()
+        cur = conn.cursor(dictionary=True)
         try:
+            stale_rows: list[dict] = []
+            for i in range(0, len(stale_keys), _BATCH_SIZE):
+                batch = stale_keys[i:i + _BATCH_SIZE]
+                placeholders = ",".join(["(%s,%s,%s)"] * len(batch))
+                cur.execute(
+                    "SELECT * FROM production_daily "
+                    f"WHERE (date, factory, item_code) IN ({placeholders}) FOR UPDATE",
+                    tuple(value for key in batch for value in key),
+                )
+                stale_rows.extend(cur.fetchall())
+            for row in stale_rows:
+                key = (row["date"], str(row["factory"]), str(row["item_code"]))
+                current = _comparable(
+                    row["item_name"], row["category1"], row["category2"],
+                    row["planned_qty"], row["actual_qty"],
+                )
+                if snapshot.get(key) != current:
+                    raise RuntimeError("대조 후 DB가 변경되어 삭제를 중단합니다. 다시 동기화하세요.")
+            if stale_rows:
+                backup_path = str(_backup_stale_rows(stale_rows, source_path))
+                delete_records = [
+                    (row["date"], row["factory"], row["item_code"]) for row in stale_rows
+                ]
+                for i in range(0, len(delete_records), _BATCH_SIZE):
+                    cur.executemany(
+                        "DELETE FROM production_daily WHERE date=%s AND factory=%s AND item_code=%s",
+                        delete_records[i:i + _BATCH_SIZE],
+                    )
+                    deleted += cur.rowcount
             for i in range(0, len(records), _BATCH_SIZE):
                 batch = records[i:i + _BATCH_SIZE]
                 cur.executemany(_INSERT_SQL, batch)
@@ -188,9 +279,12 @@ def _bulk_upsert(records: list[tuple]) -> tuple[int, int]:
             conn.commit()
         finally:
             cur.close()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
-    return affected_total, batches
+    return affected_total, batches, deleted, backup_path
 
 
 # 외부에서 한 번만 실행되도록 가드되는 상위 함수 (앱 기동시 호출).
@@ -230,7 +324,7 @@ def auto_sync_production_once(
     state = _read_state()
     last_mtime = state.get("last_mtime")
 
-    if not force and last_mtime == mtime:
+    if not force and last_mtime == mtime and state.get("sync_policy_version") == SYNC_POLICY_VERSION:
         result.update(
             status="unchanged",
             message=f"소스 mtime 동일 — skip (last sync: {state.get('last_sync_at')})",
@@ -247,22 +341,24 @@ def auto_sync_production_once(
         t0 = datetime.now()
         df = _load_daily_sheet(src)
         records = _df_to_records(df)
-        # 변경분만 UPSERT — 실패하면 전량 UPSERT로 안전하게 되돌린다(정확성 우선).
-        try:
-            targets = _changed_records(records, _existing_snapshot())
-            incremental = True
-        except Exception as diff_error:
-            logger.warning(f"[production_sync] 증분 비교 실패 — 전량 UPSERT로 대체: {diff_error}")
-            targets, incremental = records, False
-        affected, batches = _bulk_upsert(targets)
+        if src.stat().st_mtime != mtime:
+            raise RuntimeError("읽는 중 원본 파일이 변경되어 동기화를 중단합니다.")
+        snapshot = _existing_snapshot()
+        targets = _changed_records(records, snapshot)
+        stale_keys = _stale_factory_keys(records, snapshot)
+        incremental = True
+        affected, batches, deleted, backup_path = _apply_sync_changes(targets, stale_keys, snapshot, src)
         dt = (datetime.now() - t0).total_seconds()
 
         new_state = {
+            "sync_policy_version": SYNC_POLICY_VERSION,
             "last_mtime": mtime,
             "last_sync_at": t0.strftime("%Y-%m-%d %H:%M:%S"),
             "last_rows": len(records),
             "last_changed": len(targets),
             "last_affected": affected,
+            "last_deleted": deleted,
+            "last_delete_backup": backup_path,
             "last_batches": batches,
             "last_duration_sec": round(dt, 2),
             "last_incremental": incremental,
@@ -273,10 +369,12 @@ def auto_sync_production_once(
         scope = f"변경 {len(targets):,}/{len(records):,}행" if incremental else f"전량 {len(records):,}행"
         result.update(
             status="synced",
-            message=f"UPSERT 완료 — {scope} / {batches} 배치 / {dt:.1f}s",
+            message=f"동기화 완료 — {scope} / 잔존 {deleted:,}행 삭제 / {batches} 배치 / {dt:.1f}s",
             rows=len(records),
             changed=len(targets),
             affected=affected,
+            deleted=deleted,
+            delete_backup=backup_path,
             batches=batches,
             duration_sec=round(dt, 2),
             incremental=incremental,

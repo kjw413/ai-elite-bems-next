@@ -1,0 +1,21 @@
+{
+  "deleted_rows": 784,
+  "deleted_factories": {
+    "F40": 102,
+    "F10B": 682
+  },
+  "backup": "E:\\AI-Elite-BEMS-next\\backend\\app\\predictive model\\energy usage\\production_sync_backups\\production_daily_20261027_111233_872105.json",
+  "remaining_rows": 354588,
+  "source_rows": 354588,
+  "verification": "source keys and values match; retained DB values unchanged",
+  "production_totals": {
+    "F10A": {
+      "2026-10-01~2026-10-16": 2875867.0,
+      "2026-10-01~2026-10-22": 3750297.0
+    },
+    "F10B": {
+      "2026-10-01~2026-10-16": 1301176.0,
+      "2026-10-01~2026-10-22": 1800374.0
+    }
+  }
+}

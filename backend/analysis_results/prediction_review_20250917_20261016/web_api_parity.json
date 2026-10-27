@@ -1,0 +1,808 @@
+{
+  "checked_at": "2026-10-21T11:42:33.473527+09:00",
+  "endpoint": "http://127.0.0.1:8000/api/v1/predictions/run",
+  "cases": [
+    {
+      "payload": {
+        "factory": "남양주1",
+        "date": "2026-10-16",
+        "mix_prod_kg": 272744.0
+      },
+      "response": {
+        "results": [
+          {
+            "date": "2026-10-16",
+            "target": "전력",
+            "predicted": 29.856281223523695,
+            "lower": 29.744388236643474,
+            "upper": 34.790115858334396,
+            "actual": 31.356,
+            "status": "inside"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "연료",
+            "predicted": 2.8996780162001268,
+            "lower": 2.5686092429313603,
+            "upper": 3.135864340214486,
+            "actual": 2.645,
+            "status": "inside"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "용수",
+            "predicted": 0.7044943151961683,
+            "lower": 0.6286229564913364,
+            "upper": 0.765326319414708,
+            "actual": 0.687,
+            "status": "inside"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "target": "전력",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "predicted",
+          "difference_native_units": 4.547473508864641e-13
+        },
+        {
+          "target": "연료",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "pred_p05",
+          "difference_native_units": 1.1368683772161603e-13
+        },
+        {
+          "target": "용수",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "actual",
+          "difference_native_units": 0.0
+        }
+      ]
+    },
+    {
+      "payload": {
+        "factory": "남양주2",
+        "date": "2026-10-16",
+        "mix_prod_kg": 105690.0
+      },
+      "response": {
+        "results": [
+          {
+            "date": "2026-10-16",
+            "target": "전력",
+            "predicted": 66.78234616783917,
+            "lower": 58.66861796645241,
+            "upper": 76.36378153223897,
+            "actual": 61.344,
+            "status": "inside"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "연료",
+            "predicted": 3.669357898784002,
+            "lower": 3.2906683569489976,
+            "upper": 4.714017672070803,
+            "actual": 3.344,
+            "status": "inside"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "용수",
+            "predicted": 0.7707327479213523,
+            "lower": 0.6928518994090648,
+            "upper": 1.0388614011908304,
+            "actual": 0.71,
+            "status": "inside"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "target": "전력",
+          "field": "predicted",
+          "difference_native_units": 1.4551915228366852e-11
+        },
+        {
+          "target": "전력",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "pred_p05",
+          "difference_native_units": 4.547473508864641e-13
+        },
+        {
+          "target": "연료",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "predicted",
+          "difference_native_units": 1.1368683772161603e-13
+        },
+        {
+          "target": "용수",
+          "field": "pred_p05",
+          "difference_native_units": 1.1368683772161603e-13
+        },
+        {
+          "target": "용수",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "actual",
+          "difference_native_units": 0.0
+        }
+      ]
+    },
+    {
+      "payload": {
+        "factory": "김해",
+        "date": "2026-10-16",
+        "mix_prod_kg": 408718.0
+      },
+      "response": {
+        "results": [
+          {
+            "date": "2026-10-16",
+            "target": "전력",
+            "predicted": 65.7333768121482,
+            "lower": 60.94987748714352,
+            "upper": 73.86975654292236,
+            "actual": 65.64,
+            "status": "inside"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "연료",
+            "predicted": 5.009866047240051,
+            "lower": 4.100244640467017,
+            "upper": 5.597194297783674,
+            "actual": 5.099,
+            "status": "inside"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "용수",
+            "predicted": 1.4915242140638727,
+            "lower": 1.3268541466328359,
+            "upper": 1.6178995096922546,
+            "actual": 1.482,
+            "status": "inside"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "target": "전력",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p05",
+          "difference_native_units": 7.275957614183426e-12
+        },
+        {
+          "target": "전력",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "predicted",
+          "difference_native_units": 9.094947017729282e-13
+        },
+        {
+          "target": "연료",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "pred_p05",
+          "difference_native_units": 2.2737367544323206e-13
+        },
+        {
+          "target": "용수",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "actual",
+          "difference_native_units": 0.0
+        }
+      ]
+    },
+    {
+      "payload": {
+        "factory": "광주",
+        "date": "2026-10-16",
+        "mix_prod_kg": 21379.0
+      },
+      "response": {
+        "results": [
+          {
+            "date": "2026-10-16",
+            "target": "전력",
+            "predicted": 30.20671716737484,
+            "lower": 29.518683650478586,
+            "upper": 36.681201852676395,
+            "actual": 29.52,
+            "status": "inside"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "연료",
+            "predicted": 3.1330411854942195,
+            "lower": 3.021152248195999,
+            "upper": 4.004465721112237,
+            "actual": 2.986,
+            "status": "under"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "용수",
+            "predicted": 0.39191538773282036,
+            "lower": 0.33902591763788603,
+            "upper": 0.4571396023959318,
+            "actual": 0.355,
+            "status": "inside"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "target": "전력",
+          "field": "predicted",
+          "difference_native_units": 7.275957614183426e-12
+        },
+        {
+          "target": "전력",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p95",
+          "difference_native_units": 7.275957614183426e-12
+        },
+        {
+          "target": "전력",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "predicted",
+          "difference_native_units": 4.547473508864641e-13
+        },
+        {
+          "target": "연료",
+          "field": "pred_p05",
+          "difference_native_units": 4.547473508864641e-13
+        },
+        {
+          "target": "연료",
+          "field": "pred_p95",
+          "difference_native_units": 4.547473508864641e-13
+        },
+        {
+          "target": "연료",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "actual",
+          "difference_native_units": 0.0
+        }
+      ]
+    },
+    {
+      "payload": {
+        "factory": "논산",
+        "date": "2026-10-16",
+        "mix_prod_kg": 114616.0
+      },
+      "response": {
+        "results": [
+          {
+            "date": "2026-10-16",
+            "target": "전력",
+            "predicted": 43.1972382957184,
+            "lower": 42.018406425668985,
+            "upper": 49.22783427538888,
+            "actual": 41.887980000000006,
+            "status": "under"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "연료",
+            "predicted": 1.6857571229891124,
+            "lower": 1.588202965508924,
+            "upper": 1.9266351891661164,
+            "actual": 1.599,
+            "status": "inside"
+          },
+          {
+            "date": "2026-10-16",
+            "target": "용수",
+            "predicted": 0.5276797670568151,
+            "lower": 0.435867450114285,
+            "upper": 0.7077647380325194,
+            "actual": 0.472,
+            "status": "inside"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "target": "전력",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p95",
+          "difference_native_units": 7.275957614183426e-12
+        },
+        {
+          "target": "전력",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "predicted",
+          "difference_native_units": 1.1368683772161603e-13
+        },
+        {
+          "target": "용수",
+          "field": "pred_p05",
+          "difference_native_units": 1.1368683772161603e-13
+        },
+        {
+          "target": "용수",
+          "field": "pred_p95",
+          "difference_native_units": 1.1368683772161603e-13
+        },
+        {
+          "target": "용수",
+          "field": "actual",
+          "difference_native_units": 0.0
+        }
+      ]
+    },
+    {
+      "payload": {
+        "factory": "남양주2",
+        "date": "2026-05-01",
+        "mix_prod_kg": 48854.0
+      },
+      "response": {
+        "results": [
+          {
+            "date": "2026-05-01",
+            "target": "전력",
+            "predicted": 42.88172357174002,
+            "lower": 32.14252785985027,
+            "upper": 58.702022971753394,
+            "actual": 41.4,
+            "status": "inside"
+          },
+          {
+            "date": "2026-05-01",
+            "target": "연료",
+            "predicted": 1.9478622675683852,
+            "lower": 1.6905741214770134,
+            "upper": 2.8550544234519473,
+            "actual": 1.231,
+            "status": "under"
+          },
+          {
+            "date": "2026-05-01",
+            "target": "용수",
+            "predicted": 0.401851308707908,
+            "lower": 0.39246181644864814,
+            "upper": 0.6618153266648558,
+            "actual": 0.335,
+            "status": "under"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "target": "전력",
+          "field": "predicted",
+          "difference_native_units": 7.275957614183426e-12
+        },
+        {
+          "target": "전력",
+          "field": "pred_p05",
+          "difference_native_units": 3.637978807091713e-12
+        },
+        {
+          "target": "전력",
+          "field": "pred_p95",
+          "difference_native_units": 7.275957614183426e-12
+        },
+        {
+          "target": "전력",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "pred_p95",
+          "difference_native_units": 4.547473508864641e-13
+        },
+        {
+          "target": "연료",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "predicted",
+          "difference_native_units": 5.684341886080802e-14
+        },
+        {
+          "target": "용수",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "actual",
+          "difference_native_units": 0.0
+        }
+      ]
+    },
+    {
+      "payload": {
+        "factory": "남양주2",
+        "date": "2026-05-04",
+        "mix_prod_kg": 172437.0
+      },
+      "response": {
+        "results": [
+          {
+            "date": "2026-05-04",
+            "target": "전력",
+            "predicted": 84.8033846992099,
+            "lower": 75.95341112039128,
+            "upper": 91.55857023023184,
+            "actual": 80.064,
+            "status": "inside"
+          },
+          {
+            "date": "2026-05-04",
+            "target": "연료",
+            "predicted": 4.307411710449914,
+            "lower": 3.293364410209891,
+            "upper": 4.829324659173417,
+            "actual": 3.707,
+            "status": "inside"
+          },
+          {
+            "date": "2026-05-04",
+            "target": "용수",
+            "predicted": 1.3350821398533572,
+            "lower": 1.2247992158190164,
+            "upper": 1.606356695092974,
+            "actual": 0.909,
+            "status": "under"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "target": "전력",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "predicted",
+          "difference_native_units": 9.094947017729282e-13
+        },
+        {
+          "target": "연료",
+          "field": "pred_p05",
+          "difference_native_units": 4.547473508864641e-13
+        },
+        {
+          "target": "연료",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "actual",
+          "difference_native_units": 0.0
+        }
+      ]
+    },
+    {
+      "payload": {
+        "factory": "김해",
+        "date": "2026-04-01",
+        "mix_prod_kg": 436118.0
+      },
+      "response": {
+        "results": [
+          {
+            "date": "2026-04-01",
+            "target": "전력",
+            "predicted": 74.10851636776701,
+            "lower": 66.1143222014439,
+            "upper": 83.40898739832821,
+            "actual": 73.08,
+            "status": "inside"
+          },
+          {
+            "date": "2026-04-01",
+            "target": "연료",
+            "predicted": 6.073788675332261,
+            "lower": 5.798809236828533,
+            "upper": 6.676030592686755,
+            "actual": 6.533,
+            "status": "inside"
+          },
+          {
+            "date": "2026-04-01",
+            "target": "용수",
+            "predicted": 1.6277836757532842,
+            "lower": 1.4427744001407985,
+            "upper": 1.7068164657584777,
+            "actual": 1.806,
+            "status": "over"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "target": "전력",
+          "field": "predicted",
+          "difference_native_units": 1.4551915228366852e-11
+        },
+        {
+          "target": "전력",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "전력",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "predicted",
+          "difference_native_units": 9.094947017729282e-13
+        },
+        {
+          "target": "연료",
+          "field": "pred_p05",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "연료",
+          "field": "actual",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "predicted",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "pred_p05",
+          "difference_native_units": 2.2737367544323206e-13
+        },
+        {
+          "target": "용수",
+          "field": "pred_p95",
+          "difference_native_units": 0.0
+        },
+        {
+          "target": "용수",
+          "field": "actual",
+          "difference_native_units": 0.0
+        }
+      ]
+    }
+  ],
+  "checked_values": 96,
+  "maximum_absolute_difference": 1.4551915228366852e-11
+}

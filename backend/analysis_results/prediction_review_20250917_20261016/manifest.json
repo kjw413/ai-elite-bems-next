@@ -1,0 +1,261 @@
+{
+  "started_at": "2026-10-21T11:30:56.824470+09:00",
+  "date_from": "2025-09-17",
+  "date_to": "2026-10-16",
+  "calendar_days": 395,
+  "factories": [
+    "남양주1",
+    "남양주2",
+    "김해",
+    "광주",
+    "논산"
+  ],
+  "targets": [
+    "전력",
+    "연료",
+    "용수"
+  ],
+  "expected_rows": 5925,
+  "active_model_path": "E:\\AI-Elite-BEMS-next\\backend\\app\\predictive model\\energy usage\\v5.3.pkl",
+  "active_model_sha256": "58fc955d90487cffc982cdc610226b242fa775c9c367b0549409dd12b596ce12",
+  "active_model_size": 2683509345,
+  "evaluation": "current_model_retrospective_replay_with_realized_covariates",
+  "save_to_operational_db": false,
+  "split_basis": "training source defaults; confirm artifact metadata per series",
+  "source_default_train_end": "2025-12-31",
+  "source_default_validation_end": "2026-03-31",
+  "source_default_test_end": "2026-05-15",
+  "completed_at": "2026-10-21T11:41:42.715595+09:00",
+  "actual_rows": 5925,
+  "parity_checked_values": 135,
+  "parity_max_absolute_difference": 1.4551915228366852e-11,
+  "source_code_sha256": {
+    "app/services/usage_prediction_v5_service.py": "94c1e0b41f68d28694fdaab4b53d108426ab38a7145a5c01a6a565ae82e54512",
+    "app/services/v5_common.py": "10e7b9a5b00fba54808e655ee67551c843294803d3d9f2d4240c3d13f8efa098",
+    "app/services/production_actual_service.py": "5ba26159b71d0d88d76fbf071e2ee5feac3819772d267758e441f0f0b4e9debb"
+  },
+  "output_files": {
+    "algorithm_metrics.csv": {
+      "bytes": 360065,
+      "sha256": "6aaaeac3a1a0a902da4ebfcbf64831fc9751067ec70c43c332293e2b60cf6a5d"
+    },
+    "analyze_results.py": {
+      "bytes": 21214,
+      "sha256": "fcdec50eaf9590f6836315c0706ef1732f09a72b998e244cd8581e9b583e380e"
+    },
+    "build_workbook.mjs": {
+      "bytes": 20934,
+      "sha256": "67238ad73da142957078b75316707f1ffcdbb2813f6f201f02930bf213dffdad"
+    },
+    "daily_lag1_baseline_comparison.csv": {
+      "bytes": 850117,
+      "sha256": "718c99866549e935a084207bbd6e6f7bd584e26b36e07a507adc9eef2a17d703"
+    },
+    "daily_model_inputs.csv": {
+      "bytes": 1467637,
+      "sha256": "96c0c2ca91a177a90a0d6f5e150fc6b0fbce46ea01bc18718420f2cb67b37573"
+    },
+    "daily_predictions.csv": {
+      "bytes": 2016314,
+      "sha256": "c79b3cb9f4a3dd25b340bf58724dcc19137401231e1affb57c52060a3c9cef7e"
+    },
+    "diagnostics_findings.json": {
+      "bytes": 74577,
+      "sha256": "24d17ac69c486b485ddaaa8993fd7b9b9fa687f80f378e5e34d3584cc345c601"
+    },
+    "diagnostics_findings.txt": {
+      "bytes": 4521,
+      "sha256": "340f719473436e3ce984fa297837d53942b7cda750274ece1e3e34bc48cc520d"
+    },
+    "diagnostic_scope_metrics.csv": {
+      "bytes": 17833,
+      "sha256": "022913076fb350e7e2e4f2759606acb29740eb633d8f10d058551ff90dc553d8"
+    },
+    "energy_history_snapshot.csv": {
+      "bytes": 212847,
+      "sha256": "bac75fb6a24d8cea66c937ceb3dcf42bf654ac428f76889a9a8176632409130f"
+    },
+    "feature_error_associations.csv": {
+      "bytes": 190162,
+      "sha256": "e8a85c214101e6934511167f857836c24a9039d2b783126ba8a1de742c5cc7b2"
+    },
+    "inference_environment.json": {
+      "bytes": 442,
+      "sha256": "cdeb8033a8cb3de9382e60942a386e9abf3e3395e51d1d0a9e1459f51dc0e5ec"
+    },
+    "lag1_baseline_metrics.csv": {
+      "bytes": 36145,
+      "sha256": "1e83a00c6ef6d2e4058a12efa5dc4760d4893a93ac6b270242eab225712e8ce0"
+    },
+    "mape_30d_all_calendar_days.png": {
+      "bytes": 498747,
+      "sha256": "5b382c34be6c4a4628ddf3dfc8b9bd93a9fcc0e6ff0f582ed4d8f2f825994560"
+    },
+    "mape_30d_regular_workdays.png": {
+      "bytes": 615937,
+      "sha256": "616fe060e246b57ed810f932dc55a3e472f682474bf1eeac686d1086b598b9af"
+    },
+    "METHODS_KO.txt": {
+      "bytes": 9706,
+      "sha256": "4712064683c9965be66cf161103377a2bd43e0fc75755d124fbcd8dbbf7fa2b8"
+    },
+    "model_metadata.json": {
+      "bytes": 49891,
+      "sha256": "32e0ac2f5e4ec8ac1ecd1bb1c86c4b47dc888583a266896046b8c726ada256e1"
+    },
+    "model_variables.csv": {
+      "bytes": 25597,
+      "sha256": "2c5cd68ce3ddf01193fa0b0ac45921dd36e465e116f4a5033bf66c7c73c84477"
+    },
+    "monthly_metrics.csv": {
+      "bytes": 42060,
+      "sha256": "add0583c26d646661e70a4359e3ed2fdab5df5561071942754dbb266da8ede8b"
+    },
+    "monthly_metrics_by_scope.csv": {
+      "bytes": 228139,
+      "sha256": "77aaf0bb910408ec15bb0764da6cf26807670643b7aa1fb34c19c0e84cfdea4e"
+    },
+    "parity_checks.csv": {
+      "bytes": 6237,
+      "sha256": "e07b12addb0eee322b77149b28841249bca170d6f04a82bf3bb0ba7fcaf72440"
+    },
+    "per_model_predictions.csv": {
+      "bytes": 16822769,
+      "sha256": "fa69abe1c5f48be09267585f2b7e8f880a1cddfa6342dd3474e49f8807c4bceb"
+    },
+    "prediction_performance_review.xlsx": {
+      "bytes": 1278011,
+      "sha256": "50eab9e9236d43d711ba38bb2c0f86dea4173bf5b753e1c00c8c8a990db23c69"
+    },
+    "prediction_performance_review.xlsx.inspect.ndjson": {
+      "bytes": 57376203,
+      "sha256": "20e03731e1b63d631d33239c221b667b3506ccae8a3c7865e8b82ade537c10ed"
+    },
+    "prepare_workbook_data.py": {
+      "bytes": 7013,
+      "sha256": "eca816671d0aae4d13b371771f86993f98d968700f940fd4d3e5b673e0f97c4e"
+    },
+    "production_snapshot.csv": {
+      "bytes": 119824,
+      "sha256": "02d84939248415cb35a6f00afecb4ca3324ce12b8b2180b136ec960b244decd6"
+    },
+    "recent_previous_60d_changes.csv": {
+      "bytes": 43285,
+      "sha256": "c9a56bb84dca61e1d83d381d2d819681eae6b3c1e65b717d50d74c89280fa892"
+    },
+    "recent_previous_60d_metrics.csv": {
+      "bytes": 40866,
+      "sha256": "76d3df8edd776849b775f5b73cae83d6affdca57805302632605c08508770ce1"
+    },
+    "registry_snapshot.json": {
+      "bytes": 997,
+      "sha256": "1eed34d8c2d5dfd04bc7f8d66be2a2db9f343d72c110de5f48f332e7a5f15483"
+    },
+    "split_metrics.csv": {
+      "bytes": 10746,
+      "sha256": "1adf914266e95e6f2fd4df059b5e3c32cd126abac58e7214c211973dfd69f17b"
+    },
+    "summary.csv": {
+      "bytes": 10535,
+      "sha256": "1083e66db7a44939227ff40c3e5857854a3016ace885d21b5addcd552f7ae4ce"
+    },
+    "validation_checks.json": {
+      "bytes": 550,
+      "sha256": "2afff974b56fdb52b88fa30ff07a57ec6346cd22292abcaa801a2da2c4a5ab89"
+    },
+    "weather_snapshot.csv": {
+      "bytes": 502632,
+      "sha256": "8b70a62df6584d69d13d5a427f862f1498e679370a98510a5496217632fc1cc0"
+    },
+    "web_api_parity.json": {
+      "bytes": 21703,
+      "sha256": "2614dba8ca46df72c9584f445eba13035399740b61a86a0fd3cae955f379704d"
+    },
+    "web_results.jsonl": {
+      "bytes": 31681515,
+      "sha256": "d19d64d905cd4892ba44dd7566e482e03ccbaa43ea9fb5cc1d29e1ac4eb7ef02"
+    },
+    "wip_snapshot_광주.csv": {
+      "bytes": 108480,
+      "sha256": "0510baff181ddbc9c0424b7f35a5afd89745b59172e7bbb5eadab4ae7dfb7cb8"
+    },
+    "wip_snapshot_김해.csv": {
+      "bytes": 179701,
+      "sha256": "616746e500ec587aa32ac692357d46406d9081729c516f157f75563ad5d86732"
+    },
+    "wip_snapshot_남양주1.csv": {
+      "bytes": 170295,
+      "sha256": "1aae059a48ab2114329902a7bedf84d1f6977493158e349f35f9979989e1f2dd"
+    },
+    "wip_snapshot_남양주2.csv": {
+      "bytes": 170295,
+      "sha256": "1aae059a48ab2114329902a7bedf84d1f6977493158e349f35f9979989e1f2dd"
+    },
+    "wip_snapshot_논산.csv": {
+      "bytes": 101102,
+      "sha256": "aae242f7988ee07b92a07941c2a454bc83ea2beced252be340c801a6ba5fa2d4"
+    },
+    "workbook_checks.json": {
+      "bytes": 60906,
+      "sha256": "27bb77c7a7fa90f687a0fd57122030f9b1e7919445baf20bf1a9712e5df493ca"
+    },
+    "workbook_data.json": {
+      "bytes": 10962940,
+      "sha256": "40986b593ef11942cad181d969bd77d419fcdcd24eff9bfd9dccae55869b4281"
+    },
+    "workbook_delivery_verification.json": {
+      "bytes": 1207,
+      "sha256": "3d7b7d20ba7ce721b4d77a7c6741421f0a0a9d67e333367186b6fe626a729c67"
+    },
+    "workbook_preview_1.png": {
+      "bytes": 140280,
+      "sha256": "6cf9219e3646bc19b2f74b8c1f55886b3e0bfb2658e4ac803a75286335edbcb2"
+    },
+    "workbook_preview_2.png": {
+      "bytes": 115379,
+      "sha256": "3d15b218c19dbec834ab3d02ec63dd78c3f974b3c06779a1eaff42274ebbf9b6"
+    },
+    "workbook_preview_3.png": {
+      "bytes": 98654,
+      "sha256": "b90c3e75245ec86c55b7f9290b600a0148f77264f3252ffe939e752d14a8b77d"
+    },
+    "workbook_preview_4.png": {
+      "bytes": 98063,
+      "sha256": "bd6d18f61f7db4f7716c506980b2bd0419ed67f8deed49a65034e360bfb1c335"
+    },
+    "workbook_preview_5.png": {
+      "bytes": 52842,
+      "sha256": "38da9948ccf0bbe45c6674bd620757fd82b34f9641b45983576a416996cdd8ee"
+    },
+    "workbook_preview_6.png": {
+      "bytes": 112347,
+      "sha256": "e5e124410dc414bc0f5e917da34644f03f8922aada72407f47de0a995ce8b7e7"
+    },
+    "workbook_preview_7.png": {
+      "bytes": 237382,
+      "sha256": "a7c940b2e68b0bccdd4f16dcecdcee72a5c4a82de425981f3dea96b623aa511c"
+    },
+    "workbook_preview_8.png": {
+      "bytes": 110759,
+      "sha256": "a5f41a596b236b8729087507a6bf9a5179abbbe965424699f69548e463fcd124"
+    }
+  },
+  "finalized_at": "2026-10-21T11:58:54.039718+09:00",
+  "zero_actual_mape_excluded": 14,
+  "rolling_definition": "Valid APE mean in (t-N calendar days,t], N=7/30; actual zero excluded; initial windows partial; count columns retained",
+  "running_web_api_parity_values": 96,
+  "reproduction_scripts": {
+    "backend\\tools\\export_prediction_review.py": {
+      "sha256": "80145a6001ee350a127c4e1ca16ee4d133d387a1977b5cae5f7f094700e72f2a"
+    },
+    "backend\\tools\\verify_prediction_review_web.py": {
+      "sha256": "38d98f0cdb122f51134411e5545cba8145bebc27f40b4517fc6edaf0ba96a178"
+    },
+    "backend\\tools\\finalize_prediction_review.py": {
+      "sha256": "60c5931439b16b174d9778a035ff2e29862185181ad4c089a301f41149ba996a"
+    },
+    "backend\\analysis_results\\prediction_review_20250917_20261016\\analyze_results.py": {
+      "sha256": "fcdec50eaf9590f6836315c0706ef1732f09a72b998e244cd8581e9b583e380e"
+    }
+  }
+}

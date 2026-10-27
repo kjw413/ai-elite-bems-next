@@ -1,0 +1,32 @@
+{
+  "active_model_key": "v5.3",
+  "active_model_path": "app\\predictive model\\energy usage\\v5.3.pkl",
+  "training_profile": "quantile_wip",
+  "missing_model_keys": [
+    "v5",
+    "v5.1",
+    "v5.2"
+  ],
+  "available_models": {
+    "v5": {
+      "label": "기본 v5 모델 (점추정)",
+      "path": "app\\predictive model\\energy usage\\v5.pkl",
+      "training_profile": "baseline"
+    },
+    "v5.1": {
+      "label": "재공품 반영 v5 모델 (점추정)",
+      "path": "app\\predictive model\\energy usage\\v5.1.pkl",
+      "training_profile": "wip_shortlist"
+    },
+    "v5.2": {
+      "label": "분위수 회귀 + CQR (정상범주 밴드)",
+      "path": "app\\predictive model\\energy usage\\v5.2.pkl",
+      "training_profile": "quantile_wip"
+    },
+    "v5.3": {
+      "label": "v5.2 + 보틀링/활성SKU 피처 + 2026-Q1 VAL split",
+      "path": "app\\predictive model\\energy usage\\v5.3.pkl",
+      "training_profile": "quantile_wip"
+    }
+  }
+}

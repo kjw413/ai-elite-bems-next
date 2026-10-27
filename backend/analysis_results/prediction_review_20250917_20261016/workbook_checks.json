@@ -1,0 +1,2598 @@
+{
+  "summary": "{\"kind\":\"table\",\"sheet\":\"성능 요약\",\"address\":\"A7:K12\",\"rows\":6,\"cols\":11,\"values\":[[\"공장\",\"에너지원\",\"단위\",\"예측 건수\",\"실측 건수\",\"MAPE 유효일\",\"MAPE (%)\",\"WAPE (%)\",\"평균오차\",\"MAE\",\"평가 대상\"],[\"광주\",\"연료\",\"Nm³\",263,263,263,15.395751660343734,14.02316383977883,620.2017932341519,704.4443044887345,\"일반 근무일\"],[\"광주\",\"용수\",\"ton\",263,263,263,10.789936601399917,10.052728132435302,29.95405559499819,57.22081654923764,\"일반 근무일\"],[\"광주\",\"전력\",\"kWh\",263,263,263,8.983130072512719,8.54355975277541,2506.974658709035,3085.0513336835725,\"일반 근무일\"],[\"김해\",\"연료\",\"Nm³\",265,265,265,6.9549588562142,7.2792106991980035,-303.0724063772844,356.39070520712664,\"일반 근무일\"],[\"김해\",\"용수\",\"ton\",265,265,265,6.615755849738559,6.513102575279878,-36.557300501388184,90.81698186751292,\"일반 근무일\"]]}",
+  "errors": "{\"kind\":\"notice\",\"message\":\"Cell search matched 0 entries.\"}",
+  "reconciliations": [
+    {
+      "label": "광주/연료/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/regular_workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/regular_workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/regular_workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/workdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/workdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/workdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/all_calendar_days/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/all_calendar_days/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/all_calendar_days/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/nonworkdays/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/nonworkdays/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/nonworkdays/MAE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2025-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2025-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2025-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2025-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2025-11/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2025-11/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2025-12/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2025-12/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-01/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-01/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-02/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-02/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-03/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-03/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-04/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-04/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-05/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-05/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-06/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-06/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-07/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-07/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-08/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-08/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-09/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-09/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-10/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/2026-10/WAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/연료/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/용수/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "광주/전력/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/연료/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/용수/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "김해/전력/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/연료/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/용수/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주1/전력/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/연료/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/용수/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "남양주2/전력/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/연료/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/용수/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/previous60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/recent60/MAPE",
+      "absolute_difference": 0
+    },
+    {
+      "label": "논산/전력/MAPE_change_pp",
+      "absolute_difference": 0
+    },
+    {
+      "label": "daily arithmetic 0",
+      "absolute_difference": 0
+    },
+    {
+      "label": "daily arithmetic 1",
+      "absolute_difference": 1.0658141036401503e-14
+    },
+    {
+      "label": "daily arithmetic 2",
+      "absolute_difference": 0
+    }
+  ]
+}

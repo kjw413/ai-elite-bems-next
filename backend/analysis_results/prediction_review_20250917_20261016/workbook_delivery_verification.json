@@ -1,0 +1,50 @@
+{
+  "file": "prediction_performance_review.xlsx",
+  "bytes": 1278011,
+  "sha256": "50eab9e9236d43d711ba38bb2c0f86dea4173bf5b753e1c00c8c8a990db23c69",
+  "sheet_names": [
+    "성능 요약",
+    "월별 추이",
+    "구간별 성능",
+    "최근 성능 변화",
+    "일별 예측오차",
+    "일별 입력변수",
+    "모델 사용변수",
+    "분석 방법"
+  ],
+  "native_chart_count": 3,
+  "chart_series_counts": [
+    5,
+    5,
+    5
+  ],
+  "chart_series_colors": [
+    [
+      "376EAC",
+      "2A8B83",
+      "CB8A2D",
+      "8B6EAE",
+      "9D5B59"
+    ],
+    [
+      "376EAC",
+      "2A8B83",
+      "CB8A2D",
+      "8B6EAE",
+      "9D5B59"
+    ],
+    [
+      "376EAC",
+      "2A8B83",
+      "CB8A2D",
+      "8B6EAE",
+      "9D5B59"
+    ]
+  ],
+  "rendered_sheets_reviewed": 8,
+  "daily_prediction_rows": 5925,
+  "model_variable_rows": 730,
+  "actual_input_values_file": "daily_model_inputs.csv",
+  "workbook_metrics": "verified stored results; sample daily arithmetic formulas retained",
+  "validation_note": "All summary/monthly/recent metrics matched source CSV values. All eight sheet previews visually inspected. No relevant formula errors."
+}

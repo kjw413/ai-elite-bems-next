@@ -1,0 +1,17 @@
+{
+  "verified_at": "2026-10-21T11:58:54.039718+09:00",
+  "rows": 5925,
+  "series": 15,
+  "dates_per_series": 395,
+  "unique_keys": true,
+  "source_actual_reconciled_rows": 5925,
+  "raw_web_result_reconciled_rows": 5925,
+  "standard_ape_zero_exclusions": 14,
+  "summary_groups_independently_recomputed": 60,
+  "used_feature_values_present": true,
+  "finite_predictions": true,
+  "ordered_prediction_bands": true,
+  "running_web_api_cases": 8,
+  "running_web_api_values": 96,
+  "running_web_api_max_difference": 1.4551915228366852e-11
+}

@@ -1,0 +1,15 @@
+{
+  "python": "3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]",
+  "executable": "E:\\AI-Elite-BEMS-next\\.venv\\Scripts\\python.exe",
+  "packages": {
+    "numpy": "2.5.1",
+    "pandas": "3.0.3",
+    "joblib": "1.5.3",
+    "scikit-learn": "1.9.0",
+    "lightgbm": "4.7.0",
+    "xgboost": "3.3.0",
+    "catboost": "1.2.10",
+    "streamlit": "1.59.2",
+    "mysql-connector-python": "9.7.0"
+  }
+}
