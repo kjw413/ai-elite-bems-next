@@ -59,7 +59,8 @@ export const demo = {
       const compressor = Math.round(power * 0.17 * 10) / 10;
       return { date: `07.${String(i + 2).padStart(2, "0")}`, power, freezing, compressor,
         other: Math.round((power - freezing - compressor) * 10) / 10,
-        fuel: 18 + ((i * 3) % 9), water: 12 + ((i * 5) % 8), wastewater: 7 + ((i * 2) % 5) };
+        fuel: 18 + ((i * 3) % 9), water: 12 + ((i * 5) % 8), wastewater: 7 + ((i * 2) % 5),
+        productionTon: 1180 + (i % 4) * 55 };
     }),
     equipment: [{ name: "냉동", value: 38 }, { name: "공압", value: 17 }, { name: "생산설비·기타", value: 45 }],
     factories: [{ factory: "남양주", power: 920, fuel: 132, water: 86, wastewater: 48 }, { factory: "김해", power: 710, fuel: 104, water: 64, wastewater: 39 }, { factory: "광주", power: 540, fuel: 82, water: 51, wastewater: 31 }, { factory: "논산", power: 610, fuel: 91, water: 57, wastewater: 34 }, { factory: "경산", power: 430, fuel: 68, water: 43, wastewater: 26 }],

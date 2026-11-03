@@ -1702,6 +1702,28 @@ def energy(
         """ + clause + " GROUP BY date ORDER BY date",
         (window_from, window_to, *values),
     )
+    # 사용량과 같은 일·공장 범위의 믹스생산량을 함께 제공한다. 광주만 기존
+    # 원단위 조회와 동일하게 완제품+지정 재공품 생산량으로 보정한다.
+    # 연간·빈 일별 조회에는 추가 생산량 조회를 하지 않는다.
+    if rows:
+        actual_records = (
+            actual_production_records(fetch_actual_production_frame(window_from, window_to))
+            if "광주" in physical_factory_members(factory) else []
+        )
+        production_rows = fetch_corrected_energy_rows(
+            window_from, window_to, actual_records, factory=factory,
+        )
+        daily_production_kg: dict[date, float] = {}
+        for production_row in _energy_rows_in_scope(production_rows, factory, window_from, window_to):
+            production_date = normalize_date(production_row.get("date"))
+            if production_date is not None:
+                daily_production_kg[production_date] = (
+                    daily_production_kg.get(production_date, 0.0)
+                    + scalar(production_row.get("mix_prod_kg"))
+                )
+        for row in rows:
+            production_kg = daily_production_kg.get(normalize_date(row.get("date")))
+            row["productionTon"] = round(production_kg / 1000, 3) if production_kg is not None else None
     # 전력 설비 분해(legacy 일별 추이) — 기타 = 전체 − 냉동 − 공압, 음수 방지.
     for row in rows:
         row["other"] = round(max(0.0, scalar(row.get("power")) - scalar(row.get("freezing")) - scalar(row.get("compressor"))), 2)
@@ -1862,11 +1884,13 @@ def intensity_analysis(
         if row_date is None:
             continue
         value = optional_scalar(row.get("unit_value"))
+        usage = optional_scalar(row.get("usage_value"))
         prod_ton = scalar(row.get("production_kg")) / 1000
         daily.append({
             "date": row_date.strftime("%m.%d"),
             "value": round(value, 2) if value is not None else None,
             "productionTon": round(prod_ton, 3),
+            "usage": round(usage, 3) if usage is not None else None,
         })
 
     # 주간 실적 집계 — 원단위는 비율이라 주 평균을 단순 산술평균으로 내면 안 된다.

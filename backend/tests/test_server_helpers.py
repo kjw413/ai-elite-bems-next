@@ -932,6 +932,93 @@ class ServerHelperTests(unittest.TestCase):
         self.assertAlmostEqual(entry["usage"]["power"]["current"], 100.0)        # kWh → MWh
         self.assertAlmostEqual(entry["production"]["current"], 50.0)             # kg → ton
 
+    def test_energy_daily_production_matches_period_and_factory_scope(self) -> None:
+        production_by_factory = {
+            "남양주1": 1000.0, "남양주2": 2000.0, "김해": 3000.0,
+            "광주": 9999.0, "논산": 4000.0, "경산": 5000.0,
+        }
+        energy_rows = [
+            {"date": day, "factory": factory, "mix_prod_kg": quantity}
+            for day in (date(2026, 8, 22), date(2026, 8, 23))
+            for factory, quantity in (
+                production_by_factory.items() if day.day == 22
+                else dict.fromkeys(production_by_factory, 0.0).items()
+            )
+        ]
+        # 광주 완제품과 지정 재공품은 기존 보정 경로에서 한 번만 합산한다.
+        actual = [
+            {"date": date(2026, 8, 22), "factory": "광주", "actual_prod_kg": 1200.0},
+            {"date": date(2026, 8, 22), "factory": "광주", "actual_prod_kg": 800.0},
+            {"date": date(2026, 8, 22), "factory": "남양주1", "actual_prod_kg": 99000.0},
+        ]
+        for mode in ("month", "range"):
+            for factory, expected_ton in (
+                ("전사", 17.0), ("전사(경산 제외)", 12.0),
+                ("남양주", 3.0), ("광주", 2.0),
+            ):
+                with self.subTest(mode=mode, factory=factory):
+                    start = date(2026, 8, 1 if mode == "month" else 22)
+                    end = date(2026, 8, 24 if mode == "month" else 23)
+
+                    def query(sql, params):
+                        if "SUM(mix_prod_kg) mix_prod_kg" in sql:
+                            targets = set(params[2:])
+                            return [dict(row) for row in energy_rows
+                                    if start <= row["date"] <= end
+                                    and (not targets or row["factory"] in targets)]
+                        if "GROUP BY date ORDER BY date" in sql:
+                            return [{"date": day, "power": 1.25, "fuel": 0.5,
+                                     "water": 0.25, "wastewater": 0.1,
+                                     "freezing": 0.5, "compressor": 0.25}
+                                    for day in (date(2026, 8, 22), date(2026, 8, 23), date(2026, 8, 24))
+                                    if start <= day <= end]
+                        return []
+
+                    with (
+                        patch.object(server, "fetch_one", return_value={"max_date": date(2026, 8, 24)}),
+                        patch.object(server, "fetch_all", side_effect=query) as fetch_all,
+                        patch.object(server, "fetch_actual_production_frame", return_value=actual) as fetch_actual,
+                        patch.object(server, "_apply_monthly_energy_fallback", return_value=[]),
+                        patch.object(server, "period_coverage", return_value={}),
+                    ):
+                        result = server.energy(
+                            factory=factory, mode=mode, requested_date=date(2026, 8, 24),
+                            date_from=start if mode == "range" else None,
+                            date_to=end if mode == "range" else None,
+                        )
+
+                    self.assertEqual(result["dateFrom"], start.isoformat())
+                    self.assertEqual(result["dateTo"], end.isoformat())
+                    self.assertEqual(result["daily"][0]["productionTon"], expected_ton)
+                    self.assertEqual(result["daily"][0]["power"], 1.25)
+                    self.assertEqual(result["daily"][1]["productionTon"], 0.0)
+                    if mode == "month":
+                        self.assertIsNone(result["daily"][2]["productionTon"])
+                    production_query = next(call for call in fetch_all.call_args_list
+                                            if "SUM(mix_prod_kg) mix_prod_kg" in call.args[0])
+                    self.assertEqual(production_query.args[1], (start, end, *server.factory_clause(factory)[1]))
+                    if "광주" in server.physical_factory_members(factory):
+                        fetch_actual.assert_called_once_with(start, end)
+                    else:
+                        fetch_actual.assert_not_called()
+
+    def test_energy_annual_mode_skips_daily_production_queries(self) -> None:
+        with (
+            patch.object(server, "fetch_one", return_value={"max_date": date(2026, 8, 24)}),
+            patch.object(server, "fetch_all", return_value=[]),
+            patch.object(server, "fetch_actual_production_frame") as fetch_actual,
+            patch.object(server, "fetch_corrected_energy_rows") as fetch_energy,
+            patch.object(server, "_apply_monthly_energy_fallback", return_value=[]),
+            patch.object(server, "period_coverage", return_value={}),
+        ):
+            result = server.energy(
+                factory="전사", mode="year", requested_date=date(2026, 8, 24),
+                date_from=None, date_to=None,
+            )
+        self.assertEqual(result["daily"], [])
+        fetch_actual.assert_not_called()
+        fetch_energy.assert_not_called()
+
     def test_gwangju_energy_rows_use_wip_inclusive_production_denominator(self) -> None:
         energy = [{
             "date": date(2026, 8, 24), "factory": "광주", "mix_prod_kg": 1000.0,
@@ -1014,10 +1101,58 @@ class ServerHelperTests(unittest.TestCase):
             )
 
         self.assertEqual(result["daily"], [{
-            "date": "08.24", "value": 50.0, "productionTon": 2.0,
+            "date": "08.24", "value": 50.0, "productionTon": 2.0, "usage": 100.0,
         }])
         gwangju_matrix = next(row for row in result["matrix"] if row["factory"] == "광주")
         self.assertEqual(gwangju_matrix["current"], 50.0)
+
+    def test_intensity_daily_usage_preserves_metric_numerator_in_month_and_range(self) -> None:
+        for metric, spec in server.INTENSITY_METRICS.items():
+            for mode in ("month", "range"):
+                with self.subTest(metric=metric, mode=mode):
+                    energy = [
+                        {
+                            "date": date(2026, 8, 22), "factory": "김해",
+                            "mix_prod_kg": 1000.0,
+                            # 저장 원단위로 사용량을 역산하지 않는다.
+                            spec["unit_column"]: 321.0,
+                            spec["column"]: 100.12349,
+                        },
+                        {
+                            "date": date(2026, 8, 23), "factory": "김해",
+                            "mix_prod_kg": 1000.0,
+                            spec["unit_column"]: 1.0,
+                            spec["column"]: 0.0,
+                        },
+                        {
+                            "date": date(2026, 8, 24), "factory": "김해",
+                            "mix_prod_kg": 0.0,
+                            spec["unit_column"]: 1.0,
+                            spec["column"]: 900.0,
+                        },
+                    ]
+                    with (
+                        patch.object(server, "fetch_one", side_effect=[
+                            {"max_date": date(2026, 8, 24)}, None,
+                        ]),
+                        patch.object(server, "fetch_all", return_value=energy),
+                        patch.object(server, "fetch_actual_production_frame", return_value=[]),
+                        patch.object(server, "_monthly_intensity_fallback_sources", return_value=None),
+                        patch.object(server, "period_coverage", return_value={}),
+                    ):
+                        result = server.intensity_analysis(
+                            factory="김해", metric=metric, mode=mode,
+                            requested_date=date(2026, 8, 24),
+                            date_from=date(2026, 8, 22) if mode == "range" else None,
+                            date_to=date(2026, 8, 24) if mode == "range" else None,
+                        )
+
+                    self.assertEqual(result["daily"], [
+                        {"date": "08.22", "value": 321.0, "productionTon": 1.0, "usage": 100.123},
+                        {"date": "08.23", "value": 1.0, "productionTon": 1.0, "usage": 0.0},
+                        # 무생산일은 기존 유효 원단위 집계 대상에서 제외된다.
+                        {"date": "08.24", "value": None, "productionTon": 0.0, "usage": 0.0},
+                    ])
 
     def test_feature_importance_validates_factory_and_target(self) -> None:
         with patch.object(server, "import_core") as import_core:

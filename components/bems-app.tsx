@@ -21,6 +21,7 @@ import { DataToggle } from "@/components/data-toggle";
 import { EventMarkerHint, dayLabelOf, eventMarkers, groupEventsByLabel, monthLabelOf, useFieldEvents, type EventTarget } from "@/components/event-markers";
 import { PredictionGap } from "@/components/prediction-gap";
 import { EnergyCost } from "@/components/energy-cost";
+import { DailyProductionTrend } from "@/components/daily-production-trend";
 
 type Screen = PageId;
 type DataScreen = Exclude<Screen, "savings" | "report" | "admin">;
@@ -345,6 +346,7 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
 
   const [metric, setMetric] = useState("power"); const units: AnyData = { power: "MWh", fuel: "천 Nm³", water: "천 ton", wastewater: "천 ton" };
   const [compareFactories, setCompareFactories] = useState(false);
+  const [dailyView, setDailyView] = useState<"production" | "equipment">("production");
   const values = data.daily?.map((r: AnyData) => Number(r[metric]) || 0) ?? []; const total = values.reduce((a: number,b: number)=>a+b,0);
   const periodLabel = data.dateFrom && data.dateTo ? `${data.dateFrom} ~ ${data.dateTo}` : "";
   const summaryMeta = mode === "range" ? "선택 기간" : mode === "year" ? "연 누계" : "당월";
@@ -355,6 +357,7 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
   }));
   const compareNames = ["남양주", "김해", "광주", "논산", "경산"].filter(name => byFactoryRows.some((row: AnyData) => row[name] != null));
   const comparing = compareFactories && compareNames.length > 0;
+  const showProduction = !comparing && (metric !== "power" || dailyView === "production");
   const yoyTable = buildYoyTable(data.yoy ?? [], metric);
   const yoyUnit = units[metric];
   const yoyCsvRows = [...yoyTable.rows, ...(yoyTable.total ? [yoyTable.total] : [])].map(row => ({
@@ -369,6 +372,11 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
   const dailyPeriods = dailySeriesForTable.map((r: AnyData) => r.date);
   const dailyRowDefs: LegendItem[] = comparing
     ? compareNames.map(name => ({ key: name, label: name, color: factoryColors[name] }))
+    : showProduction
+    ? [
+        { key: metric, label: `${energyMetricLabels[metric]} 사용량(${units[metric]})`, color: energyMetricColors[metric] },
+        { key: "productionTon", label: "생산량(ton)", color: "var(--chart-production)" },
+      ]
     : metric === "power"
     ? [
         { key: "power", label: "전체 전력", color: energyMetricColors.power },
@@ -379,10 +387,11 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
     : [{ key: metric, label: energyMetricLabels[metric], color: energyMetricColors[metric] }];
   const dailyPivotRows: PivotRow[] = dailyRowDefs.map(def => {
     const rowValues = dailySeriesForTable.map((r: AnyData) => (typeof r[def.key] === "number" ? r[def.key] : null));
-    const total = rowValues.reduce((acc: number, v: number | null) => acc + (v ?? 0), 0);
+    const total = rowValues.some((value: number | null) => value != null)
+      ? rowValues.reduce((acc: number, v: number | null) => acc + (v ?? 0), 0) : null;
     return { key: def.key, label: def.label, values: rowValues, total };
   });
-  const showDailyLegend = dailyRowDefs.length > 1;
+  const showDailyLegend = !showProduction && dailyRowDefs.length > 1;
   const yoyLegend = useSeriesToggle();
   // 주간 실적 집계 (월간 모드) — 일별 차트는 요일 잡음이 커서 "이번 달 어느 주가 무거웠나"가
   // 잘 안 보인다. 월~일 7일을 채운 주만 주 합계 막대로 쌓고, 실적이 없는 날이 섞인 주도
@@ -440,14 +449,18 @@ function Energy({ data, factory, requestedDate, view, onViewChange, mode, onMode
       : <section className="kpi-grid compact"><Kpi label="기간 누계" value={total} unit={units[metric]} icon={Bolt}/><Kpi label="일평균" value={values.length?total/values.length:0} unit={units[metric]} icon={Activity}/><Kpi label="최대 사용량" value={values.length?Math.max(...values):0} unit={units[metric]} icon={Gauge}/></section>}
     <section className="content-grid">
       {mode === "year" ? yoyCard : <>
-      <article className="card chart-card span-all"><CardTitle title={comparing ? "일별 사용 추이 · 공장별 비교" : metric === "power" ? "일별 사용 추이 · 설비 분해" : "일별 사용 추이"} meta={units[metric]}>{comparing
+      <article className="card chart-card span-all daily-production-card"><CardTitle title={comparing ? "일별 사용 추이 · 공장별 비교" : showProduction ? "일별 사용량·생산량 추이" : "일별 사용 추이 · 설비 분해"} meta={showProduction ? `${units[metric]} · ton` : units[metric]}>
+        {!comparing && metric === "power" && <div className="segmented daily-chart-switch" role="group" aria-label="일별 사용량 차트 구분">
+          <button type="button" className={dailyView === "production" ? "active" : ""} aria-pressed={dailyView === "production"} onClick={() => setDailyView("production")}>생산량 비교</button>
+          <button type="button" className={dailyView === "equipment" ? "active" : ""} aria-pressed={dailyView === "equipment"} onClick={() => setDailyView("equipment")}>설비 분해</button>
+        </div>}{comparing
         ? <CsvButton filename={`energy_daily_factories_${metric}`} rows={byFactoryRows} columns={["date", ...compareNames]} labels={{date:"일자",...Object.fromEntries(compareNames.map(name=>[name,`${name}(${units[metric]})`]))}}/>
-        : <CsvButton filename={`energy_daily_${metric}`} rows={data.daily} columns={["date","power","freezing","compressor","other","fuel","water","wastewater"]} labels={{date:"일자",power:"전력(MWh)",freezing:"냉동(MWh)",compressor:"공압(MWh)",other:"기타(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)"}}/>}</CardTitle>
-        <Chart>{comparing
+        : <CsvButton filename={`energy_daily_${metric}`} rows={data.daily} columns={["date","power","freezing","compressor","other","fuel","water","wastewater","productionTon"]} labels={{date:"일자",power:"전력(MWh)",freezing:"냉동(MWh)",compressor:"공압(MWh)",other:"기타(MWh)",fuel:"연료(천 Nm³)",water:"용수(천 ton)",wastewater:"폐수(천 ton)",productionTon:"생산량(ton)"}}/>}</CardTitle>
+        {showProduction ? <DailyProductionTrend rows={data.daily ?? []} valueKey={metric} valueLabel={`${energyMetricLabels[metric]} 사용량`} unit={units[metric]} color={energyMetricColors[metric]} events={dailyEvents}/> : <Chart>{comparing
         ? <LineChart data={byFactoryRows}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{compareNames.map(name => !dailyLegend.isHidden(name) && <Line key={name} type="linear" dataKey={name} name={name} stroke={factoryColors[name]} strokeWidth={2} dot={false} activeDot={{ r: 5 }} connectNulls={false}/>)}{eventMarkers(dailyEvents)}</LineChart>
         : metric === "power"
         ? <ComposedChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/>{!dailyLegend.isHidden("power") && <Area type="linear" dataKey="power" name="전체 전력" stroke={energyMetricColors.power} strokeWidth={2} fill={energyMetricColors.power} fillOpacity={0.1}/>}{!dailyLegend.isHidden("freezing") && <Line type="linear" dataKey="freezing" name="냉동" stroke={palette.actual} strokeWidth={2} dot={false}/>}{!dailyLegend.isHidden("compressor") && <Line type="linear" dataKey="compressor" name="공압" stroke={palette.target} strokeWidth={2} dot={false}/>}{!dailyLegend.isHidden("other") && <Line type="linear" dataKey="other" name="기타" stroke={palette.previous} strokeWidth={2} strokeDasharray="4 3" dot={false}/>}{eventMarkers(dailyEvents)}</ComposedChart>
-        : <AreaChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Area type="linear" dataKey={metric} stroke={energyMetricColors[metric]} strokeWidth={2} fill={energyMetricColors[metric]} fillOpacity={0.1}/>{eventMarkers(dailyEvents)}</AreaChart>}</Chart>
+        : <AreaChart data={data.daily}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Area type="linear" dataKey={metric} stroke={energyMetricColors[metric]} strokeWidth={2} fill={energyMetricColors[metric]} fillOpacity={0.1}/>{eventMarkers(dailyEvents)}</AreaChart>}</Chart>}
         {showDailyLegend && <ToggleLegend items={dailyRowDefs} hidden={dailyLegend.hidden} onToggle={dailyLegend.toggle}/>}
         <EventMarkerHint count={dailyEvents.size}/>
         <DataToggle><PivotTable periods={dailyPeriods} rows={dailyPivotRows} totalLabel="누계"/></DataToggle></article></>}
@@ -482,6 +495,8 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
   const periodLabel = data.dateFrom && data.dateTo ? `${data.dateFrom} ~ ${data.dateTo}` : "";
   const [showCumulative, setShowCumulative] = useState(false);
   const metricColor = energyMetricColors[metric] ?? palette.actual;
+  const usageUnit = { power: "kWh", fuel: "Nm³", water: "ton" }[metric];
+  const usageLabel = `${intensityMetrics.find(item => item.id === metric)?.label} 사용량`;
   // 주말·공휴일 등 생산 실적이 없는 날은 value가 null로 내려온다 — 그 날짜 자체를
   // 배열에서 제거해 x축에 빈 구간이 생기지 않고 실적 있는 날끼리 바로 이어지게 한다.
   const measuredDays: AnyData[] = (data.daily ?? []).filter((row: AnyData) => row.value != null);
@@ -523,6 +538,8 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
   const dailyTonTotal = measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.productionTon) || 0), 0);
   const dailyWeightedSum = measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.value) || 0) * (Number(row.productionTon) || 0), 0);
   const dailyWeightedTotal = dailyTonTotal > 0 ? Math.round(dailyWeightedSum / dailyTonTotal * 100) / 100 : null;
+  const dailyUsageTotal = measuredDays.some(row => row.usage != null)
+    ? measuredDays.reduce((acc: number, row: AnyData) => acc + (Number(row.usage) || 0), 0) : null;
   const monthlyLegend = useSeriesToggle();
   const showMonthlyTotal = Boolean(cumulative) && !showCumulative;
   const intensityEvents = groupEventsByLabel(
@@ -572,18 +589,20 @@ function Intensity({ data, factory, metric, onMetricChange, mode, onModeChange, 
     </div>
     <section className="kpi-grid compact"><Kpi label={`${summaryMeta} 원단위`} value={mode === "range" ? dailyWeightedTotal : scopeKpi?.current} unit={data.unit} change={mode === "range" ? null : scopeKpi?.change} icon={mode === "year" ? CalendarDays : Gauge}/><Kpi label={`${summaryMeta} 생산량`} value={scopeTon} unit="ton" change={scopeTonChange} goodWhen="up" icon={Factory}/><Kpi label="절감 목표" value={data.targetPct} unit="%" icon={ShieldCheck}/></section>
     <section className="content-grid">
-      {mode !== "year" && <article className="card chart-card span-all"><CardTitle title="일별 원단위 추이" meta={`${data.unit} · ${operatingOnly ? "가동일" : "실적 있는 날 전체"}`}>
+      {mode !== "year" && <article className="card chart-card span-all daily-production-card"><CardTitle title="일별 원단위·생산량 추이" meta={operatingOnly ? "가동일" : "실적 있는 날 전체"}>
           <label className="check-toggle"><input type="checkbox" checked={operatingOnly} onChange={event => setOperatingOnly(event.target.checked)}/>가동일만 보기</label>
-          <CsvButton filename={`intensity_daily_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={measuredDays} columns={["date","value","productionTon"]} labels={{date:"일자",value:`원단위(${data.unit})`,productionTon:"생산량(ton)"}}/></CardTitle>
-        <Chart><LineChart data={dailySeries}><CartesianGrid vertical={false}/><XAxis dataKey="date" interval="preserveStartEnd" minTickGap={18}/><YAxis domain={["auto","auto"]}/><Tooltip {...tooltipStyle} formatter={numberFormatter}/><Line type="linear" dataKey="value" name={`원단위(${data.unit})`} stroke={metricColor} strokeWidth={2} connectNulls={false} dot={seriesDot(metricColor)} activeDot={{ r: 5 }}/>{eventMarkers(intensityEvents)}</LineChart></Chart>
+          <CsvButton filename={`intensity_daily_${metric}_${(data.dateFrom ?? "").replaceAll("-","")}`} rows={measuredDays} columns={["date","value","productionTon","usage"]} labels={{date:"일자",value:`원단위(${data.unit})`,productionTon:"생산량(ton)",usage:`${usageLabel}(${usageUnit})`}}/></CardTitle>
+        <DailyProductionTrend rows={dailySeries} valueKey="value" valueLabel="원단위" unit={data.unit} color={metricColor} events={intensityEvents} autoDomain/>
         {operatingOnly && excludedDays > 0 && <p className="quad-caption">비가동 {excludedDays}일(생산량이 기간 중앙값의 50% 미만)을 차트에서 제외했습니다 — 소량 생산일은 고정부하가 분모에 몰려 원단위가 수십 배로 튀어 평일 증감을 가립니다. 아래 데이터 표에는 모든 날짜가 그대로 있습니다.</p>}
         <EventMarkerHint count={intensityEvents.size}/>
-        <DataToggle><PivotTable periods={measuredDays.map((row: AnyData) => row.date)} totalLabel={`가중 누계(${data.unit})`} rows={[
+        <DataToggle><PivotTable periods={measuredDays.map((row: AnyData) => row.date)} totalLabel="누계(원단위 가중)" rows={[
           { key: "value", label: `원단위(${data.unit})`, values: measuredDays.map((row: AnyData) => row.value), total: dailyWeightedTotal,
             format: value => value == null ? "-" : fmt(Number(value), 2),
             // 비가동일은 값이 튀므로 흐리게 — 평일과 같은 무게로 읽히지 않게 한다.
             className: (_value, index) => index >= 0 && !isOperating(measuredDays[index]) ? "off-day" : undefined },
           { key: "productionTon", label: "생산량(ton)", values: measuredDays.map((row: AnyData) => row.productionTon), total: Math.round(dailyTonTotal * 10) / 10,
+            className: (_value, index) => index >= 0 && !isOperating(measuredDays[index]) ? "off-day" : undefined },
+          { key: "usage", label: `${usageLabel}(${usageUnit})`, values: measuredDays.map((row: AnyData) => row.usage), total: dailyUsageTotal,
             className: (_value, index) => index >= 0 && !isOperating(measuredDays[index]) ? "off-day" : undefined },
         ]}/></DataToggle></article>}
       {mode === "year" && <article className="card chart-card span-all"><CardTitle title={`${data.year}년 원단위 추이${showCumulative ? " · 누계" : ""}`} meta={data.unit}><label className="check-toggle"><input type="checkbox" checked={showCumulative} onChange={event => setShowCumulative(event.target.checked)}/>누계 추이 보기</label><CsvButton filename={`intensity_monthly_${metric}_${data.year}`} rows={monthlySeries} columns={["month","previous","target","current"]} labels={{month:"월",previous:`전년(${data.unit})`,target:`목표(${data.unit})`,current:`금년(${data.unit})`}}/></CardTitle>
